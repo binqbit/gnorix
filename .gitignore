@@ -1,3 +1,5 @@
 /.agent-workspace/
 /private-docs/
 /target/
+/reports/*
+!/reports/README.md

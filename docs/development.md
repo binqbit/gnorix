@@ -93,6 +93,21 @@ Persistence, encrypted backups and enrollment restoration are deliberately not i
 
 Tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy, resistance to biometric attacks, or on-chain gas/execution. Those require the separate measurement and integration validation plans.
 
+## Static fingerprint reports
+
+The [fingerprint report tool](../tools/fingerprint-reports/README.md) renders local diagnostic snapshots as PNG. It shows the source image, triangular-grid connections, supplied point weights or other metrics, histograms, scalar maps and line series. It runs separately from the Rust library and accepts a documented JSON snapshot from any processing stage.
+
+Separate full-size overlays show point centers and supplied circular tolerance distances in original image pixels. Opacity defaults to 50%; marker size, tolerance preview and crop are explicit display controls. A crop preserves source coordinates and does not filter the stage's measurements or change its histograms.
+
+To generate the first reports from the checked-in synthetic image, install `uv` and run from the repository root:
+
+```sh
+uv run --project tools/fingerprint-reports --locked gnorix-report sample \
+  --image crates/gnorix/tests/assets/test-fingerprint.png
+```
+
+This example computes local intensity statistics only. Its preview grid controls do not select biometric thresholds or a weighting algorithm. The tool guide describes importing actual intermediate values, selecting metrics and reproducing reports from saved snapshots. Generated PNG reports and the sample's image/JSON bundle go to the repository-root, Git-ignored `reports/` directory by default, independently of the launch directory. Use `--output reports/fingerprint` from the repository root to group a run in a subdirectory, or provide another explicit output path.
+
 ## Change discipline
 
 Keep pipeline, mechanism and primitive responsibilities distinct. Prefer clear function names and cohesive modules, and use blank lines between logical segments. Refactor when current requirements outgrow a structure; remove unused code and obsolete fields. Before the first release, correct architecture takes priority over compatibility with old internal APIs. Add abstractions and package boundaries only when current responsibilities justify them.
