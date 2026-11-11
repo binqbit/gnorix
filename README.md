@@ -13,3 +13,17 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Concept](docs/concept.md) explains the biometric-stability problem, accepted-key-set principle, Merkle commitment and intended role of the library.
 - [How it works](docs/how-it-works.md) follows enrollment, retained proof material, fresh-capture reconstruction, signing, verification and recovery.
 - [Architecture](docs/architecture.md) describes component responsibilities, the user/verifier boundary, independent library and NEAR integration.
+- [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
+
+## Development
+
+The Rust workspace contains the independent `gnorix` library in `crates/gnorix`. The foundation provides capture and geometry types, enrollment/signing/verification pipelines, bounded candidate processing, and a working SHA-256 Merkle commitment and proof implementation. Applications supply the measurement engine and KDF/signature provider explicitly.
+
+Use the pinned Rust 1.99.1 toolchain, then run:
+
+```sh
+cargo test --workspace --all-targets --locked
+cargo run -p gnorix --example merkle --locked
+```
+
+The example exercises membership proofs with illustrative public-key bytes. Biometric algorithms, numerical acceptance criteria, production KDF/signature providers, protected persistence and the NEAR execution adapter remain development work. See [Development](docs/development.md) for the complete workflow and test scope.
