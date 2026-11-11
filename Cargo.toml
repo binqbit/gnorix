@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/gnorix"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-dev.1"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+sha2 = "0.11.1"
+zeroize = "1.9.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
