@@ -1,146 +1,239 @@
-"""Command-line orchestration for static diagnostic reports."""
+"""Run native fingerprint extraction and replace the canonical local report."""
 
 from __future__ import annotations
 
 import argparse
+import json
+import math
+import os
+import shutil
+import subprocess
+from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 
-from .model import load_snapshot
-from .options import OverlayOptions
-from .render import render_snapshot
-from .sample import write_sample
-from .structure import render_structure
+from .structure import MAX_SNAPSHOT_BYTES, render_structure
+
+_REPORTS = (
+    "overview.png",
+    "structure-overlay.png",
+    "scale-analysis.png",
+    "bootstrap-analysis.png",
+    "normalization-analysis.png",
+    "contour-comparison.png",
+    "contour-overlay.png",
+)
+_DATA_FILES = {
+    "features.json",
+    "source.png",
+    "normalized.png",
+    "denoised.png",
+    "coherence.png",
+    "usable.png",
+    "binary.png",
+    "skeleton.png",
+    "ridge-level.png",
+    "valley-level.png",
+    "normalization-support.png",
+    "measurement-skeleton.png",
+    "pattern-support.png",
+}
+
+
+class _RecoveryRequired(RuntimeError):
+    """A previous complete report must survive a failed rollback."""
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Render fingerprint diagnostics as local PNG files.")
-    commands = root.add_subparsers(dest="command", required=True)
-    render = commands.add_parser("render", help="Render a saved diagnostic snapshot")
-    render.add_argument("snapshot", type=Path)
-    render.add_argument("--metric", action="append", help="Render only named metrics (repeatable)")
-    sample = commands.add_parser("sample", help="Measure image intensities on a preview grid")
-    sample.add_argument("--image", type=Path, required=True)
-    sample.add_argument("--spacing", type=float, default=36, help="Preview grid spacing in pixels")
-    sample.add_argument("--radius", type=int, default=12, help="Intensity window radius in pixels")
-    sample.add_argument(
-        "--rotation", type=float, default=0, help="Preview grid rotation in degrees"
+    command = argparse.ArgumentParser(
+        description="Analyze one opaque PNG with native Gnorix and refresh reports/fingerprint/."
     )
-
-    structure = commands.add_parser("structure", help="Render a native fingerprint extraction")
-    structure.add_argument("snapshot", type=Path)
-    structure.add_argument(
-        "--output", type=Path, help="Output directory (default: repository-root reports/)"
-    )
-    structure.add_argument("--dpi", type=int, default=160, help="PNG resolution (50 to 600)")
-    structure.add_argument(
+    command.add_argument("--image", type=Path, required=True, help="Opaque fingerprint PNG")
+    command.add_argument("--dpi", type=int, default=160, help="PNG resolution (50 to 600)")
+    command.add_argument(
         "--overlay-alpha", type=float, default=0.5, help="Overlay opacity from 0 to 1"
     )
-    structure.add_argument("--overwrite", action="store_true", help="Replace matching output files")
+    return command
 
-    for command in (render, sample):
-        command.add_argument(
-            "--output", type=Path, help="Output directory (default: repository-root reports/)"
-        )
-        command.add_argument("--dpi", type=int, default=160, help="PNG resolution (50 to 600)")
-        command.add_argument(
-            "--overlay-alpha", type=float, default=0.5, help="Overlay opacity from 0 to 1"
-        )
-        command.add_argument(
-            "--point-radius", type=float, default=3, help="Point marker radius in image pixels"
-        )
-        command.add_argument(
-            "--tolerance-radius",
-            type=float,
-            help="Display a circular tolerance radius for every point, in image pixels",
-        )
-        command.add_argument(
-            "--crop",
-            type=float,
-            nargs=4,
-            metavar=("X", "Y", "WIDTH", "HEIGHT"),
-            help="Display this crop in original image pixel coordinates",
-        )
-        command.add_argument(
-            "--overlay-only", action="store_true", help="Export only the large image overlays"
-        )
-        command.add_argument(
-            "--overwrite", action="store_true", help="Replace matching output files"
-        )
+
+def repository_root() -> Path:
+    root = Path(__file__).resolve().parents[3]
+    if (
+        not (root / "Cargo.toml").is_file()
+        or not (root / "crates" / "gnorix" / "examples" / "fingerprint.rs").is_file()
+    ):
+        raise ValueError("cannot locate the Gnorix checkout; run the tool from its source checkout")
     return root
 
 
-def publish_files(paths: list[Path], output: Path, overwrite: bool) -> list[Path]:
-    destinations = [output / path.name for path in paths]
-    if not overwrite:
-        conflicts = [path.name for path in destinations if path.exists()]
-        if conflicts:
-            raise ValueError(f"output already exists: {', '.join(conflicts)}; use --overwrite")
-
-    for source, destination in zip(paths, destinations, strict=True):
-        source.replace(destination)
-    return destinations
+def _output_directory(root: Path) -> Path:
+    parent = root / "reports"
+    if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+        raise ValueError("repository reports path must be a real directory")
+    parent.mkdir(exist_ok=True)
+    return parent / "fingerprint"
 
 
-def render_bundle(arguments: argparse.Namespace) -> list[Path]:
-    snapshot = load_snapshot(arguments.snapshot)
-    arguments.output.mkdir(parents=True, exist_ok=True)
-
-    with TemporaryDirectory(prefix=".pending-", dir=arguments.output) as temporary:
-        files = render_snapshot(
-            snapshot,
-            Path(temporary),
-            arguments.dpi,
-            tuple(arguments.metric) if arguments.metric else None,
-            overlay=overlay_options(arguments),
-            overlay_only=arguments.overlay_only,
+def _validate_existing(output: Path) -> None:
+    if output.is_symlink() or (output.exists() and not output.is_dir()):
+        raise ValueError("reports/fingerprint must be a real directory")
+    if not output.exists() or not any(output.iterdir()):
+        return
+    expected = {*_REPORTS, "README.md", "data"}
+    children = {path.name: path for path in output.iterdir()}
+    if set(children) != expected or any(path.is_symlink() for path in children.values()):
+        raise ValueError(
+            "reports/fingerprint contains unrelated or incomplete files; refusing replacement"
         )
-        return publish_files(files, arguments.output, arguments.overwrite)
+    if not children["data"].is_dir() or any(
+        not path.is_file() for name, path in children.items() if name != "data"
+    ):
+        raise ValueError("reports/fingerprint contains unexpected file types")
+    data = {path.name: path for path in children["data"].iterdir()}
+    if set(data) != _DATA_FILES or any(
+        path.is_symlink() or not path.is_file() for path in data.values()
+    ):
+        raise ValueError("reports/fingerprint/data contains unrelated or incomplete files")
+    with data["features.json"].open("rb") as stream:
+        # Identification only: the full new bundle is validated by the renderer.
+        # An existing broken report is still replaceable if its schema is intact.
+        encoded = stream.read(MAX_SNAPSHOT_BYTES + 1)
+    if len(encoded) > MAX_SNAPSHOT_BYTES:
+        raise ValueError("existing report JSON exceeds the supported size")
+    try:
+        snapshot = json.loads(encoded)
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise ValueError("existing report does not contain identifiable native output") from error
+    if not isinstance(snapshot, dict) or snapshot.get("schema") != "gnorix.ridge-extraction.v1":
+        raise ValueError("existing report is not a native Gnorix extraction")
 
 
-def sample_bundle(arguments: argparse.Namespace) -> list[Path]:
-    arguments.output.mkdir(parents=True, exist_ok=True)
-
-    with TemporaryDirectory(prefix=".pending-", dir=arguments.output) as temporary:
-        folder = Path(temporary)
-        snapshot_path = write_sample(
-            arguments.image, folder, arguments.spacing, arguments.radius, arguments.rotation
-        )
-        snapshot = load_snapshot(snapshot_path)
-        reports = render_snapshot(
-            snapshot,
-            folder,
-            arguments.dpi,
-            overlay=overlay_options(arguments),
-            overlay_only=arguments.overlay_only,
-        )
-        files = [folder / "capture.png", snapshot_path, *reports]
-        return publish_files(files, arguments.output, arguments.overwrite)
+@contextmanager
+def _run_lock(parent: Path):
+    lock = parent / ".fingerprint.lock"
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as error:
+        raise ValueError(
+            "another fingerprint report run holds reports/.fingerprint.lock; "
+            "if it was interrupted, confirm no run is active before removing that lock"
+        ) from error
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(f"pid={os.getpid()}\n")
+        yield
+    finally:
+        lock.unlink()
 
 
-def structure_bundle(arguments: argparse.Namespace) -> list[Path]:
-    arguments.output.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".pending-", dir=arguments.output) as temporary:
-        files = render_structure(
-            arguments.snapshot, Path(temporary), arguments.dpi, arguments.overlay_alpha
-        )
-        return publish_files(files, arguments.output, arguments.overwrite)
-
-
-def overlay_options(arguments: argparse.Namespace) -> OverlayOptions:
-    return OverlayOptions(
-        alpha=arguments.overlay_alpha,
-        point_radius=arguments.point_radius,
-        tolerance_radius=arguments.tolerance_radius,
-        crop=tuple(arguments.crop) if arguments.crop is not None else None,
+def _extract(root: Path, image: Path, destination: Path) -> None:
+    result = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "gnorix",
+            "--release",
+            "--example",
+            "fingerprint",
+            "--locked",
+            "--",
+            str(image),
+            str(destination),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "no diagnostic output").strip()
+        raise RuntimeError(
+            f"native fingerprint extraction failed (exit {result.returncode}):\n{detail}"
+        )
 
 
-def default_output() -> Path:
-    root = Path(__file__).resolve().parents[3]
-    if not (root / "Cargo.toml").is_file() or not (root / "crates" / "gnorix").is_dir():
-        raise ValueError("cannot locate the Gnorix checkout; specify --output explicitly")
-    return root / "reports"
+def _write_readme(staging: Path) -> None:
+    data = json.loads((staging / "data" / "features.json").read_text(encoding="utf-8"))
+    contours = data["contours"]
+    adjustments = contours["smoothing"]["edges"] + contours["smoothing"]["cycles"]
+    accepted = sum(join["status"] == "accepted" for join in contours["joins"])
+    applied = sum(item["smoothing_applied"] for item in adjustments)
+    text = f"""# Fingerprint report
+
+Start with [the overview](overview.png). This folder contains the latest successful analysis.
+
+- [Observed structure](structure-overlay.png)
+- [Full-source width measurement](scale-analysis.png)
+- [Bootstrap profiles](bootstrap-analysis.png)
+- [Local normalization](normalization-analysis.png)
+- [Contour comparison](contour-comparison.png)
+- [Refined contour overlay](contour-overlay.png)
+
+Common width unit R: **{data["scale"]["unit_px"]:.6g} source pixels**.
+Smoothing applied to **{applied} / {len(adjustments)} paths**.
+Accepted source-supported joins: **{accepted}**.
+Candidates kept separate: **{len(contours["joins"]) - accepted}**.
+
+Overlays retain source coordinates. Green joins were accepted using image evidence;
+amber dashed candidates remain disconnected. Smoothed geometry is an estimate,
+not verified anatomy or a biometric matching score.
+
+[Native measurements and geometry](data/features.json) and the grayscale processing
+stages are retained in `data/`. The report is generated locally from the selected
+image. The checked-in test fingerprint is synthetic.
+
+Run `gnorix-report --image /path/to/fingerprint.png` through the repository's
+report-tool environment to refresh this folder. A failed extraction or rendering
+leaves the previous successful report in place.
+"""
+    (staging / "README.md").write_text(text, encoding="utf-8")
+
+
+def _publish(staging: Path, output: Path, backup: Path) -> None:
+    had_previous = output.exists()
+    if had_previous:
+        output.rename(backup)
+    try:
+        staging.rename(output)
+    except BaseException:
+        if had_previous:
+            try:
+                backup.rename(output)
+            except OSError as error:
+                raise _RecoveryRequired(
+                    f"report publication and rollback failed; previous report preserved at {backup}"
+                ) from error
+        raise
+    if had_previous:
+        shutil.rmtree(backup)
+
+
+def generate_report(image: Path, dpi: int, alpha: float) -> Path:
+    root = repository_root()
+    image = image.resolve(strict=True)
+    if not image.is_file():
+        raise ValueError("--image must point to a readable PNG file")
+    output = _output_directory(root)
+    with _run_lock(output.parent):
+        _validate_existing(output)
+        temporary = Path(mkdtemp(prefix=".fingerprint-", dir=output.parent))
+        preserve_recovery = False
+        try:
+            staging = temporary / "report"
+            staging.mkdir()
+            _extract(root, image, staging / "data")
+            render_structure(staging / "data" / "features.json", staging, dpi, alpha)
+            _write_readme(staging)
+            _validate_existing(output)
+            _publish(staging, output, temporary / "previous")
+        except _RecoveryRequired:
+            preserve_recovery = True
+            raise
+        finally:
+            if not preserve_recovery:
+                shutil.rmtree(temporary)
+    return output / "overview.png"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,15 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     arguments = command.parse_args(argv)
     if not 50 <= arguments.dpi <= 600:
         command.error("--dpi must be from 50 to 600")
-
+    if not math.isfinite(arguments.overlay_alpha) or not 0 <= arguments.overlay_alpha <= 1:
+        command.error("--overlay-alpha must be finite and from 0 to 1")
     try:
-        if arguments.output is None:
-            arguments.output = default_output()
-        handlers = {"sample": sample_bundle, "render": render_bundle, "structure": structure_bundle}
-        files = handlers[arguments.command](arguments)
-    except (OSError, ValueError) as error:
+        overview = generate_report(arguments.image, arguments.dpi, arguments.overlay_alpha)
+    except (OSError, ValueError, RuntimeError) as error:
         command.exit(2, f"error: {error}\n")
-
-    for path in files:
-        print(path)
+    print(overview)
     return 0

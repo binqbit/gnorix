@@ -1,1 +1,1 @@
-"""Local static visualization of explicit fingerprint diagnostics."""
+"""One native fingerprint analysis with a local PNG report."""

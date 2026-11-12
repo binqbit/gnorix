@@ -28,7 +28,7 @@ def fixture():
             {"arc_fraction": 1, "angle_radians": 1.2},
         ],
     }
-    return {
+    data = {
         "schema": "gnorix.ridge-extraction.v1",
         "width": 32,
         "height": 24,
@@ -158,6 +158,66 @@ def fixture():
         },
     }
 
+    data["contours"] = unchanged_contours(data)
+    return data
+
+
+def unchanged_contours(data):
+    unit = data["scale"]["unit_px"]
+    return {
+        "method": "source-supported-smooth-contours",
+        "nodes": [{**node, "source_node": node["id"]} for node in data["nodes"]],
+        "edges": [
+            {
+                "id": edge["id"],
+                "start": edge["start"],
+                "end": edge["end"],
+                "points": copy.deepcopy(edge["points"]),
+                "source_edges": [edge["id"]],
+                "source_cycles": [],
+                "source_joins": [],
+            }
+            for edge in data["edges"]
+        ],
+        "cycles": [
+            {
+                "id": cycle["id"],
+                "points": copy.deepcopy(cycle["points"]),
+                "source_edges": [],
+                "source_cycles": [cycle["id"]],
+                "source_joins": [],
+            }
+            for cycle in data["cycles"]
+        ],
+        "joins": [],
+        "policy": {
+            "max_gap_px": unit,
+            "max_tangent_error_radians": np.pi / 6,
+            "min_mean_darkness": 0.5,
+            "min_dark_fraction": 0.7,
+            "min_mean_flank_contrast": 0.25,
+            "max_light_gap_px": unit / 4,
+        },
+        "smoothing": {
+            "sigma_px": unit / 2,
+            "sample_spacing_px": min(unit / 8, 1),
+            "max_displacement_px": unit / 4,
+            **{
+                kind: [
+                    {
+                        source_key: item["id"],
+                        "max_displacement_px": 0,
+                        "smoothing_applied": False,
+                        "applied_fraction": 0,
+                        "retained_reason": None,
+                    }
+                    for item in data[kind]
+                ]
+                for kind, source_key in (("edges", "source_edge"), ("cycles", "source_cycle"))
+            },
+        },
+    }
+
 
 class StructureTests(unittest.TestCase):
     def setUp(self):
@@ -211,11 +271,13 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(
             [path.name for path in paths],
             [
-                "structure-overview.png",
+                "overview.png",
                 "structure-overlay.png",
                 "scale-analysis.png",
                 "bootstrap-analysis.png",
                 "normalization-analysis.png",
+                "contour-comparison.png",
+                "contour-overlay.png",
             ],
         )
         self.assertEqual((self.base / "source.png").read_bytes(), original)
@@ -283,7 +345,8 @@ class StructureTests(unittest.TestCase):
     def test_empty_graph_still_produces_structure_and_scale_reports(self):
         data = fixture()
         data.update(nodes=[], edges=[], cycles=[])
-        self.assertEqual(len(self.render(data)), 5)
+        data["contours"] = unchanged_contours(data)
+        self.assertEqual(len(self.render(data)), 7)
         self.assertIn("No extracted graph structure", self.labels(self.figures[1]))
         self.assertIn("Graph cycle rank: 0", self.labels(self.figures[1]))
         self.assertEqual(len(self.figures[1].axes[0].collections), 0)
@@ -314,6 +377,7 @@ class StructureTests(unittest.TestCase):
                 },
             ]
         )
+        data["contours"] = unchanged_contours(data)
         # One cycle from the parallel pair, one self-edge, one isolated cycle.
         # The two isolated nodes must not change the cycle count.
         self.assertEqual(_load_structure(self.write(data)).graph_cycle_rank, 3)
@@ -449,12 +513,12 @@ class StructureTests(unittest.TestCase):
     def test_failed_final_export_does_not_replace_existing_reports(self):
         output = self.base / "report"
         output.mkdir()
-        old = output / "structure-overview.png"
+        old = output / "overview.png"
         old.write_bytes(b"previous report")
         with patch("gnorix_reports.structure._save_figure") as save:
 
             def fail(figure, path, dpi):
-                if path.name == "normalization-analysis.png":
+                if path.name == "contour-overlay.png":
                     plt.close(figure)
                     raise OSError("simulated output failure")
                 _save_figure(figure, path, dpi)
@@ -464,7 +528,7 @@ class StructureTests(unittest.TestCase):
                 render_structure(self.write(copy.deepcopy(fixture())), output, dpi=50)
         self.assertEqual(old.read_bytes(), b"previous report")
         self.assertEqual(list(output.iterdir()), [old])
-        self.assertEqual(save.call_count, 5)
+        self.assertEqual(save.call_count, 7)
 
 
 if __name__ == "__main__":

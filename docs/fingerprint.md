@@ -7,15 +7,13 @@
 From the repository root:
 
 ```sh
-cargo run -p gnorix --release --example fingerprint --locked -- \
-  crates/gnorix/tests/assets/test-fingerprint.png reports/fingerprint
-uv run --project tools/fingerprint-reports --locked gnorix-report structure \
-  reports/fingerprint/features.json --output reports/fingerprint/visuals
+uv run --project tools/fingerprint-reports --locked gnorix-report \
+  --image crates/gnorix/tests/assets/test-fingerprint.png
 ```
 
-The Rust example requires an opaque PNG and a new output directory. It estimates ridge thickness and period from the image before scale-dependent extraction; there is no manual period argument or fallback to a sample-specific value. Transparent input is rejected instead of interpreting hidden RGB as scanner evidence; applications with missing pixels should supply a `Capture` validity mask. The PNG adapter and JSON export use development-only `image` and `serde_json` dependencies; the library itself accepts an existing `Capture` and adds no runtime dependencies.
+The report command requires an opaque PNG and a Gnorix checkout with the pinned Rust toolchain. It runs the native extractor and refreshes the single `reports/fingerprint/` directory after extraction, validation and rendering succeed. It estimates ridge thickness and period from the image before scale-dependent extraction; there is no manual period argument or fallback to a sample-specific value. Transparent input is rejected instead of interpreting hidden RGB as scanner evidence; applications with missing pixels should supply a `Capture` validity mask. The PNG adapter and JSON export use development-only `image` and `serde_json` dependencies; the library itself accepts an existing `Capture` and adds no runtime dependencies.
 
-The bundle contains the source grayscale image, local dark/light references, raw measurement skeleton and confirmed-pattern support, final image stages and `features.json`. The report command produces five PNG figures: an overview, a structural overlay, primary `scale-analysis.png`, provisional `bootstrap-analysis.png` and `normalization-analysis.png`. Overlay geometry is semitransparent and retains source pixel coordinates. The JSON retains every full-pass width observation, its represented length and original grayscale mean.
+The bundle keeps the source grayscale image, local dark/light references, raw measurement skeleton, confirmed-pattern support, final image stages and `features.json` in `reports/fingerprint/data/`. The report root contains a generated `README.md` and seven PNG figures: `overview.png`, a structural overlay, primary `scale-analysis.png`, provisional `bootstrap-analysis.png`, `normalization-analysis.png`, `contour-comparison.png` and `contour-overlay.png`. The contour comparison shows the same source and crop before and after reconstruction. Overlay geometry is semitransparent and retains source pixel coordinates. The JSON retains every full-pass width observation, its represented length and original grayscale mean, plus reconstructed paths and their provenance.
 
 ## Full-source measurement and common unit
 
@@ -95,7 +93,7 @@ The observed node's `touches_unobserved` flag also includes regions excluded by 
 
 Accepted joins concatenate paths and remove only their consumed ending nodes. They can also close a disconnected path into a cycle. Every final path records its original edge/cycle IDs and accepted join IDs; every retained node maps to its original node. Each original path occurs exactly once, including paths that could not be smoothed. Junctions, isolated nodes and existing isolated cycles are retained. `edge_smoothing` and `cycle_smoothing` report actual maximum displacement, applied blend and any retention reason, indexed by the observed graph. The complete smoothing controls and gap policy are exported with the result.
 
-Reconstructed lengths and midpoints are measured on the resulting polylines; their turning profiles are sampled without applying a second Gaussian. The original graph descriptors retain their previous meaning. A smooth continuation remains an image-based inference rather than proof that an anatomical ridge was continuous.
+Reconstructed lengths and midpoints are measured on the resulting polylines; their turning profiles are sampled without applying a second Gaussian. The original graph descriptors retain their previous meaning. The PNG renderer displays supplied geometry and does not perform reconstruction or silently fill rejected gaps. A smooth continuation remains an image-based inference rather than proof that an anatomical ridge was continuous.
 
 ## Controls and bounds
 
@@ -119,6 +117,6 @@ The report distinguishes isolated cycles from total graph cycle rank (`edges - n
 
 ## Verification and integration boundary
 
-Tests cover image and mask validation, blank captures, oriented stripes, local brightness changes, source-intensity integration, independence from masked pixel values, component and hole preservation, missing regions, diagonal topology, junction clusters, closed cycles, long iterative paths, geometric invariances, numerical limits and the checked-in fingerprint. Contour tests additionally cover endpoint preservation, small-loop retention, swept support, collision rejection, supported processing gaps, identical geometry with a white source gap, missing acquisition pixels, ambiguous partners and complete path provenance. The report tests cover summary reconstruction, malformed geometry, palette support, path containment, image dimensions, empty graphs and PNG output. The synthetic fixture verifies execution and visualization, not real-scanner recognition performance.
+Tests cover image and mask validation, blank captures, oriented stripes, local brightness changes, source-intensity integration, independence from masked pixel values, component and hole preservation, missing regions, diagonal topology, junction clusters, closed cycles, long iterative paths, geometric invariances, numerical limits and the checked-in fingerprint. Contour tests additionally cover endpoint preservation, small-loop retention, swept support, collision rejection, supported processing gaps, identical geometry with a white source gap, missing acquisition pixels, ambiguous partners and complete path provenance. The report tests cover summary reconstruction, malformed geometry, palette support, path containment, image dimensions, empty graphs, contour origins and PNG output. The synthetic fixture verifies execution and visualization, not real-scanner recognition performance.
 
 The extractor is a component for a future complete `MeasurementEngine`. Registration, cross-capture correspondence, feature selection, calibrated tolerances, quantization and candidate encoding are not selected here. It is deliberately not connected to signing as a placeholder measurement strategy. Those choices require repeat captures and evaluation before a biometric key can be reconstructed reliably.

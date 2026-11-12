@@ -96,20 +96,18 @@ Persistence, encrypted backups and enrollment restoration are deliberately not i
 
 Tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy, resistance to biometric attacks, or on-chain gas/execution. Those require the separate measurement and integration validation plans.
 
-## Static fingerprint reports
+## Static fingerprint report
 
-The [fingerprint report tool](../tools/fingerprint-reports/README.md) renders local diagnostic snapshots as PNG. It shows the source image, triangular-grid connections, supplied point weights or other metrics, histograms, scalar maps and line series. It runs separately from the Rust library and accepts a documented JSON snapshot from any processing stage.
-
-Separate full-size overlays show point centers and supplied circular tolerance distances in original image pixels. Opacity defaults to 50%; marker size, tolerance preview and crop are explicit display controls. A crop preserves source coordinates and does not filter the stage's measurements or change its histograms.
-
-To generate the first reports from the checked-in synthetic image, install `uv` and run from the repository root:
+The [fingerprint report tool](../tools/fingerprint-reports/README.md) runs the native Rust extractor and publishes its actual measurements and geometry as one PNG report bundle. Install `uv` alongside the pinned Rust toolchain, then run from the repository root:
 
 ```sh
-uv run --project tools/fingerprint-reports --locked gnorix-report sample \
+uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image crates/gnorix/tests/assets/test-fingerprint.png
 ```
 
-This example computes local intensity statistics only. Its preview grid controls do not select biometric thresholds or a weighting algorithm. The tool guide describes importing actual intermediate values, selecting metrics and reproducing reports from saved snapshots. Generated PNG reports and the sample's image/JSON bundle go to the repository-root, Git-ignored `reports/` directory by default, independently of the launch directory. Use `--output reports/fingerprint` from the repository root to group a run in a subdirectory, or provide another explicit output path.
+The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization and reconstructed contours. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.
+
+Geometry overlays default to 50% opacity and retain source coordinates. `--overlay-alpha` and `--dpi` affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
 
 ## Change discipline
 

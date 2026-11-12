@@ -1,7 +1,7 @@
 [project]
 name = "gnorix-fingerprint-reports"
 version = "0.1.0"
-description = "Static diagnostic reports for Gnorix fingerprint experiments"
+description = "Native fingerprint analysis and PNG reports for Gnorix"
 requires-python = ">=3.11"
 dependencies = [
   "matplotlib>=3.10,<4",

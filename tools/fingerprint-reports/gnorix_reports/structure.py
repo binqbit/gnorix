@@ -19,6 +19,12 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
+from .contours import (
+    Contours,
+    render_contour_comparison,
+    render_contour_overlay,
+    validate_contours,
+)
 from .full_scale import (
     IMAGE_KEYS as MEASUREMENT_IMAGES,
 )
@@ -28,8 +34,7 @@ from .full_scale import (
     validate_full_scale,
     validate_measurement_maps,
 )
-from .images import load_image
-from .model import MAX_FRAME_PIXELS, MAX_FRAME_SIDE, MAX_SNAPSHOT_BYTES
+from .images import MAX_FRAME_PIXELS, MAX_FRAME_SIDE, load_image
 from .normalization import (
     IMAGE_KEYS,
     Normalization,
@@ -40,6 +45,7 @@ from .normalization import (
 from .scale import ScaleAnalysis, render_scale_analysis, validate_scale
 
 _SCHEMA = "gnorix.ridge-extraction.v1"
+MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 _MAX_ITEMS = 100_000
 _MAX_PATH_POINTS = 1_000_000
 _STAGES = (
@@ -97,17 +103,19 @@ class _Structure:
     cycles: tuple[_Curve, ...]
     images: dict[str, Path]
     graph_cycle_rank: int
+    contours: Contours
 
 
 def render_structure(
     snapshot_path: Path, output: Path, dpi: int = 160, alpha: float = 0.5
 ) -> list[Path]:
-    """Validate a native extraction bundle and export five PNG diagnostics.
+    """Validate a native extraction bundle and export seven PNG diagnostics.
 
     All rasters must have the declared source dimensions. Coordinates are pixel
     centers: (0, 0) is the center of the top-left pixel. Curves are displayed as
     supplied, including curves whose descriptor failed; no graph repair, shape
     fitting, matching tolerance, or confidence calculation is performed here.
+    Separate contour figures display the supplied native refinement and joins.
     """
     if type(dpi) is not int or not 1 <= dpi <= 600:
         raise ValueError("report DPI must be an integer in [1, 600]")
@@ -132,7 +140,7 @@ def render_structure(
         with tempfile.TemporaryDirectory(prefix=".ridge-report-", dir=output.parent) as temporary:
             staging = Path(temporary)
             with matplotlib.rc_context(_STYLE):
-                _save_figure(_overview(snapshot, images), staging / "structure-overview.png", dpi)
+                _save_figure(_overview(snapshot, images), staging / "overview.png", dpi)
                 _save_figure(
                     _overlay(snapshot, images, alpha), staging / "structure-overlay.png", dpi
                 )
@@ -151,14 +159,26 @@ def render_structure(
                     staging / "normalization-analysis.png",
                     dpi,
                 )
+                _save_figure(
+                    render_contour_comparison(snapshot.contours, images["source"], alpha),
+                    staging / "contour-comparison.png",
+                    dpi,
+                )
+                _save_figure(
+                    render_contour_overlay(snapshot.contours, images["source"], alpha),
+                    staging / "contour-overlay.png",
+                    dpi,
+                )
             output.mkdir(parents=True, exist_ok=True)
             paths = []
             for name in (
-                "structure-overview.png",
+                "overview.png",
                 "structure-overlay.png",
                 "scale-analysis.png",
                 "bootstrap-analysis.png",
                 "normalization-analysis.png",
+                "contour-comparison.png",
+                "contour-overlay.png",
             ):
                 target = output / name
                 (staging / name).replace(target)
@@ -211,6 +231,9 @@ def _load_structure(path: Path) -> _Structure:
     keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES)
     images = {key: _image_path(base, raw_images.get(key), key) for key in keys}
     rank = _graph_cycle_rank(node_ids, data["edges"], len(cycles))
+    contours = validate_contours(
+        data.get("contours"), raw_nodes, data["edges"], data["cycles"], width, height, scale.unit_px
+    )
     return _Structure(
         width,
         height,
@@ -224,6 +247,7 @@ def _load_structure(path: Path) -> _Structure:
         cycles,
         images,
         rank,
+        contours,
     )
 
 

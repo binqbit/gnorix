@@ -1,4 +1,4 @@
-"""Bounded local PNG/JPEG decoding shared by sampling and report rendering."""
+"""Bounded decoding of the native extractor's 8-bit grayscale PNG stages."""
 
 from __future__ import annotations
 
@@ -8,17 +8,15 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from .model import MAX_FRAME_PIXELS, MAX_FRAME_SIDE
-
+MAX_FRAME_SIDE = 16_384
+MAX_FRAME_PIXELS = 16_777_216
 MAX_IMAGE_BYTES = 128 * 1024 * 1024
-SUPPORTED_MODES = frozenset({"L", "LA", "P", "RGB", "RGBA"})
 
 
-def load_image(path: Path, expected_size: tuple[int, int] | None = None) -> Image.Image:
-    """Return an owned native-mode image; the caller must close the returned copy.
+def load_image(path: Path, expected_size: tuple[int, int]) -> Image.Image:
+    """Return an owned grayscale image; the caller must close the returned copy.
 
     Format, dimensions and 8-bit sample mode are checked before full decoding.
-    Palette/alpha information is retained for an explicit caller-side conversion.
     """
     try:
         with warnings.catch_warnings():
@@ -42,13 +40,13 @@ def load_image(path: Path, expected_size: tuple[int, int] | None = None) -> Imag
         raise ValueError(f"image {path.name!r} cannot be decoded safely") from error
 
 
-def _validate_image(image: Image.Image, expected_size: tuple[int, int] | None) -> None:
-    if image.format not in {"PNG", "JPEG"}:
-        raise ValueError("image content must be PNG or JPEG")
+def _validate_image(image: Image.Image, expected_size: tuple[int, int]) -> None:
+    if image.format != "PNG":
+        raise ValueError("native image stages must be PNG")
     width, height = image.size
     if width * height > MAX_FRAME_PIXELS or max(width, height) > MAX_FRAME_SIDE:
         raise ValueError("image exceeds the supported pixel dimensions")
-    if expected_size is not None and image.size != expected_size:
+    if image.size != expected_size:
         raise ValueError("decoded image dimensions do not match the frame")
-    if image.mode not in SUPPORTED_MODES:
-        raise ValueError(f"image mode {image.mode!r} is not a supported 8-bit mode")
+    if image.mode != "L":
+        raise ValueError("native image stages must be 8-bit grayscale")
