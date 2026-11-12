@@ -35,6 +35,8 @@ On the [checked-in test image](../crates/gnorix/tests/assets/test-fingerprint.pn
 
 For example, ending **#160 at (466, 535)** has P = 0.829, G = 0.683, C = 0.989 and T = 1. With N = 1, its strength and priority are both **0.911**.
 
+The next stage builds [regional feature combinations](feature-combinations.md): nine configurable circular pools and bounded, priority-weighted point subsets with explicit coverage and shared-region provenance.
+
 ## Run on an image
 
 From the repository root:

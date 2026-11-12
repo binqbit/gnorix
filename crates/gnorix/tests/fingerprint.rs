@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use gnorix::biometrics::{
     Capture,
     fingerprint::{self, ExtractionConfig, FingerprintError, NodeKind, RidgeMap, SourceDecision},
@@ -108,7 +110,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
         .into_luma8();
     let capture =
         Capture::new(image.width(), image.height(), image.into_raw(), None, None).unwrap();
-    let result = fingerprint::extract(&capture, &ExtractionConfig::default()).unwrap();
+    let mut result = fingerprint::extract(&capture, &ExtractionConfig::default()).unwrap();
     assert!(!result.bootstrap.profiles.is_empty());
     assert!((28.0..50.0).contains(&result.bootstrap.ridge_period_px));
     assert!(!result.scale.observations.is_empty());
@@ -204,6 +206,204 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
         }
     }
     assert!(!format!("{result:?}").contains("Point"));
+    assert_regional_combinations(&mut result);
+}
+
+fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
+    let config = fingerprint::CombinationConfig {
+        min_points: 3,
+        pool_multiplier: 2,
+        diameter_fraction: 0.5,
+        combinations_per_region: 12,
+        max_work: 10_000_000,
+    };
+    let selected = fingerprint::generate_combinations(result, &config).unwrap();
+    assert_eq!(
+        selected,
+        fingerprint::generate_combinations(result, &config).unwrap()
+    );
+    assert!(selected.work_used > 0 && selected.work_used <= config.max_work);
+    assert_eq!(selected.regions.len(), 9);
+    assert!(selected.points.len() >= config.min_points * config.pool_multiplier);
+    assert!(
+        selected
+            .points
+            .windows(2)
+            .all(|pair| pair[0].id < pair[1].id)
+    );
+
+    let originals: BTreeMap<_, _> = result
+        .feature_strength
+        .candidates
+        .iter()
+        .map(|feature| (feature.id, feature))
+        .collect();
+    for point in &selected.points {
+        let original = originals[&point.id];
+        assert_eq!(point.position, original.position);
+        assert_eq!(point.kind, original.kind);
+        assert_eq!(Some(point.priority), original.priority);
+    }
+
+    assert_combination_subsets(&selected, &config);
+    for (id, region) in selected.regions.iter().enumerate() {
+        assert_eq!(usize::from(region.id), id);
+        assert_combination_region(&selected, region, &config);
+    }
+    assert_combination_failures(result, &selected, config);
+    assert_overlapping_region_deduplication(result, config);
+
+    // Source IDs, rather than incidental storage order, define the output.
+    result.feature_strength.candidates.reverse();
+    let reordered = fingerprint::generate_combinations(result, &config).unwrap();
+    result.feature_strength.candidates.reverse();
+    assert_eq!(selected, reordered);
+}
+
+fn assert_overlapping_region_deduplication(
+    result: &fingerprint::Fingerprint,
+    config: fingerprint::CombinationConfig,
+) {
+    let selected = fingerprint::generate_combinations(
+        result,
+        &fingerprint::CombinationConfig {
+            diameter_fraction: 10.0,
+            ..config
+        },
+    )
+    .unwrap();
+    assert_eq!(selected.combinations.len(), config.combinations_per_region);
+    for region in &selected.regions {
+        assert_eq!(region.available_points, selected.points.len());
+        assert_eq!(region.pool, selected.regions[0].pool);
+        assert_eq!(region.combination_count, config.combinations_per_region);
+    }
+    for combination in &selected.combinations {
+        assert_eq!(combination.regions, (0..9).collect::<Vec<_>>());
+    }
+}
+
+fn assert_combination_subsets(
+    selected: &fingerprint::FeatureCombinations,
+    config: &fingerprint::CombinationConfig,
+) {
+    let mut unique = BTreeSet::new();
+    assert!(!selected.combinations.is_empty());
+    for combination in &selected.combinations {
+        assert!(unique.insert(&combination.feature_ids));
+        assert!(
+            combination
+                .feature_ids
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
+        assert!(combination.feature_ids.len() >= config.min_points);
+        assert!(combination.score.is_finite() && (0.1..=1.0).contains(&combination.score));
+        assert!(!combination.regions.is_empty());
+        assert!(combination.regions.windows(2).all(|pair| pair[0] < pair[1]));
+        for &id in &combination.regions {
+            let region = &selected.regions[usize::from(id)];
+            assert!(combination.feature_ids.len() <= region.pool.len());
+            assert!(
+                combination
+                    .feature_ids
+                    .iter()
+                    .all(|id| region.pool.contains(id))
+            );
+        }
+    }
+    assert!(selected.combinations.windows(2).all(|pair| {
+        pair[0].score > pair[1].score
+            || (pair[0].score == pair[1].score && pair[0].feature_ids < pair[1].feature_ids)
+    }));
+}
+
+fn assert_combination_region(
+    selected: &fingerprint::FeatureCombinations,
+    region: &fingerprint::CombinationRegion,
+    config: &fingerprint::CombinationConfig,
+) {
+    let points: BTreeMap<_, _> = selected
+        .points
+        .iter()
+        .map(|point| (point.id, point))
+        .collect();
+    assert_eq!(
+        region.pool.len(),
+        config.min_points * config.pool_multiplier
+    );
+    assert!(region.available_points >= region.pool.len());
+    assert!(region.radius.is_finite() && region.radius >= region.initial_radius);
+    assert!(region.pool.windows(2).all(|pair| {
+        let (a, b) = (points[&pair[0]], points[&pair[1]]);
+        a.priority > b.priority || (a.priority == b.priority && a.id < b.id)
+    }));
+    for id in &region.pool {
+        let position = points[id].position;
+        let distance = (position.x() - region.center.x()).hypot(position.y() - region.center.y());
+        assert!(distance <= region.radius);
+    }
+
+    let subsets: Vec<_> = selected
+        .combinations
+        .iter()
+        .filter(|combination| combination.regions.contains(&region.id))
+        .collect();
+    assert_eq!(subsets.len(), region.combination_count);
+    assert_eq!(region.combination_count, config.combinations_per_region);
+    let incidence: Vec<_> = region
+        .pool
+        .iter()
+        .map(|id| {
+            subsets
+                .iter()
+                .filter(|subset| subset.feature_ids.contains(id))
+                .count()
+        })
+        .collect();
+    assert!(incidence.iter().all(|&count| count > 0));
+    assert!(incidence.windows(2).all(|pair| pair[0] >= pair[1]));
+}
+
+fn assert_combination_failures(
+    result: &fingerprint::Fingerprint,
+    selected: &fingerprint::FeatureCombinations,
+    config: fingerprint::CombinationConfig,
+) {
+    use fingerprint::{CombinationConfig, CombinationError, generate_combinations};
+
+    assert!(matches!(
+        generate_combinations(
+            result,
+            &CombinationConfig {
+                min_points: 0,
+                ..config
+            }
+        ),
+        Err(CombinationError::InvalidConfig(_))
+    ));
+    for max_work in [1, selected.work_used - 1] {
+        assert_eq!(
+            generate_combinations(result, &CombinationConfig { max_work, ..config }),
+            Err(CombinationError::WorkLimit)
+        );
+    }
+    let required = selected.points.len() + 1;
+    assert_eq!(
+        generate_combinations(
+            result,
+            &CombinationConfig {
+                min_points: required,
+                pool_multiplier: 1,
+                combinations_per_region: 1,
+                ..config
+            }
+        ),
+        Err(CombinationError::InsufficientPoints {
+            required,
+            available: selected.points.len(),
+        })
+    );
 }
 
 fn assert_visible_ending_context(result: &fingerprint::Fingerprint) {

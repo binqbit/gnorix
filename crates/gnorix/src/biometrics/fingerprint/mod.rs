@@ -6,6 +6,7 @@
 
 mod clarity;
 mod cleanup;
+mod combinations;
 mod curve;
 mod enhancement;
 mod features;
@@ -29,6 +30,10 @@ pub use clarity::ClarityMap;
 pub use cleanup::{
     CleanupOrigin, JunctionRoute, LoopAssessment, LoopEvidence, RidgeCleanup, SourceDecision,
     SourcePolicy, SpurAssessment, SpurEvidence, SpurRemoval,
+};
+pub use combinations::{
+    CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FeatureCombination,
+    FeatureCombinations, RegionBounds, generate_combinations,
 };
 pub use enhancement::LocalPalette;
 pub use features::{
