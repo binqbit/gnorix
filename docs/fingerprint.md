@@ -153,7 +153,7 @@ Clarity support conservatively requires the complete tensor neighborhood and the
 
 `structure-overlay.png` uses final cleaned and reconstructed paths and surviving features. It resolves original identity through both provenance transitions. Removed spurs, collapsed loop junctions and joined endings do not reappear. Changed feature types or degrees have unavailable priority because their new shape has not been assessed. New closed paths without an original isolated-cycle candidate remain unscored geometry.
 
-Feature markers use final priority on a fixed 0–1 viridis scale. Their opacity is `0.4 + 0.5 × sqrt(priority)`, within 40–90%; unavailable evidence is gray at 40%. Diagnostics retain intrinsic strength Q and its separate context, local evidence, stability and neighborhood components. Path opacity continues to use regional clarity; it is not the feature score.
+Feature markers use final priority on a fixed 0–1 scale: red → orange → yellow → bright green, from weak to strong. The continuous palette increases in lightness and stays distinct from the cyan paths; markers and colorbars share the same scale across images. Their opacity is `0.4 + 0.5 × sqrt(priority)`, within 40–90%; unavailable evidence is gray at 40%. Diagnostics retain intrinsic strength Q and its separate context, local evidence, stability and neighborhood components. Path opacity continues to use regional clarity; it is not the feature score.
 
 ### What makes a feature strong
 

@@ -216,9 +216,10 @@ score continuously; a source-backed continuation limits ending support. Missing
 required source evidence remains unknown. These scores do not relax strict cleanup.
 An arm's graph-ending stop is an extraction endpoint, not a confirmed source termination.
 Both the structural overlay and dedicated strength figure show higher priority as brighter
-feature markers, with fixed opacity 40% + 50% × sqrt(priority). The 0–1 color scale is the
-same for every image. Map/annotation opacity does not change these markers.
-Unknown priority is gray; measured zero uses the bottom of the fixed 0–1 color scale.
+feature markers, with fixed opacity 40% + 50% × sqrt(priority). The fixed 0–1 color scale
+progresses continuously from red through orange and yellow to bright green, with increasing
+lightness. It is the same for every image. Map/annotation opacity does not change these markers.
+Unknown priority is gray; measured zero is red.
 Line opacity shows local image clarity, independently of feature strength.
 These are diagnostic measurements, not probabilities of anatomical correctness or identity.
 

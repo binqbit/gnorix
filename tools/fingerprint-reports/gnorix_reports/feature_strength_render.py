@@ -8,7 +8,7 @@ import textwrap
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize, to_rgba
+from matplotlib.colors import LinearSegmentedColormap, Normalize, to_rgba
 from matplotlib.lines import Line2D
 
 from .clarity import UNKNOWN_COLOR
@@ -28,6 +28,10 @@ _COMPONENTS = (
     ("strength", "Q · feature quality", "#7b3294"),
     ("priority", "Priority · Q × N", "#005f73"),
 )
+# Increasing lightness from weak red to strong green, away from cyan paths.
+_PRIORITY_CMAP = LinearSegmentedColormap.from_list(
+    "feature_priority", ["#d94355", "#ec843d", "#dcbf3b", "#b8e651", "#7dff69"]
+)
 MARKER_OPACITY_LABEL = (
     "Feature markers: color and opacity = priority Q × N · 40% + 50% × sqrt(priority)."
 )
@@ -36,12 +40,11 @@ MARKER_OPACITY_LABEL = (
 def candidate_colors(candidates):
     """A fixed 0–1 color scale; unavailable and measured zero remain distinct."""
     colors = []
-    cmap = plt.get_cmap("viridis")
     for candidate in candidates:
         if candidate.priority is None:
             colors.append(to_rgba(UNKNOWN_COLOR, 0.4))
         else:
-            color = list(cmap(candidate.priority))
+            color = list(_PRIORITY_CMAP(float(candidate.priority)))
             color[3] = 0.4 + 0.5 * math.sqrt(candidate.priority)
             colors.append(color)
     return np.asarray(colors).reshape(-1, 4)
@@ -80,7 +83,7 @@ def draw_feature_markers(axis, candidates, size, *, hollow=False):
 
 def feature_legend_handles():
     handles = [
-        Line2D([], [], marker=marker, linestyle="none", color="#31688e", label=label)
+        Line2D([], [], marker=marker, linestyle="none", color=_PRIORITY_CMAP(0.5), label=label)
         for marker, label in _KINDS.values()
     ]
     handles.append(
@@ -98,11 +101,11 @@ def feature_legend_handles():
 
 def add_priority_colorbar(figure, axis):
     figure.colorbar(
-        ScalarMappable(norm=Normalize(0, 1), cmap="viridis"),
+        ScalarMappable(norm=Normalize(0, 1), cmap=_PRIORITY_CMAP),
         ax=axis,
         shrink=0.6,
         pad=0.02,
-        label="Feature priority Q × N · 0 = dim, 1 = bright",
+        label="Feature priority Q × N · 0 = dim, 1 = bright\nRed → orange → yellow → green",
     )
 
 
