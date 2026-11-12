@@ -38,6 +38,14 @@ impl SecretPolicy {
     }
 }
 
+pub(crate) fn check_attempt(attempt: usize, limits: &Limits) -> Result<()> {
+    if attempt >= limits.candidate_attempts.get() {
+        return Err(Error::LimitExceeded(Resource::CandidateAttempts));
+    }
+
+    Ok(())
+}
+
 pub(crate) fn check_size(size: usize, limit: NonZeroUsize, resource: Resource) -> Result<()> {
     if size > limit.get() {
         Err(Error::LimitExceeded(resource))

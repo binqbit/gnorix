@@ -9,7 +9,7 @@ use crate::{
     encoding,
     error::{Resource, Stage, algorithm},
     merkle::{Hash, MerkleRoot, MerkleTree, leaf_hash},
-    policy::{Limits, SecretPolicy},
+    policy::{Limits, SecretPolicy, check_attempt},
 };
 
 /// The application/network in which an enrollment can be used.
@@ -194,14 +194,6 @@ fn assemble_enrollment<Model>(
         model,
         tree,
     }
-}
-
-pub(crate) fn check_attempt(attempt: usize, limits: &Limits) -> Result<()> {
-    if attempt >= limits.candidate_attempts.get() {
-        return Err(Error::LimitExceeded(Resource::CandidateAttempts));
-    }
-
-    Ok(())
 }
 
 fn validate_spec(spec: &EnrollmentSpec) -> Result<()> {

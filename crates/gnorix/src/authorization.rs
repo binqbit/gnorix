@@ -10,10 +10,10 @@ use crate::{
         validate_public_key, validate_signature,
     },
     encoding,
-    enrollment::{Enrollment, EnrollmentCommitment, check_attempt},
+    enrollment::{Enrollment, EnrollmentCommitment},
     error::{Resource, Stage, algorithm},
     merkle::{self, Hash, MerkleError, MerkleProof, leaf_hash},
-    policy::Limits,
+    policy::{Limits, check_attempt},
 };
 
 /// Exact application intent. The application defines canonical payload bytes and
