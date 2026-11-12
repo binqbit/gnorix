@@ -2,6 +2,39 @@
 
 `gnorix::biometrics::fingerprint` processes one grayscale capture into a ridge skeleton, an observed graph, a graph with short terminal artifacts removed, reconstructed smooth contours and geometric measurements. It is implemented in native Rust. It does not call Python, SourceAFIS, a scanner SDK or a network service. Its output is sensitive biometric information intended for local inspection and later measurement-engine development.
 
+## Feature summary
+
+We record **endings, bifurcations, other junctions, isolated nodes and isolated cycles**. Each candidate retains its ID, type, source-image `(x, y)`, original graph references, arm measurements, observed coverage, weakness/stop reasons and stress-test matches in `data/features.json`. The common geometric unit **R** is the length-weighted mean dark-ridge thickness.
+
+1. Measure R, normalize local dark/light levels, denoise and trace the ridge skeleton into a graph.
+2. Correct source-confirmed short spurs and duplicate ridge arms, then smooth contours and join source-supported gaps.
+3. Assess candidate geometry and original-image evidence at local and extended scales; compare extraction across eight threshold variants.
+
+| Metric | What it measures |
+|---|---|
+| P | Local source support: ridge continuity and feature-specific separation or termination. |
+| G | Local geometry over 2R: arm extent, separation and possible continuation. |
+| C | Extended source-confirmed structure over 4R; sustained, separated branches or a supported ending. |
+| T | Stability across eight threshold variants of this capture. |
+| N | Neighborhood factor in a 3R radius; crowding and incomplete coverage lower it within 0.5–1. |
+
+Intrinsic strength **Q** gives extended context the main weight; final **priority** also accounts for the neighborhood:
+
+```text
+Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5 × T)
+priority = Q × N
+```
+
+Missing required evidence is `null`, distinct from measured zero. These scores describe evidence on one capture; they are not calibrated recognition probabilities. [Detailed scoring rules](#feature-strength-scale-context-and-priority) follow below.
+
+### Example: priority above 30%
+
+![Cleaned fingerprint contours with surviving feature priorities strictly above 0.30](assets/fingerprint-priority-over-30.png)
+
+On the [checked-in test image](../crates/gnorix/tests/assets/test-fingerprint.png), **41 surviving features** have `priority > 0.30`: **35 endings and 6 bifurcations**, with R = 16.82 px. Circles mark endings; triangles mark bifurcations. Color progresses from red through orange and yellow to bright green as priority increases, with 40–90% opacity. Three markers retain hollow × notation for unknown continuation. The 30% cutoff filters this illustration only; the full report retains all candidates and their scores.
+
+For example, ending **#160 at (466, 535)** has P = 0.829, G = 0.683, C = 0.989 and T = 1. With N = 1, its strength and priority are both **0.911**.
+
 ## Run on an image
 
 From the repository root:

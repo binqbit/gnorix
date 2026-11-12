@@ -14,7 +14,7 @@ The application retains control over enrollment ownership, permitted actions, re
 - [How it works](docs/how-it-works.md) follows enrollment, retained proof material, fresh-capture reconstruction, signing, verification and recovery.
 - [Architecture](docs/architecture.md) describes component responsibilities, the user/verifier boundary, independent library and NEAR integration.
 - [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
-- [Fingerprint extraction](docs/fingerprint.md) describes native ridge processing, graph geometry and reproducible PNG diagnostics.
+- [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
 
 ## Development
 
