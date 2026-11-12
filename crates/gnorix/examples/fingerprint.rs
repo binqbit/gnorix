@@ -8,6 +8,8 @@ mod cleanup;
 mod contours;
 #[path = "fingerprint/features.rs"]
 mod features;
+#[path = "support/image_input.rs"]
+mod image_input;
 #[path = "fingerprint/images.rs"]
 mod images;
 #[path = "fingerprint/snapshot.rs"]
@@ -33,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("output directory already exists".into());
     }
     let config = ExtractionConfig::default();
-    let source = images::read(&input, config.max_pixels)?;
+    let source = image_input::read(&input, config.max_pixels)?;
     let capture = Capture::new(
         source.width(),
         source.height(),

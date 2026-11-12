@@ -63,7 +63,7 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 
 Feature assessment separates local evidence (`features/evidence.rs`), extended source-backed structure (`features/context.rs` and its tracing/probe modules), threshold correspondence (`features/stability/`) and bounded crowding (`features/neighborhood.rs`). The orchestration combines these independent measurements; the report adapters only serialize and validate them. All source/graph observation preserves the original topology. Context traversal, sampling and neighborhood work have explicit bounds.
 
-The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` handles image I/O, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
+The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` exports image stages, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
 
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
