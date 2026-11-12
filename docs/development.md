@@ -50,7 +50,7 @@ Locations in this table are relative to `crates/gnorix`. High-level functions ca
 
 ## Connecting algorithms
 
-The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns ridge geometry with source-pixel coordinates and processing provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
+The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry and separately reconstructed smooth contours with source-pixel coordinates and explicit join provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
 
 Implement `MeasurementEngine` for the selected measurement strategy. It supplies a profile identifier, builds its own reconstruction model, enumerates all accepted enrollment candidates, and reconstructs candidates from a new capture under that same model. Its identifier must cover every setting that affects interpretation or candidate bytes.
 

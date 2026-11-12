@@ -10,7 +10,9 @@ mod full_scale;
 mod graph;
 mod photometry;
 mod quality;
+mod repair;
 mod scale;
+mod smoothing;
 mod thinning;
 
 use std::{error::Error, fmt};
@@ -20,7 +22,9 @@ use super::{Capture, geometry::Point};
 pub use enhancement::LocalPalette;
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use quality::WidthConsistency;
+pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
 pub use scale::{BootstrapScale, RidgeSpan, ScaleProfile};
+pub use smoothing::{SmoothingAdjustment, SmoothingControls, SmoothingRejection};
 
 /// Image-processing controls, independent of biometric matching tolerances.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,6 +227,29 @@ pub struct CurveGeometry {
     pub turning: Vec<TurnSample>,
 }
 
+/// Geometric reconstruction with explicit links back to observed structure.
+///
+/// Each observed path is retained exactly once. Only source-supported accepted
+/// joins change connectivity; other proposals remain separate diagnostics.
+/// Geometry describes these resulting paths without a second smoothing pass.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourReconstruction {
+    pub smoothing: SmoothingControls,
+    pub gap_policy: GapPolicy,
+    pub graph: RidgeGraph,
+    /// Original node index for each retained node in `graph`.
+    pub node_sources: Vec<usize>,
+    pub edge_origins: Vec<PathOrigin>,
+    pub cycle_origins: Vec<PathOrigin>,
+    pub joins: Vec<GapJoin>,
+    /// One adjustment per original graph edge, before joining.
+    pub edge_smoothing: Vec<SmoothingAdjustment>,
+    /// One adjustment per original isolated cycle.
+    pub cycle_smoothing: Vec<SmoothingAdjustment>,
+    pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+    pub cycle_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+}
+
 /// Sensitive diagnostics and structure from one capture; no match score.
 pub struct Fingerprint {
     /// Full-source ridge-width measurement; `unit_px` is the common length unit.
@@ -242,6 +269,7 @@ pub struct Fingerprint {
     pub binary: RidgeMap,
     pub skeleton: RidgeMap,
     pub graph: RidgeGraph,
+    pub contours: ContourReconstruction,
     /// One entry per graph edge, in the same order. An unresolved descriptor
     /// retains the graph path and its error rather than silently dropping it.
     pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
@@ -267,7 +295,7 @@ struct Preprocessed {
     map: RidgeMap,
 }
 
-/// Extracts ridge structure without a separate gap-repair or pore-removal stage.
+/// Extracts ridge structure, smooth contours and source-supported short joins.
 ///
 /// The image scale is estimated before any scale-dependent filtering. This is a transparent native
 /// processing pipeline, not an exact port of SourceAFIS or a calibrated matcher.
@@ -289,6 +317,7 @@ pub fn extract(
         smoothing_sigma: scale.unit_px / 2.0,
     };
     let (edge_geometry, cycle_geometry) = describe_graph(&graph, curve_config);
+    let contours = reconstruct_contours(capture, &prepared, &skeleton, &graph, scale.unit_px)?;
 
     Ok(Fingerprint {
         scale,
@@ -301,6 +330,7 @@ pub fn extract(
         binary: prepared.map,
         skeleton,
         graph,
+        contours,
         edge_geometry,
         cycle_geometry,
     })
@@ -349,21 +379,59 @@ fn describe_graph(
     graph: &RidgeGraph,
     config: CurveConfig,
 ) -> (CurveMeasurements, CurveMeasurements) {
+    describe_paths(graph, |points, closed| {
+        curve::describe(points, closed, config)
+    })
+}
+
+fn reconstruct_contours(
+    capture: &Capture,
+    prepared: &Preprocessed,
+    skeleton: &RidgeMap,
+    graph: &RidgeGraph,
+    unit_px: f64,
+) -> Result<ContourReconstruction, FingerprintError> {
+    let smoothed = smoothing::smooth(graph, &prepared.map, unit_px)?;
+    let repaired = repair::reconstruct(
+        capture,
+        &prepared.palette,
+        &smoothed.graph,
+        skeleton,
+        unit_px,
+    )?;
+    let spacing = smoothing::SmoothingControls::for_unit(unit_px)?.sample_spacing_px;
+    let (edge_geometry, cycle_geometry) = describe_paths(&repaired.graph, |points, closed| {
+        curve::describe_smoothed(points, closed, spacing)
+    });
+
+    Ok(ContourReconstruction {
+        smoothing: SmoothingControls::for_unit(unit_px)?,
+        gap_policy: repaired.policy,
+        graph: repaired.graph,
+        node_sources: repaired.node_sources,
+        edge_origins: repaired.edge_origins,
+        cycle_origins: repaired.cycle_origins,
+        joins: repaired.joins,
+        edge_smoothing: smoothed.edge_adjustments,
+        cycle_smoothing: smoothed.cycle_adjustments,
+        edge_geometry,
+        cycle_geometry,
+    })
+}
+
+fn describe_paths(
+    graph: &RidgeGraph,
+    describe: impl Fn(&[Point], bool) -> Result<CurveGeometry, FingerprintError>,
+) -> (CurveMeasurements, CurveMeasurements) {
     let edges = graph
         .edges
         .iter()
-        .map(|edge| {
-            curve::describe(
-                &edge.points,
-                edge.points.first() == edge.points.last(),
-                config,
-            )
-        })
+        .map(|edge| describe(&edge.points, edge.points.first() == edge.points.last()))
         .collect();
     let cycles = graph
         .cycles
         .iter()
-        .map(|cycle| curve::describe(&cycle.points, true, config))
+        .map(|cycle| describe(&cycle.points, true))
         .collect();
     (edges, cycles)
 }

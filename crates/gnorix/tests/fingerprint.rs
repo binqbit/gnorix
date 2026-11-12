@@ -52,10 +52,19 @@ fn native_pipeline_is_deterministic_and_never_uses_masked_pixels() {
     assert_eq!(a.palette, b.palette);
     assert_eq!(a.scale, b.scale);
     assert_eq!(a.edge_geometry, b.edge_geometry);
+    assert_eq!(a.contours, b.contours);
     for edge in &a.graph.edges {
         let left = edge.points.iter().any(|p| p.x() < 44.0);
         let right = edge.points.iter().any(|p| p.x() >= 52.0);
         assert!(!(left && right), "a graph path crossed the invalid stripe");
+    }
+    for edge in &a.contours.graph.edges {
+        let left = edge.points.iter().any(|p| p.x() < 44.0);
+        let right = edge.points.iter().any(|p| p.x() >= 52.0);
+        assert!(
+            !(left && right),
+            "a reconstructed contour crossed missing source"
+        );
     }
 }
 
@@ -125,6 +134,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert!(!result.graph.edges.is_empty());
     assert_eq!(result.edge_geometry.len(), result.graph.edges.len());
     assert_eq!(result.cycle_geometry.len(), result.graph.cycles.len());
+    assert_contour_provenance(&result);
     assert_eq!(result.normalized.len(), capture.pixels().len());
     assert_eq!(result.palette.ridge_gray.len(), capture.pixels().len());
     assert_eq!(result.palette.valley_gray.len(), capture.pixels().len());
@@ -188,4 +198,49 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
         }
     }
     assert!(!format!("{result:?}").contains("Point"));
+}
+
+fn assert_contour_provenance(result: &fingerprint::Fingerprint) {
+    let contours = &result.contours;
+    assert_eq!(contours.edge_geometry.len(), contours.graph.edges.len());
+    assert_eq!(contours.cycle_geometry.len(), contours.graph.cycles.len());
+    assert_eq!(contours.edge_smoothing.len(), result.graph.edges.len());
+    assert_eq!(contours.cycle_smoothing.len(), result.graph.cycles.len());
+    assert_eq!(contours.node_sources.len(), contours.graph.nodes.len());
+    for (node, &source) in contours.graph.nodes.iter().zip(&contours.node_sources) {
+        assert_eq!(node, &result.graph.nodes[source]);
+    }
+
+    let mut edges = vec![0; result.graph.edges.len()];
+    let mut cycles = vec![0; result.graph.cycles.len()];
+    let mut joins = vec![0; contours.joins.len()];
+    for origin in contours.edge_origins.iter().chain(&contours.cycle_origins) {
+        for &index in &origin.source_edges {
+            edges[index] += 1;
+        }
+        for &index in &origin.source_cycles {
+            cycles[index] += 1;
+        }
+        for &index in &origin.source_joins {
+            joins[index] += 1;
+        }
+    }
+    assert!(edges.iter().chain(&cycles).all(|&count| count == 1));
+    for (join, count) in contours.joins.iter().zip(joins) {
+        assert_eq!(
+            count,
+            usize::from(join.status == fingerprint::GapStatus::Accepted)
+        );
+    }
+
+    for (edge, geometry) in contours.graph.edges.iter().zip(&contours.edge_geometry) {
+        if let Ok(geometry) = geometry {
+            let length: f64 = edge
+                .points
+                .windows(2)
+                .map(|pair| (pair[1].x() - pair[0].x()).hypot(pair[1].y() - pair[0].y()))
+                .sum();
+            assert!((length - geometry.arc_length).abs() < 1e-8);
+        }
+    }
 }

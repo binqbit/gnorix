@@ -45,9 +45,27 @@ pub(super) fn describe(
     let smoothed = smooth(&samples, spacing, config.smoothing_sigma, closed)?;
     let turning = turning_profile(&smoothed, closed)?;
 
+    measurements(&path, turning)
+}
+
+/// Measures a supplied geometric contour without smoothing it a second time.
+pub(super) fn describe_smoothed(
+    points: &[Point],
+    closed: bool,
+    sample_spacing: f64,
+) -> Result<CurveGeometry, FingerprintError> {
+    validate_spacing(sample_spacing)?;
+    let path = Path::new(points, closed)?;
+    let (samples, _) = path.resample(sample_spacing)?;
+    let turning = turning_profile(&samples, closed)?;
+
+    measurements(&path, turning)
+}
+
+fn measurements(path: &Path, turning: Vec<TurnSample>) -> Result<CurveGeometry, FingerprintError> {
     Ok(CurveGeometry {
         arc_length: path.length,
-        chord_length: if closed {
+        chord_length: if path.closed {
             0.0
         } else {
             distance(path.points[0], path.points[path.points.len() - 1])?
@@ -58,11 +76,7 @@ pub(super) fn describe(
 }
 
 fn validate_config(config: CurveConfig) -> Result<(), FingerprintError> {
-    if !config.sample_spacing.is_finite() || config.sample_spacing <= 0.0 {
-        return Err(FingerprintError::InvalidConfig(
-            "curve sample spacing must be finite and positive",
-        ));
-    }
+    validate_spacing(config.sample_spacing)?;
 
     if !config.smoothing_sigma.is_finite() || config.smoothing_sigma <= 0.0 {
         return Err(FingerprintError::InvalidConfig(
@@ -70,6 +84,15 @@ fn validate_config(config: CurveConfig) -> Result<(), FingerprintError> {
         ));
     }
 
+    Ok(())
+}
+
+fn validate_spacing(spacing: f64) -> Result<(), FingerprintError> {
+    if !spacing.is_finite() || spacing <= 0.0 {
+        return Err(FingerprintError::InvalidConfig(
+            "curve sample spacing must be finite and positive",
+        ));
+    }
     Ok(())
 }
 
@@ -334,6 +357,24 @@ mod tests {
         assert!(geometry.turning.iter().any(|sample| {
             sample.angle_radians > 0.1 && sample.angle_radians < FRAC_PI_2 - 0.1
         }));
+    }
+
+    #[test]
+    fn final_contour_measurements_do_not_apply_another_gaussian() {
+        let path = [point(0.0, 0.0), point(3.0, 0.0), point(3.0, 4.0)];
+        let geometry = describe_smoothed(&path, false, 0.1).unwrap();
+        close(geometry.arc_length, 7.0);
+        close(geometry.chord_length, 5.0);
+        assert_eq!(geometry.midpoint, point(3.0, 0.5));
+        // Away from the corner, tangents are exactly those of the supplied
+        // straight segments. A second Gaussian would spread the turn farther.
+        for sample in &geometry.turning {
+            if sample.arc_fraction < 2.8 / 7.0 {
+                close(sample.angle_radians, 0.0);
+            } else if sample.arc_fraction > 3.2 / 7.0 {
+                close(sample.angle_radians, FRAC_PI_2);
+            }
+        }
     }
 
     #[test]
