@@ -1,7 +1,7 @@
 //! Feature-specific evidence from the unchanged original capture.
 
 use super::super::{LocalPalette, SourceDecision, cleanup, graph};
-use super::geometry::{self, ArmPath};
+use super::geometry::{self, ArmPath, EndingBackbone};
 use super::sampling::{Sampler, Work, interior_light, separation};
 use super::{
     Capture, FeatureArm, FeatureKind, FeaturePolicy, FeatureReason, FeatureStrength,
@@ -178,8 +178,9 @@ fn ending(
     for cycle in &graph.cycles {
         sampler.work.charge(cycle.points.len())?;
     }
-    let backbone = ending_backbone(graph, id, arm.edge, policy.branch_horizon_px);
-    let continuation = geometry::continuation(id, context.arms, &backbone, policy, sampler.work)?;
+    let backbone = EndingBackbone::new(graph, id, arm.edge, policy.branch_horizon_px);
+    let continuation =
+        geometry::continuation(id, context.arms, backbone.paths(), policy, sampler.work)?;
     feature.continuation = continuation;
     feature.geometry_support = continuation.map(|value| feature.geometry_coverage * (1.0 - value));
     if continuation.is_some_and(|value| value > 0.0) {
@@ -200,8 +201,9 @@ fn ending(
         context.capture,
         context.palette,
         &points,
-        &backbone,
-        context.components,
+        backbone
+            .edges()
+            .map(|(points, start)| (points, context.components[start])),
         context.components[id],
         policy.reference_width_px,
         guard_work,
@@ -269,23 +271,6 @@ fn cycle(
     }
     reason(&mut feature, FeatureReason::IsolatedGeometry);
     Ok(feature)
-}
-
-fn ending_backbone(graph: &RidgeGraph, node: usize, edge: usize, horizon: f64) -> RidgeGraph {
-    let mut backbone = graph.clone();
-    let original = &graph.edges[edge];
-    let remaining = geometry::arc_length(&original.points, false) - horizon;
-    backbone.edges[edge].points = if remaining <= 0.0 {
-        Vec::new()
-    } else {
-        let reverse = original.start == node;
-        let mut points = geometry::prefix(&original.points, reverse, remaining);
-        if reverse {
-            points.reverse();
-        }
-        points
-    };
-    backbone
 }
 
 fn minimum(a: Option<f64>, b: Option<f64>) -> Option<f64> {

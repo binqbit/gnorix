@@ -10,6 +10,57 @@ pub(super) struct ArmPath {
     pub direction: Option<[f64; 2]>,
 }
 
+/// The original paths with only one ending's inspected arc removed. Other
+/// edges and isolated cycles stay borrowed from the observation.
+pub(super) struct EndingBackbone<'a> {
+    graph: &'a RidgeGraph,
+    clipped_edge: usize,
+    remainder: Vec<Point>,
+}
+
+impl<'a> EndingBackbone<'a> {
+    pub(super) fn new(graph: &'a RidgeGraph, node: usize, edge: usize, horizon: f64) -> Self {
+        let original = &graph.edges[edge];
+        let remaining = arc_length(&original.points, false) - horizon;
+        let remainder = if remaining <= 0.0 {
+            Vec::new()
+        } else {
+            let reverse = original.start == node;
+            let mut points = prefix(&original.points, reverse, remaining);
+            if reverse {
+                points.reverse();
+            }
+            points
+        };
+        Self {
+            graph,
+            clipped_edge: edge,
+            remainder,
+        }
+    }
+
+    /// Points and original start-node index, in unchanged edge order.
+    pub(super) fn edges(&self) -> impl ExactSizeIterator<Item = (&[Point], usize)> {
+        self.graph.edges.iter().enumerate().map(|(id, edge)| {
+            let points = if id == self.clipped_edge {
+                self.remainder.as_slice()
+            } else {
+                &edge.points
+            };
+            (points, edge.start)
+        })
+    }
+
+    pub(super) fn paths(&self) -> impl Iterator<Item = (&[Point], bool)> {
+        self.edges().map(|(points, _)| (points, false)).chain(
+            self.graph
+                .cycles
+                .iter()
+                .map(|cycle| (&cycle.points[..], true)),
+        )
+    }
+}
+
 pub(super) fn arms(
     graph: &RidgeGraph,
     policy: &FeaturePolicy,
@@ -118,12 +169,12 @@ pub(super) fn separation(
 
 /// Nearby forward paths aligned over a supported tangent span. Their presence
 /// weakens termination evidence; this measurement never proposes a new join.
-/// The supplied evidence graph excludes only this ending's inspected terminal
+/// The supplied evidence paths exclude only this ending's inspected terminal
 /// arc; the remaining own edge can contain a nearby facing end of a broken ring.
-pub(super) fn continuation(
+pub(super) fn continuation<'a>(
     node: usize,
     all: &[Vec<ArmPath>],
-    graph: &RidgeGraph,
+    paths: impl IntoIterator<Item = (&'a [Point], bool)>,
     policy: &FeaturePolicy,
     work: &mut Work,
 ) -> Result<Option<f64>, FingerprintError> {
@@ -133,12 +184,7 @@ pub(super) fn continuation(
     };
     let origin = arm.points[0];
     let mut maximum = 0.0_f64;
-    for (points, closed) in graph
-        .edges
-        .iter()
-        .map(|edge| (&edge.points[..], false))
-        .chain(graph.cycles.iter().map(|cycle| (&cycle.points[..], true)))
-    {
+    for (points, closed) in paths {
         work.charge(points.len().saturating_mul(12))?;
         let mut distances = vec![0.0];
         for (a, b) in segments(points, closed) {

@@ -117,13 +117,11 @@ pub(super) fn clean(
 /// The feature assessor supplies the original component labels and an evidence
 /// backbone with this ending's inspected terminal arc excluded. This reuses the
 /// same source cap and curved-continuation guard without changing cleanup.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn feature_ending(
+pub(super) fn feature_ending<'a>(
     capture: &Capture,
     palette: &LocalPalette,
     points: &[Point],
-    backbone_graph: &RidgeGraph,
-    components: &[usize],
+    backbone_paths: impl ExactSizeIterator<Item = (&'a [Point], usize)>,
     component: usize,
     unit: f64,
     work: &mut Work,
@@ -131,13 +129,10 @@ pub(super) fn feature_ending(
     selection::charge_source(work, &[points], unit)?;
     let mut evidence = source::verify_spur(capture, palette, points, unit)?;
     if evidence.decision == SourceDecision::Confirmed {
-        work.charge(backbone_graph.edges.len() as f64)?;
-        let excluded: Vec<_> = backbone_graph
-            .edges
-            .iter()
-            .map(|edge| edge.points.len() < 2)
-            .collect();
-        let backbone = continuation::Backbone::new(backbone_graph, &excluded, components, &[]);
+        work.charge(backbone_paths.len() as f64)?;
+        let backbone = continuation::Backbone::from_paths(
+            backbone_paths.filter(|(points, _)| points.len() >= 2),
+        );
         evidence.decision =
             continuation::check(capture, palette, points, unit, &backbone, component, work)?;
     }

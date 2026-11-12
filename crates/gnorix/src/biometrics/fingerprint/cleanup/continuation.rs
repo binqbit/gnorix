@@ -39,41 +39,51 @@ impl<'a> Backbone<'a> {
             .iter()
             .enumerate()
             .filter(|(id, _)| !excluded[*id])
-            .map(|(_, edge)| {
-                let mut bounds = [
-                    f64::INFINITY,
-                    f64::INFINITY,
-                    f64::NEG_INFINITY,
-                    f64::NEG_INFINITY,
-                ];
-                for point in &edge.points {
-                    bounds[0] = bounds[0].min(point.x());
-                    bounds[1] = bounds[1].min(point.y());
-                    bounds[2] = bounds[2].max(point.x());
-                    bounds[3] = bounds[3].max(point.y());
-                }
-                let mut positions = vec![0.0];
-                for pair in edge.points.windows(2) {
-                    positions.push(
-                        positions.last().copied().unwrap() + super::distance(pair[0], pair[1]),
-                    );
-                }
-                BackbonePath {
-                    points: &edge.points,
-                    component: components[edge.start],
-                    bounds,
-                    positions,
-                }
-            })
-            .collect();
-        let known_ends = confirmed
+            .map(|(_, edge)| (&edge.points[..], components[edge.start]));
+        let mut backbone = Self::from_paths(paths);
+        backbone.known_ends = confirmed
             .iter()
             .map(|&id| KnownEnd {
                 points: &graph.edges[id].points,
                 component: components[graph.edges[id].start],
             })
             .collect();
-        Self { paths, known_ends }
+        backbone
+    }
+
+    pub(super) fn from_paths(paths: impl Iterator<Item = (&'a [Point], usize)>) -> Self {
+        let paths = paths
+            .map(|(points, component)| {
+                let mut bounds = [
+                    f64::INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NEG_INFINITY,
+                ];
+                for point in points {
+                    bounds[0] = bounds[0].min(point.x());
+                    bounds[1] = bounds[1].min(point.y());
+                    bounds[2] = bounds[2].max(point.x());
+                    bounds[3] = bounds[3].max(point.y());
+                }
+                let mut positions = vec![0.0];
+                for pair in points.windows(2) {
+                    positions.push(
+                        positions.last().copied().unwrap() + super::distance(pair[0], pair[1]),
+                    );
+                }
+                BackbonePath {
+                    points,
+                    component,
+                    bounds,
+                    positions,
+                }
+            })
+            .collect();
+        Self {
+            paths,
+            known_ends: Vec::new(),
+        }
     }
 }
 

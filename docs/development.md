@@ -59,7 +59,7 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `scale.rs`, `scale/`, `full_scale.rs`, `full_scale/` | Bootstrap search, grayscale profiles, complete ridge-width measurement and local measurement support. |
 | `enhancement/` | Local normalization, intensity filtering, orientation tensors and reusable directional responses. |
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
-| `features/` | Source probes, geometric evidence and stress correspondence. |
+| `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
 
 ## Connecting algorithms
 

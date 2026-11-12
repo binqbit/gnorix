@@ -9,8 +9,8 @@ fn aggregation_retains_zero_and_unknown_without_renormalizing() {
     assert_eq!(combine(Some(1.0), None, 0.0), None);
 }
 
-use super::super::{LocalPalette, RidgeEdge, RidgeNode};
-use geometry::ArmPath;
+use super::super::{LocalPalette, RidgeCycle, RidgeEdge, RidgeNode};
+use geometry::{ArmPath, EndingBackbone};
 use sampling::{Sampler, Work};
 
 fn point(x: f64, y: f64) -> Point {
@@ -70,6 +70,14 @@ fn graph(paths: Vec<Vec<Point>>) -> RidgeGraph {
     graph
 }
 
+fn graph_paths(graph: &RidgeGraph) -> impl Iterator<Item = (&[Point], bool)> {
+    graph
+        .edges
+        .iter()
+        .map(|edge| (&edge.points[..], false))
+        .chain(graph.cycles.iter().map(|cycle| (&cycle.points[..], true)))
+}
+
 #[test]
 fn geometric_separation_grows_continuously_from_the_required_outer_window() {
     let policy = policy(8.0);
@@ -125,7 +133,7 @@ fn nearby_continuation_uses_a_path_tangent_instead_of_each_raster_step() {
         let graph = graph(vec![incoming.clone(), path]);
         let mut work = Work::default();
         let arms = geometry::arms(&graph, &policy, &mut work).unwrap();
-        geometry::continuation(0, &arms, &graph, &policy, &mut work)
+        geometry::continuation(0, &arms, graph_paths(&graph), &policy, &mut work)
             .unwrap()
             .unwrap()
     };
@@ -228,10 +236,67 @@ fn nearby_facing_end_of_the_same_long_edge_counts_as_continuation() {
     let arms = geometry::arms(&graph, &policy, &mut work).unwrap();
     // Evidence starts after the first ending's inspected 2R. The other end is
     // geometrically nearby even though both ends belong to the same graph edge.
-    let mut backbone = graph.clone();
-    backbone.edges[0].points[0] = point(34.0, 50.0);
-    let value = geometry::continuation(0, &arms, &backbone, &policy, &mut work)
+    let backbone = EndingBackbone::new(&graph, 0, 0, policy.branch_horizon_px);
+    let value = geometry::continuation(0, &arms, backbone.paths(), &policy, &mut work)
         .unwrap()
         .unwrap();
     assert!((value - (1.0 - 10.0 / 24.0)).abs() < 1e-12);
+}
+
+#[test]
+fn ending_backbone_borrows_other_paths_and_clips_either_terminal_arc() {
+    let mut graph = graph(vec![
+        vec![point(10.0, 10.0), point(30.0, 10.0), point(30.0, 30.0)],
+        vec![point(5.0, 10.0), point(0.0, 10.0)],
+    ]);
+    graph.cycles.push(RidgeCycle {
+        points: vec![point(40.0, 40.0), point(50.0, 40.0), point(45.0, 50.0)],
+    });
+    let original = graph.clone();
+    let policy = policy(8.0);
+    let arms = geometry::arms(&graph, &policy, &mut Work::default()).unwrap();
+
+    for (node, horizon, expected) in [
+        (
+            0,
+            16.0,
+            vec![point(26.0, 10.0), point(30.0, 10.0), point(30.0, 30.0)],
+        ),
+        (
+            1,
+            16.0,
+            vec![point(10.0, 10.0), point(30.0, 10.0), point(30.0, 14.0)],
+        ),
+        (0, 40.0, Vec::new()),
+    ] {
+        let backbone = EndingBackbone::new(&graph, node, 0, horizon);
+        let edges: Vec<_> = backbone.edges().collect();
+        assert_eq!(edges.len(), graph.edges.len());
+        assert_eq!(edges[0], (expected.as_slice(), graph.edges[0].start));
+        assert_eq!(edges[1].1, graph.edges[1].start);
+        assert!(std::ptr::eq(edges[1].0, graph.edges[1].points.as_slice()));
+
+        let paths: Vec<_> = backbone.paths().collect();
+        assert!(!paths[0].1);
+        assert!(!paths[1].1);
+        assert!(paths[2].1);
+        assert!(std::ptr::eq(paths[2].0, graph.cycles[0].points.as_slice()));
+
+        let mut owned = original.clone();
+        owned.edges[0].points = expected;
+        assert_eq!(paths, graph_paths(&owned).collect::<Vec<_>>());
+        assert_eq!(
+            geometry::continuation(node, &arms, backbone.paths(), &policy, &mut Work::default())
+                .unwrap(),
+            geometry::continuation(
+                node,
+                &arms,
+                graph_paths(&owned),
+                &policy,
+                &mut Work::default()
+            )
+            .unwrap()
+        );
+        assert_eq!(graph, original);
+    }
 }
