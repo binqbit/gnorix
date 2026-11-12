@@ -1,5 +1,6 @@
+use super::assembly::assemble;
 use super::*;
-use crate::biometrics::fingerprint::RidgeNode;
+use crate::biometrics::fingerprint::{NodeKind, RidgeCycle, RidgeEdge, RidgeNode};
 
 fn point(x: f64, y: f64) -> Point {
     Point::new(x, y).unwrap()

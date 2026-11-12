@@ -1,4 +1,4 @@
-use super::selection::components;
+use super::graph::components;
 use super::*;
 use std::collections::BTreeSet;
 

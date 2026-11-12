@@ -10,7 +10,8 @@ mod stability;
 
 pub use stability::{StabilityPolicy, StressCase};
 
-use super::{Capture, ExtractionConfig, FingerprintError, NodeKind, Preprocessed, RidgeGraph};
+use super::enhancement::Preprocessed;
+use super::{Capture, ExtractionConfig, FingerprintError, NodeKind, RidgeGraph};
 use crate::biometrics::geometry::Point;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,8 +112,20 @@ pub(super) fn assess(
     config: &ExtractionConfig,
 ) -> Result<FeatureAssessment, FingerprintError> {
     let stress = stability::assess(prepared, graph, unit_px, config)?;
+    let policy = assessment_policy(unit_px, config.min_contrast, &stress);
+    let mut candidates = evidence::assess(capture, &prepared.palette, graph, &policy)?;
+    apply_stability(&mut candidates, stress.matches)?;
+
+    Ok(FeatureAssessment { policy, candidates })
+}
+
+fn assessment_policy(
+    unit_px: f64,
+    contrast_reference: f64,
+    stress: &stability::StabilityAssessment,
+) -> FeaturePolicy {
     let source = super::SourcePolicy::for_unit(unit_px);
-    let policy = FeaturePolicy {
+    FeaturePolicy {
         reference_width_px: unit_px,
         branch_horizon_px: 2.0 * unit_px,
         tangent_support_px: source.tangent_radius_px,
@@ -121,17 +134,22 @@ pub(super) fn assess(
         continuation_search_px: 3.0 * unit_px,
         terminal_barrier_width_px: source.terminal_barrier_width_px,
         terminal_barrier_depth_px: source.terminal_barrier_depth_px,
-        contrast_reference: config.min_contrast,
+        contrast_reference,
         stability: stress.policy,
         stress_cases: stress.cases,
-    };
-    let mut candidates = evidence::assess(capture, &prepared.palette, graph, &policy)?;
-    if candidates.len() != stress.matches.len() {
+    }
+}
+
+fn apply_stability(
+    candidates: &mut [FeatureStrength],
+    matches: Vec<[Option<usize>; 8]>,
+) -> Result<(), FingerprintError> {
+    if candidates.len() != matches.len() {
         return Err(FingerprintError::InvalidTopology(
             "feature stability population mismatch",
         ));
     }
-    for (candidate, matches) in candidates.iter_mut().zip(stress.matches) {
+    for (candidate, matches) in candidates.iter_mut().zip(matches) {
         candidate.stress_matches = matches;
         candidate.stability = matches.iter().filter(|item| item.is_some()).count() as f64 / 8.0;
         if candidate.stability < 1.0 {
@@ -143,7 +161,7 @@ pub(super) fn assess(
             candidate.stability,
         );
     }
-    Ok(FeatureAssessment { policy, candidates })
+    Ok(())
 }
 
 fn combine(source: Option<f64>, geometry: Option<f64>, stability: f64) -> Option<f64> {

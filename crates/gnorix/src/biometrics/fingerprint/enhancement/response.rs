@@ -1,6 +1,8 @@
 //! Frozen directional source response reused by threshold-only stress cases.
 
-use super::{FingerprintError, Normalized, Orientation, RidgeMap, interpolate};
+use super::intensity::interpolate;
+use super::orientation::Orientation;
+use super::{FingerprintError, Normalized, RidgeMap};
 
 pub(in super::super) struct DirectionalResponse {
     width: usize,
@@ -95,6 +97,7 @@ pub(super) fn collect(
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::directional_ridges;
     use super::super::*;
 
     #[test]

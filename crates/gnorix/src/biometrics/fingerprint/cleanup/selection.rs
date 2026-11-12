@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::photometry;
 use super::{
-    Capture, FingerprintError, LocalPalette, LoopAssessment, LoopEvidence, NO_SOURCE, NodeKind,
-    Point, RidgeGraph, RidgeMap, SourceDecision, SpurAssessment, SpurEvidence, SpurRemoval, Work,
+    Capture, FingerprintError, LocalPalette, LoopAssessment, LoopEvidence, NodeKind, Point,
+    RidgeGraph, RidgeMap, SourceDecision, SpurAssessment, SpurEvidence, SpurRemoval, Work,
     continuation, distance, graph, pixel, source,
 };
 
@@ -45,7 +45,7 @@ pub(super) fn assess(
         skeleton,
         observed,
         unit,
-        incidence: incidence(&observed.graph),
+        incidence: graph::incidence(&observed.graph),
     };
     let mut work = Work::default();
     let loops = assess_loops(&inputs, &mut work)?;
@@ -99,7 +99,7 @@ fn assess_spurs(
     );
     let graph = &observed.graph;
     let maximum = source::SourcePolicy::for_unit(unit).max_ridge_width_px;
-    let components = components(graph, incidence);
+    let components = graph::components(graph, incidence);
     let mut total = vec![0; graph.nodes.len()];
     let mut eligible = vec![0; graph.nodes.len()];
     let mut candidates = Vec::new();
@@ -341,42 +341,4 @@ fn oriented(points: &[Point], reverse: bool) -> Vec<Point> {
     } else {
         points.to_vec()
     }
-}
-
-fn incidence(graph: &RidgeGraph) -> Vec<Vec<usize>> {
-    let mut result = vec![Vec::new(); graph.nodes.len()];
-    for (id, edge) in graph.edges.iter().enumerate() {
-        result[edge.start].push(id);
-        result[edge.end].push(id);
-    }
-    result
-}
-
-pub(super) fn components(source: &RidgeGraph, incidence: &[Vec<usize>]) -> Vec<usize> {
-    let mut labels = vec![NO_SOURCE; source.nodes.len()];
-    for seed in 0..labels.len() {
-        if labels[seed] != NO_SOURCE {
-            continue;
-        }
-        labels[seed] = seed;
-        let mut queue = vec![seed];
-        let mut cursor = 0;
-        while cursor < queue.len() {
-            let node = queue[cursor];
-            for &id in &incidence[node] {
-                let edge = &source.edges[id];
-                let other = if edge.start == node {
-                    edge.end
-                } else {
-                    edge.start
-                };
-                if labels[other] == NO_SOURCE {
-                    labels[other] = seed;
-                    queue.push(other);
-                }
-            }
-            cursor += 1;
-        }
-    }
-    labels
 }

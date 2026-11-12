@@ -1,0 +1,238 @@
+//! Compose source measurement, extraction, reconstruction and feature evidence.
+
+use std::fmt;
+
+use super::enhancement::Preprocessed;
+use super::{
+    BootstrapScale, Capture, ClarityMap, CurveConfig, CurveGeometry, ExtractionConfig,
+    FeatureAssessment, FingerprintError, FullScale, GapJoin, GapPolicy, LocalPalette, PathOrigin,
+    Point, RidgeCleanup, RidgeGraph, RidgeMap, SmoothingAdjustment, SmoothingControls,
+    WidthConsistency, clarity, cleanup, curve, enhancement, features, full_scale, graph, repair,
+    scale, smoothing, thinning,
+};
+
+/// Geometric reconstruction with explicit links back to observed structure.
+///
+/// Source-supported spur and narrow-loop cleanup precedes smoothing and joins.
+/// The unchanged observed graph and all removed-path provenance remain available.
+/// Geometry describes these resulting paths without a second smoothing pass.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourReconstruction {
+    pub cleanup: RidgeCleanup,
+    pub smoothing: SmoothingControls,
+    pub gap_policy: GapPolicy,
+    pub graph: RidgeGraph,
+    /// Cleanup-stage node index for each retained node in `graph`.
+    pub node_sources: Vec<usize>,
+    pub edge_origins: Vec<PathOrigin>,
+    pub cycle_origins: Vec<PathOrigin>,
+    pub joins: Vec<GapJoin>,
+    /// One adjustment per cleanup-stage graph edge, before joining.
+    pub edge_smoothing: Vec<SmoothingAdjustment>,
+    /// One adjustment per cleanup-stage isolated cycle.
+    pub cycle_smoothing: Vec<SmoothingAdjustment>,
+    pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+    pub cycle_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+}
+
+/// Sensitive diagnostics and structure from one capture; no match score.
+pub struct Fingerprint {
+    /// Full-source ridge-width measurement; `unit_px` is the common length unit.
+    pub scale: FullScale,
+    /// Provisional pattern search used to initialize raw measurement windows.
+    pub bootstrap: BootstrapScale,
+    /// Thickness consistency around the full-pass arithmetic mean.
+    pub width_consistency: [WidthConsistency; 3],
+    /// Local dark/light reference levels measured on original grayscale.
+    pub palette: LocalPalette,
+    /// Intensity relative to the local dark/light midpoint, clipped to [-3, 3].
+    pub normalized: Vec<f32>,
+    /// Spatially denoised normalized intensity used for ridge detection.
+    pub denoised: Vec<f32>,
+    /// Orientation coherence in [0, 1], not a confidence probability.
+    pub coherence: Vec<f32>,
+    /// Diagnostic clarity of the original source; does not gate extraction.
+    pub clarity: ClarityMap,
+    pub binary: RidgeMap,
+    pub skeleton: RidgeMap,
+    pub graph: RidgeGraph,
+    pub contours: ContourReconstruction,
+    /// Evidence ranks for every original node and isolated cycle. These
+    /// diagnostics neither remove candidates nor affect contour reconstruction.
+    pub feature_strength: FeatureAssessment,
+    /// One entry per graph edge, in the same order. An unresolved descriptor
+    /// retains the graph path and its error rather than silently dropping it.
+    pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+    /// One entry per isolated cycle, in the same order.
+    pub cycle_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
+}
+
+impl fmt::Debug for Fingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Fingerprint")
+            .field("width", &self.binary.width())
+            .field("height", &self.binary.height())
+            .field("biometrics", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Extracts ridge structure, smooth contours and source-supported short joins.
+///
+/// The image scale is estimated before any scale-dependent filtering. This is a transparent native
+/// processing pipeline, not an exact port of SourceAFIS or a calibrated matcher.
+/// Filtering and thresholding can change connectivity; returned topology is
+/// observed in the processed image. Explicitly invalid capture pixels are never
+/// bridged, and the tracer preserves the resulting closed components.
+pub fn extract(
+    capture: &Capture,
+    config: &ExtractionConfig,
+) -> Result<Fingerprint, FingerprintError> {
+    let bootstrap = scale::estimate(capture, config)?;
+    let scale = full_scale::measure(capture, config, &bootstrap)?;
+    let width_consistency = scale.width_consistency()?;
+    let clarity = clarity::assess(capture, bootstrap.ridge_period_px)?;
+    let prepared = enhancement::preprocess(capture, config, bootstrap.ridge_period_px)?;
+    let skeleton = thinning::thin(&prepared.map)?;
+    let traced = graph::trace_with_pixels(&skeleton)?;
+    let graph = &traced.graph;
+    let curve_config = CurveConfig {
+        sample_spacing: scale.unit_px / 4.0,
+        smoothing_sigma: scale.unit_px / 2.0,
+    };
+    let (edge_geometry, cycle_geometry) = describe_graph(graph, curve_config);
+    let contours = reconstruct_contours(capture, &prepared, &skeleton, &traced, scale.unit_px)?;
+    let feature_strength = features::assess(capture, &prepared, graph, scale.unit_px, config)?;
+
+    Ok(Fingerprint {
+        scale,
+        bootstrap,
+        width_consistency,
+        palette: prepared.palette,
+        normalized: prepared.normalized,
+        denoised: prepared.denoised,
+        coherence: prepared.coherence,
+        clarity,
+        binary: prepared.map,
+        skeleton,
+        graph: traced.graph,
+        contours,
+        feature_strength,
+        edge_geometry,
+        cycle_geometry,
+    })
+}
+
+/// Traverses the raw measurement centerlines and measures original ridge widths.
+/// The arithmetic mean weights each portion by its represented source length.
+/// Three-ridge profiles confirm local regions; unmeasurable portions remain in
+/// coverage instead of receiving an inferred width.
+pub fn estimate_scale(
+    capture: &Capture,
+    config: &ExtractionConfig,
+) -> Result<FullScale, FingerprintError> {
+    let bootstrap = scale::estimate(capture, config)?;
+    full_scale::measure(capture, config, &bootstrap)
+}
+
+type CurveMeasurements = Vec<Result<CurveGeometry, FingerprintError>>;
+
+fn describe_graph(
+    graph: &RidgeGraph,
+    config: CurveConfig,
+) -> (CurveMeasurements, CurveMeasurements) {
+    describe_paths(graph, |points, closed| {
+        curve::describe(points, closed, config)
+    })
+}
+
+fn reconstruct_contours(
+    capture: &Capture,
+    prepared: &Preprocessed,
+    skeleton: &RidgeMap,
+    observed: &graph::TracedGraph,
+    unit_px: f64,
+) -> Result<ContourReconstruction, FingerprintError> {
+    let cleaned = cleanup::clean(capture, &prepared.palette, skeleton, observed, unit_px)?;
+    let smoothed = smoothing::smooth(&cleaned.result.graph, &prepared.map, unit_px)?;
+    let repaired = repair::reconstruct(
+        capture,
+        &prepared.palette,
+        &smoothed.graph,
+        &cleaned.skeleton,
+        unit_px,
+    )?;
+    let smoothing = SmoothingControls::for_unit(unit_px)?;
+    let spacing = smoothing.sample_spacing_px;
+    let (edge_geometry, cycle_geometry) = describe_paths(&repaired.graph, |points, closed| {
+        curve::describe_smoothed(points, closed, spacing)
+    });
+
+    Ok(ContourReconstruction {
+        cleanup: cleaned.result,
+        smoothing,
+        gap_policy: repaired.policy,
+        graph: repaired.graph,
+        node_sources: repaired.node_sources,
+        edge_origins: repaired.edge_origins,
+        cycle_origins: repaired.cycle_origins,
+        joins: repaired.joins,
+        edge_smoothing: smoothed.edge_adjustments,
+        cycle_smoothing: smoothed.cycle_adjustments,
+        edge_geometry,
+        cycle_geometry,
+    })
+}
+
+fn describe_paths(
+    graph: &RidgeGraph,
+    describe: impl Fn(&[Point], bool) -> Result<CurveGeometry, FingerprintError>,
+) -> (CurveMeasurements, CurveMeasurements) {
+    let edges = graph
+        .edges
+        .iter()
+        .map(|edge| describe(&edge.points, edge.points.first() == edge.points.last()))
+        .collect();
+    let cycles = graph
+        .cycles
+        .iter()
+        .map(|cycle| describe(&cycle.points, true))
+        .collect();
+    (edges, cycles)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{NodeKind, RidgeEdge, RidgeNode};
+    use super::*;
+
+    #[test]
+    fn returning_to_a_junction_does_not_close_distinct_edge_ports() {
+        let points = [(1.0, 0.0), (2.0, 1.0), (3.0, 0.0)]
+            .into_iter()
+            .map(|(x, y)| Point::new(x, y).unwrap())
+            .collect();
+        let graph = RidgeGraph {
+            nodes: vec![RidgeNode {
+                position: Point::new(2.0, 0.0).unwrap(),
+                kind: NodeKind::Junction,
+                touches_unobserved: false,
+            }],
+            edges: vec![RidgeEdge {
+                start: 0,
+                end: 0,
+                points,
+            }],
+            cycles: vec![],
+        };
+        let (edges, _) = describe_graph(
+            &graph,
+            CurveConfig {
+                sample_spacing: 0.2,
+                smoothing_sigma: 0.1,
+            },
+        );
+        assert_eq!(edges[0].as_ref().unwrap().chord_length, 2.0);
+        assert!((edges[0].as_ref().unwrap().arc_length - 2.0 * 2.0_f64.sqrt()).abs() < 1e-12);
+    }
+}

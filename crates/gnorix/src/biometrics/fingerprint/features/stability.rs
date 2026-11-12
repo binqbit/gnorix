@@ -2,7 +2,8 @@
 
 mod matching;
 
-use super::super::{ExtractionConfig, FingerprintError, Preprocessed, RidgeGraph, graph, thinning};
+use super::super::enhancement::Preprocessed;
+use super::super::{ExtractionConfig, FingerprintError, RidgeGraph, graph, thinning};
 
 /// One actual stress graph; feature IDs are its nodes followed by its cycles.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,7 +1,7 @@
 //! Bounded original-source probes with explicit missing-support accounting.
 
 use super::super::{LocalPalette, photometry};
-use super::geometry::{distance, lerp, segments};
+use super::geometry::{self, ArmPath, distance, lerp, segments};
 use super::{Capture, FeaturePolicy, FingerprintError, Point};
 
 const MAX_WORK: usize = 200_000_000;
@@ -261,4 +261,125 @@ pub(super) fn forward_observed(
         }
     }
     Ok(true)
+}
+
+/// Mean light margin across each pair's transverse connector, integrated over
+/// the outer R of both branches. A single bright pixel contributes only its
+/// represented width and length. The strongest separated pair is useful for a
+/// fork; the weakest arm still limits both overall source and geometry support.
+pub(super) fn separation(
+    sampler: &mut Sampler<'_>,
+    arms: &[ArmPath],
+    policy: &FeaturePolicy,
+) -> Result<Option<f64>, FingerprintError> {
+    let mut strongest = 0.0_f64;
+    let mut complete = true;
+    for (i, a) in arms.iter().enumerate() {
+        for b in &arms[i + 1..] {
+            let upper = a.length.min(b.length).min(policy.branch_horizon_px);
+            if upper <= policy.reference_width_px {
+                continue;
+            }
+            let span = upper - policy.reference_width_px;
+            let count = intervals(span, policy.sample_spacing_px)?;
+            sampler
+                .work
+                .charge(count.saturating_mul(a.points.len() + b.points.len()))?;
+            let mut sum = 0.0;
+            for index in 0..count {
+                let along = policy.reference_width_px + span * (index as f64 + 0.5) / count as f64;
+                let first = geometry::at(&a.points, along);
+                let second = geometry::at(&b.points, along);
+                complete &= sampler.observed_segment(first, second)?;
+                let endpoints = (sampler.sample(first)?, sampler.sample(second)?);
+                let width = geometry::distance(first, second);
+                if width == 0.0 {
+                    continue;
+                }
+                let transverse = intervals(width, policy.sample_spacing_px)?;
+                let mut light = 0.0;
+                for column in 0..transverse {
+                    let point =
+                        geometry::lerp(first, second, (column as f64 + 0.5) / transverse as f64);
+                    if let Some(sample) = sampler.sample(point)? {
+                        light += (1.0 - 2.0 * sample.dark).max(0.0);
+                    } else {
+                        complete = false;
+                    }
+                }
+                if let (Some(a), Some(b)) = endpoints {
+                    let dark_ends = (2.0 * a.dark - 1.0)
+                        .max(0.0)
+                        .min((2.0 * b.dark - 1.0).max(0.0));
+                    sum += dark_ends * light / transverse as f64;
+                } else {
+                    complete = false;
+                }
+            }
+            strongest = strongest.max(sum / count as f64 * span / policy.reference_width_px);
+        }
+    }
+    Ok(complete.then_some(strongest.clamp(0.0, 1.0)))
+}
+
+pub(super) fn interior_light(
+    sampler: &mut Sampler<'_>,
+    points: &[Point],
+    policy: &FeaturePolicy,
+) -> Result<Option<f64>, FingerprintError> {
+    let (mut left, mut top, mut right, mut bottom) = (
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for point in points {
+        left = left.min(point.x());
+        top = top.min(point.y());
+        right = right.max(point.x());
+        bottom = bottom.max(point.y());
+    }
+    let columns = intervals(right - left, policy.sample_spacing_px)?;
+    let rows = intervals(bottom - top, policy.sample_spacing_px)?;
+    sampler.work.charge(
+        columns
+            .checked_mul(rows)
+            .and_then(|n| n.checked_mul(points.len()))
+            .ok_or(FingerprintError::WorkLimit)?,
+    )?;
+    let (mut total, mut sum, mut complete) = (0_usize, 0.0, true);
+    for row in 0..rows {
+        for column in 0..columns {
+            let p = Point::new(
+                left + (right - left) * (column as f64 + 0.5) / columns as f64,
+                top + (bottom - top) * (row as f64 + 0.5) / rows as f64,
+            )
+            .unwrap();
+            if !inside(points, p) {
+                continue;
+            }
+            total += 1;
+            if let Some(sample) = sampler.sample(p)? {
+                sum += 1.0 - sample.dark;
+            } else {
+                complete = false;
+            }
+        }
+    }
+    if total == 0 {
+        return Ok(Some(0.0));
+    }
+    Ok(complete.then_some(sum / total as f64))
+}
+
+fn inside(points: &[Point], p: Point) -> bool {
+    let mut inside = false;
+    for (a, b) in geometry::segments(points, true) {
+        if (a.y() > p.y()) != (b.y() > p.y())
+            && p.x() < (b.x() - a.x()) * (p.y() - a.y()) / (b.y() - a.y()) + a.x()
+        {
+            inside = !inside;
+        }
+    }
+    inside
 }

@@ -48,6 +48,19 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 
 Locations in this table are relative to `crates/gnorix`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipeline functions are `enrollment::enroll`, `authorization::sign` and `authorization::verify`.
 
+### Fingerprint implementation layout
+
+The public entry points and types are exported by `src/biometrics/fingerprint/mod.rs`. Implementation modules own their data and operations together:
+
+| Location within `src/biometrics/fingerprint/` | Responsibility |
+|---|---|
+| `pipeline.rs` | Compose measurement, extraction, contour reconstruction and feature assessment; assemble the capture result. |
+| `map.rs`, `graph.rs` | Binary maps, boundary provenance, traced graph data, shared incidence and connected-component traversal. |
+| `scale.rs`, `scale/`, `full_scale.rs`, `full_scale/` | Bootstrap search, grayscale profiles, complete ridge-width measurement and local measurement support. |
+| `enhancement/` | Local normalization, intensity filtering, orientation tensors and reusable directional responses. |
+| `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
+| `features/` | Source probes, geometric evidence and stress correspondence. |
+
 ## Connecting algorithms
 
 The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
