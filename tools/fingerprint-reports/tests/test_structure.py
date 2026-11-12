@@ -15,8 +15,10 @@ from matplotlib.collections import LineCollection, PathCollection
 from matplotlib.text import Text
 from PIL import Image
 
+from gnorix_reports.feature_strength_render import candidate_colors, render_feature_strength
 from gnorix_reports.snapshot import load_snapshot
 from gnorix_reports.structure import _save_figure, render_structure
+from gnorix_reports.structure_render import render_structure_overlay
 
 
 def fixture():
@@ -410,6 +412,10 @@ class StructureTests(unittest.TestCase):
             np.testing.assert_array_equal(axis.images[0].get_array(), expected)
         self.assertIn("Denoised intensity", self.labels(self.figures[0]))
         overlay = self.figures[1].axes[0]
+        expected_priorities = {
+            tuple(candidate["position"]): candidate["priority"]
+            for candidate in fixture()["feature_strength"]["candidates"]
+        }
         np.testing.assert_array_equal(overlay.images[0].get_array(), self.source)
         self.assertEqual(overlay.images[0].get_alpha(), 1)
         self.assertEqual(tuple(overlay.images[0].get_extent()), (-0.5, 31.5, 23.5, -0.5))
@@ -419,22 +425,26 @@ class StructureTests(unittest.TestCase):
             if isinstance(collection, LineCollection):
                 np.testing.assert_allclose(collection.get_colors()[:, 3], 0.9)
             else:
-                self.assertEqual(collection.get_alpha(), 0.4)
+                self.assertIsNone(collection.get_alpha())
+                for position, color in zip(collection.get_offsets(), collection.get_edgecolors()):
+                    self.assertAlmostEqual(
+                        color[3], 0.4 + 0.5 * math.sqrt(expected_priorities[tuple(position)])
+                    )
         text = self.labels(self.figures[1])
         for expected in (
-            "Paths: 3",
-            "isolated cycles: 1",
+            "open paths: 3",
+            "closed contours: 1",
             "Graph cycle rank: 1",
             "Full mean ridge width: 1 R = 2 px",
-            "endings: 3",
-            "junctions: 1",
+            "Endings: 3",
+            "bifurcations: 1",
             "isolated nodes: 1",
-            "curves without geometry: 2",
+            "changed features not rescored: 0",
             "source px",
-            "synthetic unresolved tangent",
             "Hollow + ×",
         ):
             self.assertIn(expected, text)
+        self.assertNotIn("synthetic unresolved tangent", text)
         self.assertIn("All 2 observations", self.labels(self.figures[2]))
         self.assertIn("all 3 measurements", self.labels(self.figures[3]))
         self.assertIn("all 2 measurements", self.labels(self.figures[3]))
@@ -445,15 +455,18 @@ class StructureTests(unittest.TestCase):
         self.assertIn("local seed-class means", self.labels(self.figures[4]))
         self.assertIn("Described path length: 18 R", self.labels(self.figures[0]))
 
-    def test_error_curve_and_closed_cycle_remain_visible_with_unobserved_node_marked(self):
+    def test_refined_paths_and_closed_cycle_remain_visible_with_unobserved_node_marked(self):
         data = fixture()
+        data["contours"]["edges"][0]["points"][1][1] += 0.1
+        data["contours"]["smoothing"]["edges"][0].update(
+            max_displacement_px=0.1, smoothing_applied=True, applied_fraction=1
+        )
         self.render(data)
         axis = self.figures[1].axes[0]
         lines = [artist for artist in axis.collections if isinstance(artist, LineCollection)]
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(len(lines), 2)
         expected = (
-            [data["edges"][0]["points"]],
-            [data["edges"][1]["points"], data["edges"][2]["points"]],
+            [edge["points"] for edge in data["contours"]["edges"]],
             [data["cycles"][0]["points"] + [[20, 10]]],
         )
         for collection, paths in zip(lines, expected, strict=True):
@@ -466,12 +479,87 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(len(boundary), 2)  # Hollow kind marker plus cross.
         self.assertEqual(len(boundary[0].get_facecolors()), 0)
 
+    def test_both_overlays_show_all_priorities_with_source_ids_and_fixed_scale(self):
+        data = fixture()
+        data["nodes"].reverse()  # Source IDs are noncontiguous, not candidate ordinals.
+        data["contours"] = unchanged_contours(data)
+        # Every stage uses different IDs; source_node is relative to the preceding stage.
+        cleaned_ids = {node["id"]: node["id"] + 100 for node in data["cleanup"]["nodes"]}
+        for node in data["cleanup"]["nodes"]:
+            node["id"] = cleaned_ids[node["id"]]
+        for edge in data["cleanup"]["edges"]:
+            for key in ("start", "end"):
+                edge[key] = cleaned_ids[edge[key]]
+        for node in data["contours"]["nodes"]:
+            node["source_node"] = cleaned_ids[node["source_node"]]
+            node["id"] += 1000
+        for edge in data["contours"]["edges"]:
+            for key in ("start", "end"):
+                edge[key] += 1000
+        data["cleanup"]["cycles"][0]["id"] = 87
+        data["contours"]["cycles"][0]["id"] = 901
+        data["contours"]["cycles"][0]["source_cycles"] = [87]
+        data["contours"]["smoothing"]["cycles"][0]["source_cycle"] = 87
+        for candidate, score in zip(
+            data["feature_strength"]["candidates"], (0, 0.15, 0.3, None, 0.45, 0.6), strict=True
+        ):
+            candidate["strength"] = score
+            candidate["priority"] = (
+                None if score is None else score * candidate["neighborhood"]["factor"]
+            )
+            if score is None:
+                candidate.update(
+                    source_support=None,
+                    source_coverage=0.5,
+                    reasons=["missing_source_support", "stress_sensitive"],
+                )
+            else:
+                candidate["context"]["support"] = score / 0.675
+                if score == 0:
+                    candidate["reasons"].append("unconfirmed_context")
+        # Projection cannot depend on arrays sharing order across graph stages.
+        data["cleanup"]["nodes"].reverse()
+        snapshot = load_snapshot(self.write(data))
+        candidates = snapshot.feature_strength.candidates
+        colors = candidate_colors(candidates)
+        expected = {candidate.position: color for candidate, color in zip(candidates, colors)}
+        boundary = {(node.x, node.y) for node in snapshot.nodes if node.touches_unobserved}
+        figures = (
+            render_structure_overlay(snapshot, {"source": self.source}),
+            render_feature_strength(snapshot.feature_strength, self.source),
+        )
+        try:
+            for index, figure in enumerate(figures):
+                axis = figure.axes[0]
+                np.testing.assert_array_equal(axis.images[0].get_array(), self.source)
+                self.assertEqual(axis.images[0].get_alpha(), 1)
+                seen = []
+                for artist in axis.collections:
+                    if not isinstance(artist, PathCollection):
+                        continue
+                    for position, color in zip(artist.get_offsets(), artist.get_edgecolors()):
+                        position = tuple(position)
+                        seen.append(position)
+                        np.testing.assert_allclose(color, expected[position])
+                        if index == 0 and not len(artist.get_facecolors()):
+                            self.assertIn(position, boundary)
+                self.assertEqual(set(seen), set(expected))
+                for position in expected:
+                    self.assertEqual(
+                        seen.count(position), 2 if index == 0 and position in boundary else 1
+                    )
+                self.assertEqual(figure.axes[1].get_ylim(), (0, 1))
+                self.assertIn("0 = dim, 1 = bright", figure.axes[1].get_ylabel())
+        finally:
+            for figure in figures:
+                plt.close(figure)
+
     def test_empty_graph_still_produces_structure_and_scale_reports(self):
         data = fixture()
         data.update(nodes=[], edges=[], cycles=[])
         data["contours"] = unchanged_contours(data)
         self.assertEqual(len(self.render(data)), 9)
-        self.assertIn("No extracted graph structure", self.labels(self.figures[1]))
+        self.assertIn("No retained graph structure", self.labels(self.figures[1]))
         self.assertIn("Graph cycle rank: 0", self.labels(self.figures[1]))
         self.assertEqual(len(self.figures[1].axes[0].collections), 0)
 
@@ -508,7 +596,7 @@ class StructureTests(unittest.TestCase):
         self.render(data)
         self.assertIn("Graph cycle rank: 3", self.labels(self.figures[0]))
         self.assertIn("Graph cycle rank: 3", self.labels(self.figures[1]))
-        self.assertIn("isolated cycles: 1", self.labels(self.figures[1]))
+        self.assertIn("closed contours: 1", self.labels(self.figures[1]))
 
     def test_denoised_image_is_required_and_decoded_before_output(self):
         data = fixture()

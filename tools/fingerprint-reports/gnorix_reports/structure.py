@@ -97,7 +97,7 @@ def _load_images(snapshot, stack):
 def _figures(snapshot, images, palette, clarity_maps, alpha):
     """Construct one figure at a time in REPORT_FILES order to bound memory."""
     yield render_overview(snapshot, images)
-    yield render_structure_overlay(snapshot, images, alpha)
+    yield render_structure_overlay(snapshot, images)
     yield render_full_scale(snapshot.scale, images, alpha)
     yield render_scale_analysis(snapshot.bootstrap, images["source"], alpha)
     yield render_normalization_analysis(snapshot.normalization, palette, images)

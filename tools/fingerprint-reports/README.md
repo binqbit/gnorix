@@ -38,7 +38,7 @@ reports/fingerprint/
 | Figure | Content |
 |---|---|
 | `overview.png` | Source, normalization, denoising, coherence, usable region, binary ridges and skeleton, with measurement summaries. |
-| `structure-overlay.png` | Observed paths and ending/junction/isolated-node candidates, including unknown continuation. |
+| `structure-overlay.png` | Cleaned, reconstructed paths with surviving feature markers and their original priority; changed feature types remain explicitly unassessed. |
 | `scale-analysis.png` | Full-source length-weighted mean ridge width R, measured/unmeasured coverage and width consistency. |
 | `bootstrap-analysis.png` | Initial ridge triples, provisional widths and period, and original grayscale measurements. |
 | `normalization-analysis.png` | Local dark/light reference maps, supported regions and normalization behavior. |
@@ -65,7 +65,7 @@ Contour opacity is `0.4 + 0.5 × sqrt(clarity)`: a fixed **40–90%** range, ind
 
 ## Feature strength and priority
 
-The native assessment keeps every original ending, bifurcation, higher-degree junction, isolated node and isolated cycle. `feature-strength.png` includes zero scores, unknown evidence and candidates later removed by cleanup.
+The native assessment keeps every original ending, bifurcation, higher-degree junction, isolated node and isolated cycle. `feature-strength.png` includes zero scores, unknown evidence and candidates later removed by cleanup. The main `structure-overlay.png` follows final contours and both provenance transitions to show surviving features. Changed feature types/degrees remain gray and unassessed; their old scores are not reassigned to a new shape.
 
 Extended source-confirmed context C is the main evidence. It follows required arms over up to 4R, with 2R context shown for comparison, and checks actual ridge/flank separation, continuity and feature-specific valleys or termination. A weak local contrast does not veto a consistently supported structure. Source-confirmed continuation can cross an incidental graph node; ambiguous or missing continuation stays explicit. These observations do not edit the extracted or reconstructed paths.
 
@@ -81,11 +81,13 @@ priority = Q × N
 
 The neighborhood is a disk of radius 3R. Other original candidates contribute squared taper weights `(1 - distance/(3R))²` inside that radius. Source-mask and frame coverage limit isolation credit; N remains between 0.5 and 1. Crowding affects priority, not intrinsic strength Q, and cannot turn a lone artifact into strong evidence. Missing required local/context evidence yields unknown Q and priority. These are inspectable engineering scores, not calibrated recognition probabilities.
 
+Both figures use distinct candidate shapes with a fixed 0–1 viridis scale for final priority. Opacity is `0.4 + 0.5 × sqrt(priority)`, within 40–90%, independent of `--overlay-alpha`. Gray at 40% means unavailable priority; measured zero has the lowest score color. The structural overlay retains hollow markers with × for unknown continuation. Path visibility follows regional clarity, while the original image stays fully opaque.
+
 The diagnostic figure shows C/P/G/T/Q/priority distributions, C2R/C4R, per-arm extent and source separation, continuity, stop reasons, graded ending components, neighborhood evidence and the final priority. Exact native measurements remain in `data/features.json`. Python validates the versioned contract, graph references, formulas and neighborhood counts against exported positions. It does not resample source pixels or compute feature strength.
 
 ## Display controls
 
-- `--overlay-alpha 0.5`: opacity of maps, measurement overlays, structural node markers and removed-artifact annotations in `[0, 1]`. Clarity-colored lines and priority-colored feature markers use their fixed 40–90% range. Default: 0.5.
+- `--overlay-alpha 0.5`: opacity of maps, measurement overlays and removed-artifact annotations in `[0, 1]`. Clarity-colored lines and priority-colored feature markers use their fixed 40–90% range. Default: 0.5.
 - `--dpi 160`: PNG export resolution from 50 to 600. Default: 160.
 
 These options change presentation only. They do not change ridge extraction, matching tolerances or the source-coordinate system. The command generates PNG figures only.

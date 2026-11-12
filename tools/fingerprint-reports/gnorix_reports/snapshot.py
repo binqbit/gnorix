@@ -17,6 +17,7 @@ from .full_scale import FullScale, validate_full_scale
 from .images import MAX_FRAME_PIXELS, MAX_FRAME_SIDE
 from .normalization import IMAGE_KEYS, Normalization, validate_normalization
 from .scale import ScaleAnalysis, validate_scale
+from .structure_features import FinalStructure, project_final_structure
 from .validation import array_value, finite_number, identifier_value, object_value
 
 SCHEMA = "gnorix.ridge-extraction.v1"
@@ -74,6 +75,7 @@ class StructureSnapshot:
     contours: Contours
     clarity: Clarity
     feature_strength: FeatureStrength
+    final_structure: FinalStructure
 
 
 def load_snapshot(path: Path) -> StructureSnapshot:
@@ -138,6 +140,13 @@ def load_snapshot(path: Path) -> StructureSnapshot:
         retained_unconfirmed_edges=cleanup.retained_unconfirmed_edges,
         loops=cleanup.loops,
     )
+    refined = data["contours"]
+    refined_rank = _graph_cycle_rank(
+        {node["id"] for node in contours.nodes}, refined["edges"], len(refined["cycles"])
+    )
+    final_structure = project_final_structure(
+        feature_strength, cleanup, contours, refined["edges"], refined_rank
+    )
     return StructureSnapshot(
         width,
         height,
@@ -154,6 +163,7 @@ def load_snapshot(path: Path) -> StructureSnapshot:
         contours,
         clarity,
         feature_strength,
+        final_structure,
     )
 
 

@@ -157,7 +157,7 @@ def _write_readme(staging: Path) -> None:
 
 Start with [the overview](overview.png). This folder contains the latest successful analysis.
 
-- [Observed structure](structure-overlay.png)
+- [Cleaned structure and surviving features](structure-overlay.png)
 - [Full-source width measurement](scale-analysis.png)
 - [Bootstrap profiles](bootstrap-analysis.png)
 - [Local normalization](normalization-analysis.png)
@@ -183,7 +183,7 @@ Native mean clarity over supported pixels: **{mean_text}**.
 Clarity support: **{clarity["supported_pixels"]} / {clarity["total_pixels"]} pixels**.
 Original feature candidates: **{len(data["feature_strength"]["candidates"])}**.
 
-Vermillion dashed paths show removed terminal spurs and duplicate loop arms.
+Vermillion dashed paths in the comparison show removed terminal spurs and duplicate loop arms.
 An interior light valley must persist for at least R/3 to protect a narrow loop from collapse;
 width, source support and the other cleanup checks still apply.
 Overlays retain source coordinates. Green joins were accepted using image evidence;
@@ -199,6 +199,9 @@ Faint dotted originals in the comparison detail use 55% of line opacity as a ref
 Native grid-anchor scores are contrast × separation × repetition, then interpolated
 on a fixed 0–1 scale. Components interpolate separately; support can include flat background.
 
+The main structural overlay uses cleaned, reconstructed paths and surviving markers.
+Removed artifacts and joined endings are absent; changed feature types or degrees
+remain gray and unassessed. Surviving unchanged types show their original priority.
 The dedicated feature-strength figure retains every original node and isolated-cycle
 candidate, including weak candidates and candidates later removed by cleanup. It shows
 native 4R context C, local source evidence P, local geometry G and perturbation stability T.
@@ -212,6 +215,9 @@ curved source continuation, and their combined maximum. A partial cap weakens th
 score continuously; a source-backed continuation limits ending support. Missing
 required source evidence remains unknown. These scores do not relax strict cleanup.
 An arm's graph-ending stop is an extraction endpoint, not a confirmed source termination.
+Both the structural overlay and dedicated strength figure show higher priority as brighter
+feature markers, with fixed opacity 40% + 50% × sqrt(priority). The 0–1 color scale is the
+same for every image. Map/annotation opacity does not change these markers.
 Unknown priority is gray; measured zero uses the bottom of the fixed 0–1 color scale.
 Line opacity shows local image clarity, independently of feature strength.
 These are diagnostic measurements, not probabilities of anatomical correctness or identity.

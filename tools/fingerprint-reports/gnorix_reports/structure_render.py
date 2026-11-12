@@ -1,7 +1,6 @@
-"""Draw supplied observed graphs and processing stages without recomputing them."""
+"""Draw supplied final graph features and original processing diagnostics."""
 
 import math
-import textwrap
 
 import matplotlib
 
@@ -12,13 +11,13 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
 from .clarity import OPACITY_LABEL, UNKNOWN_COLOR, clarity_lines
+from .feature_strength_render import (
+    MARKER_OPACITY_LABEL,
+    add_priority_colorbar,
+    draw_feature_markers,
+    feature_legend_handles,
+)
 from .snapshot import PROCESSING_STAGES
-
-_KINDS = {
-    "ending": ("o", "#0072b2", "Ending candidate"),
-    "junction": ("^", "#d55e00", "Junction candidate"),
-    "isolated": ("s", "#8a4c99", "Isolated node"),
-}
 
 
 def _image_axes(axis, image, snapshot):
@@ -44,7 +43,7 @@ def render_overview(snapshot, images):
         mean = snapshot.clarity.mean_score
         mean_text = "unavailable" if mean is None else f"{mean:.4f}"
         feature_count = len(snapshot.feature_strength.candidates)
-        measured = sum(c.strength is not None for c in snapshot.feature_strength.candidates)
+        measured = sum(c.priority is not None for c in snapshot.feature_strength.candidates)
         summary.text(
             0.1,
             0.95,
@@ -63,7 +62,7 @@ def render_overview(snapshot, images):
             "Includes supported background.\n"
             "Diagnostic, not matching probability.\n\n"
             f"Feature candidates: {feature_count}\n"
-            f"Measured Q: {measured} / {feature_count}\n"
+            f"Measured priority: {measured} / {feature_count}\n"
             "Feature strength: feature-strength.png\n"
             "All original candidates remain visible.",
             transform=summary.transAxes,
@@ -95,61 +94,72 @@ def _described_length(snapshot):
     )
 
 
-def render_structure_overlay(snapshot, images, alpha):
+def render_structure_overlay(snapshot, images):
     height = min(16, max(7, 9 * snapshot.height / snapshot.width))
     figure, axis = plt.subplots(figsize=(11, height), layout="constrained")
     try:
         _image_axes(axis, images["source"], snapshot)
-        _draw_curves(axis, snapshot.edges, False)
-        _draw_curves(axis, snapshot.cycles, True)
-        _draw_nodes(axis, snapshot.nodes, alpha)
+        _draw_final_paths(axis, snapshot.contours.paths)
+        markers = snapshot.final_structure.markers
+        for boundary in (False, True):
+            selected = [item for item in markers if item.touches_unobserved == boundary]
+            draw_feature_markers(axis, selected, 30, hollow=boundary)
+        add_priority_colorbar(figure, axis)
         _graph_legend(figure)
-        counts = {kind: sum(node.kind == kind for node in snapshot.nodes) for kind in _KINDS}
-        boundary = sum(node.touches_unobserved for node in snapshot.nodes)
-        errors = [curve.geometry_error for curve in (*snapshot.edges, *snapshot.cycles)]
-        errors = [error for error in errors if error is not None]
+        counts = {
+            kind: sum(marker.kind == kind for marker in markers)
+            for kind in ("ending", "bifurcation", "junction", "isolated")
+        }
+        closed = sum(path.closed for path in snapshot.contours.paths)
+        unassessed = sum(marker.unassessed for marker in markers)
+        boundary = sum(marker.touches_unobserved for marker in markers)
         figure.suptitle(
-            "Extracted ridge graph · candidate structure\n"
+            "Cleaned + refined ridge graph · surviving features\n"
             f"Full mean ridge width: 1 R = {snapshot.scale.unit_px:.4g} px · "
             f"bootstrap period: {snapshot.bootstrap.ridge_period_px:.4g} px\n"
-            f"Graph cycle rank: {snapshot.graph_cycle_rank} · "
-            f"isolated cycles: {len(snapshot.cycles)}\n"
-            f"Paths: {len(snapshot.edges)} · "
-            f"endings: {counts['ending']} · junctions: {counts['junction']} · "
+            f"Graph cycle rank: {snapshot.final_structure.cycle_rank} · "
+            f"closed contours: {closed} · "
+            f"open paths: {len(snapshot.contours.paths) - closed}\n"
+            f"Endings: {counts['ending']} · bifurcations: {counts['bifurcation']} · "
+            f"other junctions: {counts['junction']} · "
             f"isolated nodes: {counts['isolated']}\n"
-            f"Nodes touching unobserved regions: {boundary} · "
-            f"curves without geometry: {len(errors)} · marker opacity: {alpha:g}",
+            f"Unobserved boundary: {boundary} · changed features not rescored: {unassessed} · "
+            f"new closed contours without priority: {snapshot.final_structure.unassessed_cycles}",
             fontsize=12,
         )
-        if not snapshot.nodes and not snapshot.edges and not snapshot.cycles:
+        if not markers and not snapshot.contours.paths:
             axis.text(
                 0.5,
                 0.5,
-                "No extracted graph structure",
+                "No retained graph structure",
                 transform=axis.transAxes,
                 ha="center",
                 va="center",
                 bbox={"facecolor": "white", "alpha": 0.9},
             )
-        if errors:
-            message = "; ".join(sorted(set(errors)))
-            axis.set_title(textwrap.fill("Geometry unavailable: " + message[:350], 100), fontsize=9)
-        axis.set_xlabel("x (source px)\n" + OPACITY_LABEL, fontsize=9)
+        axis.set_xlabel(
+            "x (source px)\n"
+            + OPACITY_LABEL
+            + "\n"
+            + MARKER_OPACITY_LABEL
+            + "\nPriority uses original evidence; changed feature types/degrees are gray."
+            + "\nAll original candidates and scores: feature-strength.png",
+            fontsize=9,
+        )
         return figure
     except Exception:
         plt.close(figure)
         raise
 
 
-def _draw_curves(axis, curves, closed):
-    for failed in (False, True):
-        paths = [curve for curve in curves if (curve.geometry_error is not None) == failed]
+def _draw_final_paths(axis, curves):
+    for closed in (False, True):
+        paths = [curve for curve in curves if curve.closed == closed]
         if paths:
-            color = "#e69f00" if failed else ("#a44cad" if closed else "#00a6b2")
             axis.add_collection(
                 clarity_lines(
                     ((curve.points, closed, curve.segment_clarity) for curve in paths),
-                    color,
+                    "#a44cad" if closed else "#00a6b2",
                     linewidths=0.9,
                     linestyles="dashed" if closed else "solid",
                     zorder=3,
@@ -157,43 +167,13 @@ def _draw_curves(axis, curves, closed):
             )
 
 
-def _draw_nodes(axis, nodes, alpha):
-    for kind, (marker, color, _) in _KINDS.items():
-        for boundary in (False, True):
-            selected = [
-                node for node in nodes if node.kind == kind and node.touches_unobserved == boundary
-            ]
-            if not selected:
-                continue
-            x, y = [node.x for node in selected], [node.y for node in selected]
-            axis.scatter(
-                x,
-                y,
-                marker=marker,
-                s=30,
-                facecolors="none" if boundary else color,
-                edgecolors=color,
-                linewidths=0.9,
-                alpha=alpha,
-                zorder=4,
-            )
-            if boundary:
-                axis.scatter(
-                    x, y, marker="x", s=13, color="#242424", linewidths=0.7, alpha=alpha, zorder=5
-                )
-
-
 def _graph_legend(figure):
     handles = [
-        Line2D([], [], color="#00a6b2", label="Observed path"),
-        Line2D([], [], color="#a44cad", linestyle="--", label="Isolated closed cycle"),
-        Line2D([], [], color="#e69f00", label="Geometry unavailable"),
+        Line2D([], [], color="#00a6b2", label="Cleaned + refined path"),
+        Line2D([], [], color="#a44cad", linestyle="--", label="Final closed contour"),
         Line2D([], [], color=UNKNOWN_COLOR, alpha=0.4, label="Clarity unavailable"),
     ]
-    handles.extend(
-        Line2D([], [], marker=marker, color=color, linestyle="none", label=label)
-        for marker, color, label in _KINDS.values()
-    )
+    handles.extend(feature_legend_handles())
     handles.append(
         Line2D(
             [],

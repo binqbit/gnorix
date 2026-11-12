@@ -151,6 +151,8 @@ Clarity support conservatively requires the complete tensor neighborhood and the
 
 `Fingerprint.feature_strength` assesses every original graph node and isolated cycle. IDs are original node indices followed by cycle indices offset by the node count. Scores do not remove candidates, edit paths, change cleanup or accept joins. All original candidates remain in `feature-strength.png` and `data/features.json`, including weak, unknown and subsequently corrected candidates.
 
+`structure-overlay.png` uses final cleaned and reconstructed paths and surviving features. It resolves original identity through both provenance transitions. Removed spurs, collapsed loop junctions and joined endings do not reappear. Changed feature types or degrees have unavailable priority because their new shape has not been assessed. New closed paths without an original isolated-cycle candidate remain unscored geometry.
+
 Feature markers use final priority on a fixed 0–1 viridis scale. Their opacity is `0.4 + 0.5 × sqrt(priority)`, within 40–90%; unavailable evidence is gray at 40%. Diagnostics retain intrinsic strength Q and its separate context, local evidence, stability and neighborhood components. Path opacity continues to use regional clarity; it is not the feature score.
 
 ### What makes a feature strong
