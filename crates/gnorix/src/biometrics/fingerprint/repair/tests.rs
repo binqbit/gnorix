@@ -372,6 +372,30 @@ fn an_oblique_corner_clip_cannot_skip_an_unobserved_bilinear_cell() {
 }
 
 #[test]
+fn adjacent_float_corner_crossings_check_capture_and_palette_support() {
+    let mut mask = vec![true; 9];
+    mask[6] = false;
+    let capture = Capture::new(3, 3, vec![20; 9], Some(mask), None).unwrap();
+    let unmasked = Capture::new(3, 3, vec![20; 9], None, None).unwrap();
+    let mut palette = LocalPalette {
+        radius_px: 1,
+        ridge_gray: vec![20.0; 9],
+        valley_gray: vec![220.0; 9],
+        usable: vec![true; 9],
+    };
+    let (a, b) = (point(0.0, 0.0), point(1.4999999999999998, 1.5));
+    assert!(segment_observed(&unmasked, &palette, a, b).is_some());
+    for (start, end) in [(a, b), (b, a)] {
+        assert!(sample_darkness(&capture, &palette, start).is_some());
+        assert!(sample_darkness(&capture, &palette, end).is_some());
+        assert!(segment_observed(&capture, &palette, start, end).is_none());
+    }
+    palette.usable[6] = false;
+    assert!(segment_observed(&unmasked, &palette, a, b).is_none());
+    assert!(segment_observed(&unmasked, &palette, b, a).is_none());
+}
+
+#[test]
 fn raw_junction_interior_pixels_remain_obstacles_even_if_absent_from_graph_paths() {
     let (capture, palette, graph, mut skeleton) = fixture();
     skeleton.ridges[25 * 80 + 33] = true;

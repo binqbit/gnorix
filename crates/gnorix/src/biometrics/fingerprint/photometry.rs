@@ -1,6 +1,6 @@
 //! Raw grayscale line integrals over the already confirmed source spans.
 
-use super::{Capture, FingerprintError};
+use super::{Capture, FingerprintError, raster};
 use crate::biometrics::geometry::Point;
 
 /// Integrates the piecewise-bilinear source image, with no normalization or
@@ -28,18 +28,11 @@ pub(super) fn mean_gray(
             "photometry span must have positive finite length",
         ));
     }
-    let mut breaks = vec![0.0, 1.0];
-    add_crossings(&mut breaks, start.x(), end.x());
-    add_crossings(&mut breaks, start.y(), end.y());
-    breaks.sort_by(f64::total_cmp);
-    breaks.dedup();
     let (mut integral, mut correction) = (0.0, 0.0);
-    for interval in breaks.windows(2) {
-        let (left, right) = (interval[0], interval[1]);
+    raster::visit_cells(start, end, width, height, |interval| {
+        let (left, right) = (interval.start, interval.end);
         let middle = left + (right - left) / 2.0;
-        let x = (start.x() + dx * middle).clamp(0.0, (width - 1) as f64);
-        let y = (start.y() + dy * middle).clamp(0.0, (height - 1) as f64);
-        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x0, y0) = (interval.x, interval.y);
         let (x1, y1) = ((x0 + 1).min(width - 1), (y0 + 1).min(height - 1));
         let corners = [
             y0 * width + x0,
@@ -51,9 +44,10 @@ pub(super) fn mean_gray(
             .valid_mask()
             .is_some_and(|mask| corners.iter().any(|&i| !mask[i]))
         {
-            return Err(FingerprintError::ScaleUnavailable(
-                "photometry span crosses unobserved source pixels",
-            ));
+            return None;
+        }
+        if left == right {
+            return Some(());
         }
         let sample = |t: f64| {
             // Validated endpoints define an in-bounds convex segment. Clamping
@@ -71,25 +65,12 @@ pub(super) fn mean_gray(
         let next = integral + adjusted;
         correction = (next - integral) - adjusted;
         integral = next;
-    }
+        Some(())
+    })
+    .ok_or(FingerprintError::ScaleUnavailable(
+        "photometry span crosses unobserved source pixels",
+    ))?;
     Ok(integral.clamp(0.0, 255.0))
-}
-
-fn add_crossings(breaks: &mut Vec<f64>, start: f64, end: f64) {
-    if start == end {
-        return;
-    }
-    let first = start.min(end).floor() as usize + 1;
-    let last = start.max(end).ceil() as usize;
-    // Each crossing is an actual source-grid boundary. Thus work is bounded
-    // by source dimensions; the enclosing scale stage already enforces pixels
-    // and profile budgets and its maximum finite profile extent.
-    for grid in first..last {
-        let t = (grid as f64 - start) / (end - start);
-        if t > 0.0 && t < 1.0 {
-            breaks.push(t);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -183,5 +164,27 @@ mod tests {
             assert!(mean_gray(input, point(-0.1, 0.0), point(1.0, 1.0)).is_err());
             assert!(mean_gray(input, point(1.0, 1.0), point(1.0, 1.0)).is_err());
         }
+    }
+
+    #[test]
+    fn adjacent_float_crossings_cannot_skip_masked_corner_cells() {
+        let mut mask = vec![true; 9];
+        mask[6] = false;
+        let source = image(3, 3, vec![73; 9], Some(mask));
+        for (a, b) in [
+            (point(0.0, 0.0), point(1.4999999999999998, 1.5)),
+            (point(1.4999999999999998, 1.5), point(0.0, 0.0)),
+            (point(0.0, 0.0), point(1.5, 1.5)),
+        ] {
+            assert!(matches!(
+                mean_gray(&source, a, b),
+                Err(FingerprintError::ScaleUnavailable(_))
+            ));
+        }
+        let observed = image(3, 3, vec![73; 9], None);
+        assert_eq!(
+            mean_gray(&observed, point(0.0, 0.0), point(1.4999999999999998, 1.5)).unwrap(),
+            73.0
+        );
     }
 }

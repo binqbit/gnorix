@@ -10,6 +10,7 @@ mod full_scale;
 mod graph;
 mod photometry;
 mod quality;
+mod raster;
 mod repair;
 mod scale;
 mod smoothing;

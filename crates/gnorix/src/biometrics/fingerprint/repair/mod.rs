@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use super::{
     Capture, FingerprintError, LocalPalette, NodeKind, RidgeCycle, RidgeEdge, RidgeGraph, RidgeMap,
+    raster,
 };
 use crate::biometrics::geometry::Point;
 use bridge::{Endpoint, SegmentIndex, distance};
@@ -277,35 +278,30 @@ fn segment_observed(
 ) -> Option<()> {
     sample_darkness(capture, palette, start)?;
     sample_darkness(capture, palette, end)?;
-    let mut breaks = vec![0.0, 1.0];
-    for (a, b) in [(start.x(), end.x()), (start.y(), end.y())] {
-        if a == b {
-            continue;
-        }
-        for boundary in (a.min(b).floor() as usize + 1)..(a.max(b).ceil() as usize) {
-            let t = (boundary as f64 - a) / (b - a);
-            if t > 0.0 && t < 1.0 {
-                breaks.push(t);
-            }
-        }
-    }
-    breaks.sort_by(f64::total_cmp);
-    breaks.dedup();
-    // Each open interval belongs to one bilinear cell. Visiting every interval
-    // checks even arbitrarily short corner clips, irrespective of sample spacing.
-    for interval in breaks.windows(2) {
-        let t = interval[0] + (interval[1] - interval[0]) / 2.0;
-        sample_darkness(
-            capture,
-            palette,
-            Point::new(
-                start.x() + t * (end.x() - start.x()),
-                start.y() + t * (end.y() - start.y()),
-            )
-            .ok()?,
-        )?;
-    }
-    Some(())
+    let (width, height) = (capture.width() as usize, capture.height() as usize);
+    raster::visit_cells(start, end, width, height, |cell| {
+        let (right, bottom) = ((cell.x + 1).min(width - 1), (cell.y + 1).min(height - 1));
+        let corners = [
+            cell.y * width + cell.x,
+            cell.y * width + right,
+            bottom * width + cell.x,
+            bottom * width + right,
+        ];
+        corners
+            .iter()
+            .all(|&index| {
+                let dark = palette.ridge_gray[index];
+                let light = palette.valley_gray[index];
+                palette.usable[index]
+                    && capture.valid_mask().is_none_or(|mask| mask[index])
+                    && dark.is_finite()
+                    && light.is_finite()
+                    && (0.0..=255.0).contains(&dark)
+                    && (0.0..=255.0).contains(&light)
+                    && light > dark
+            })
+            .then_some(())
+    })
 }
 
 fn sample_darkness(capture: &Capture, palette: &LocalPalette, point: Point) -> Option<f64> {
