@@ -37,6 +37,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 |---|---|---|
 | Acquisition input | `src/biometrics/capture.rs` | Owned grayscale pixels, optional valid-region mask and scale; shape and numeric validation; redacted diagnostics. |
 | Grid mathematics | `src/biometrics/geometry.rs` | Explicit triangular point geometry and six-neighbor coordinates, with overflow/finite-value checks. |
+| Fingerprint extraction | `src/biometrics/fingerprint/` | Native per-capture image stages, topology-preserving skeleton tracing, curve geometry and diagnostic output. |
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
 | Enrollment | `src/enrollment.rs` | Bind profile and context, prepare a model, process the complete candidate set, retain its commitment/model/hash tree. |
@@ -48,6 +49,8 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 Locations in this table are relative to `crates/gnorix`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipeline functions are `enrollment::enroll`, `authorization::sign` and `authorization::verify`.
 
 ## Connecting algorithms
+
+The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns ridge geometry with source-pixel coordinates and processing provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
 
 Implement `MeasurementEngine` for the selected measurement strategy. It supplies a profile identifier, builds its own reconstruction model, enumerates all accepted enrollment candidates, and reconstructs candidates from a new capture under that same model. Its identifier must cover every setting that affects interpretation or candidate bytes.
 

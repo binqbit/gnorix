@@ -10,6 +10,7 @@ from .model import load_snapshot
 from .options import OverlayOptions
 from .render import render_snapshot
 from .sample import write_sample
+from .structure import render_structure
 
 
 def parser() -> argparse.ArgumentParser:
@@ -25,6 +26,17 @@ def parser() -> argparse.ArgumentParser:
     sample.add_argument(
         "--rotation", type=float, default=0, help="Preview grid rotation in degrees"
     )
+
+    structure = commands.add_parser("structure", help="Render a native fingerprint extraction")
+    structure.add_argument("snapshot", type=Path)
+    structure.add_argument(
+        "--output", type=Path, help="Output directory (default: repository-root reports/)"
+    )
+    structure.add_argument("--dpi", type=int, default=160, help="PNG resolution (50 to 600)")
+    structure.add_argument(
+        "--overlay-alpha", type=float, default=0.5, help="Overlay opacity from 0 to 1"
+    )
+    structure.add_argument("--overwrite", action="store_true", help="Replace matching output files")
 
     for command in (render, sample):
         command.add_argument(
@@ -106,6 +118,15 @@ def sample_bundle(arguments: argparse.Namespace) -> list[Path]:
         return publish_files(files, arguments.output, arguments.overwrite)
 
 
+def structure_bundle(arguments: argparse.Namespace) -> list[Path]:
+    arguments.output.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".pending-", dir=arguments.output) as temporary:
+        files = render_structure(
+            arguments.snapshot, Path(temporary), arguments.dpi, arguments.overlay_alpha
+        )
+        return publish_files(files, arguments.output, arguments.overwrite)
+
+
 def overlay_options(arguments: argparse.Namespace) -> OverlayOptions:
     return OverlayOptions(
         alpha=arguments.overlay_alpha,
@@ -131,9 +152,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if arguments.output is None:
             arguments.output = default_output()
-        files = (
-            sample_bundle(arguments) if arguments.command == "sample" else render_bundle(arguments)
-        )
+        handlers = {"sample": sample_bundle, "render": render_bundle, "structure": structure_bundle}
+        files = handlers[arguments.command](arguments)
     except (OSError, ValueError) as error:
         command.exit(2, f"error: {error}\n")
 

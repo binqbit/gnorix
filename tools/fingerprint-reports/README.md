@@ -1,5 +1,22 @@
 # Fingerprint reports
 
+## Native fingerprint structure
+
+Render the actual graph and image stages exported by the Rust example:
+
+```sh
+cargo run -p gnorix --release --example fingerprint --locked -- \
+  crates/gnorix/tests/assets/test-fingerprint.png reports/fingerprint
+uv run --project tools/fingerprint-reports --locked gnorix-report structure \
+  reports/fingerprint/features.json --output reports/fingerprint/visuals
+```
+
+The output includes five PNGs: a seven-stage overview, a semitransparent structural overlay, primary `scale-analysis.png`, provisional `bootstrap-analysis.png` and `normalization-analysis.png`. The primary scale figure uses every measured link of the raw measurement skeleton, weights widths by represented source length, and shows the measured/unmeasured coverage. Its mean dark-ridge width is the common unit R. Only the overlay display is spatially reduced; all observations enter the statistics and weighted histogram.
+
+The bootstrap figure shows initial ridge triples, provisional widths/periods and original grayscale statistics. Bootstrap observations do not directly enter the final unit. The normalization figure shows the local dark/light reference maps and supported regions used by the Rust detector. Brightness uses `0 = black`, `255 = white`; unsupported reference pixels are masked. Width-consistency fractions at 10%, 20% and 30% count observations around the relevant reference (R in the primary figure, the provisional median in the bootstrap figure). Coverage separately measures source length. These are descriptive measurements, not recognition probabilities.
+
+Ending, junction and isolated-node markers have distinct shapes; unknown continuation is marked separately. Graph cycle rank includes loops connected to junctions, separately from isolated closed paths. A path with an unavailable descriptor remains visible. See [fingerprint extraction](../../docs/fingerprint.md) for the local normalization formula, averaging rules, controls and limitations.
+
 Generate static PNG diagnostics from a processing snapshot. Each report brings together the source image, coordinate-aligned points and grid, a metric distribution, and any supplied raster or line series. Separate overlay figures show points and supplied tolerance distances directly over the same image coordinates. The tool runs locally and accepts snapshots from any language or pipeline; it does not call Gnorix's Rust library or select its biometric algorithms.
 
 ## Setup and first report
