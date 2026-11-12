@@ -58,7 +58,7 @@ pub(super) fn snapshot(
         .zip(&contours.edge_geometry)
         .enumerate()
         .map(|(id, ((edge, origin), geometry))| {
-            let (geometry, error) = super::geometry_json(geometry, unit_px);
+            let (geometry, error) = super::snapshot::geometry_json(geometry, unit_px);
             json!({"id":id,"start":edge.start,"end":edge.end,
                 "points":edge.points.iter().map(|p|[p.x(),p.y()]).collect::<Vec<_>>(),
                 "segment_clarity":super::clarity::path_scores(clarity, &edge.points, false),
@@ -74,7 +74,7 @@ pub(super) fn snapshot(
         .zip(&contours.cycle_geometry)
         .enumerate()
         .map(|(id, ((cycle, origin), geometry))| {
-            let (geometry, error) = super::geometry_json(geometry, unit_px);
+            let (geometry, error) = super::snapshot::geometry_json(geometry, unit_px);
             json!({"id":id,"points":cycle.points.iter().map(|p|[p.x(),p.y()]).collect::<Vec<_>>(),
                 "segment_clarity":super::clarity::path_scores(clarity, &cycle.points, true),
                 "source_edges":origin.source_edges,"source_cycles":origin.source_cycles,

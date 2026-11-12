@@ -1,37 +1,7 @@
 //! Export native local clarity without changing source geometry or measurements.
 
-use std::{error::Error, path::Path};
-
-use gnorix::biometrics::{
-    fingerprint::{ClarityMap, Fingerprint},
-    geometry::Point,
-};
+use gnorix::biometrics::{fingerprint::ClarityMap, geometry::Point};
 use serde_json::{Value, json};
-
-pub(super) fn save(root: &Path, result: &Fingerprint) -> Result<(), Box<dyn Error>> {
-    let map = &result.clarity;
-    for (filename, values) in [
-        ("clarity.png", &map.values),
-        ("clarity-contrast.png", &map.contrast),
-        ("clarity-separation.png", &map.separation),
-        ("clarity-repetition.png", &map.repetition),
-    ] {
-        super::save_values(
-            root,
-            filename,
-            result,
-            values.iter().map(|&value| (value * 255.0).round() as u8),
-        )?;
-    }
-    super::save_values(
-        root,
-        "clarity-support.png",
-        result,
-        map.supported
-            .iter()
-            .map(|&valid| if valid { 255 } else { 0 }),
-    )
-}
 
 pub(super) fn snapshot(map: &ClarityMap) -> Value {
     let supported_pixels = map.supported.iter().filter(|&&valid| valid).count();

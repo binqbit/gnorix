@@ -61,6 +61,8 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
 | `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
 
+The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` handles image I/O, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
+
 ## Connecting algorithms
 
 The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
