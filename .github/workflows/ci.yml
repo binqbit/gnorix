@@ -51,3 +51,9 @@ jobs:
       - run: uv run --project tools/fingerprint-reports --locked ruff check tools/fingerprint-reports
       - run: uv run --project tools/fingerprint-reports --locked ruff format --check tools/fingerprint-reports
       - run: uv run --project tools/fingerprint-reports --locked python -m unittest discover -s tools/fingerprint-reports/tests -v
+      - name: Install Rust for the extraction-to-report check
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Extract the fingerprint fixture with native Rust
+        run: cargo run -p gnorix --release --example fingerprint --locked -- crates/gnorix/tests/assets/test-fingerprint.png reports/ci-fingerprint
+      - name: Render the native extraction as PNG
+        run: uv run --project tools/fingerprint-reports --locked gnorix-report structure reports/ci-fingerprint/features.json --output reports/ci-fingerprint/visuals
