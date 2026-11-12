@@ -10,7 +10,8 @@ from PIL import Image
 from test_structure import cleanup_source_policy, unchanged_contours
 
 from gnorix_reports.cleanup import validate_cleanup
-from gnorix_reports.contours import _detail, render_contour_comparison, validate_contours
+from gnorix_reports.contour_render import _detail, render_contour_comparison
+from gnorix_reports.contours import validate_contours
 
 
 def fixture(with_route=False):

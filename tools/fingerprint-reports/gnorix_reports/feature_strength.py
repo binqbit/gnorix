@@ -6,7 +6,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
-from .graph_validation import _array, _id, _number, _object, _same
+from .validation import array_value, finite_number, identifier_value, object_value, require_close
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,7 @@ class FeatureStrength:
 def _score(value, name, optional=False):
     if value is None and optional:
         return None
-    result = _number(value, "feature_strength." + name)
+    result = finite_number(value, "feature_strength." + name)
     if not 0 <= result <= 1:
         raise ValueError(f"feature_strength.{name} must be in [0, 1]")
     return result
@@ -64,7 +64,7 @@ def _score(value, name, optional=False):
 def _position(value, width, height):
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError("feature position must contain source x and y")
-    x, y = (_number(item, "feature position") for item in value)
+    x, y = (finite_number(item, "feature position") for item in value)
     if not 0 <= x <= width - 1 or not 0 <= y <= height - 1:
         raise ValueError("feature position lies outside source pixel centers")
     return x, y
@@ -78,12 +78,12 @@ def _component(value, name):
 
 def _validate_arms(value, expected, horizon):
     arms = []
-    for item in _array(value, "feature arms"):
-        item = _object(item, "feature arm")
+    for item in array_value(value, "feature arms"):
+        item = object_value(item, "feature arm")
         if item.keys() != FeatureArm.__dataclass_fields__.keys():
             raise ValueError("feature arm must declare exactly its native evidence fields")
-        edge = _id(item.get("edge"), "feature arm.edge")
-        length = _number(item.get("length_px"), "feature arm.length_px")
+        edge = identifier_value(item.get("edge"), "feature arm.edge")
+        length = finite_number(item.get("length_px"), "feature arm.length_px")
         if not 0 <= length <= horizon * (1 + 1e-12):
             raise ValueError("feature arm length exceeds the native branch horizon")
         if "source_darkness" not in item or "dark_fraction" not in item:
@@ -95,7 +95,7 @@ def _validate_arms(value, expected, horizon):
             raise ValueError("feature arm must declare its longest source light gap")
         gap = item["longest_light_gap_px"]
         if gap is not None:
-            gap = _number(gap, "feature arm.longest_light_gap_px")
+            gap = finite_number(gap, "feature arm.longest_light_gap_px")
             if not 0 <= gap <= length * (1 + 1e-12):
                 raise ValueError("feature arm light gap must lie within its represented length")
         if len({part is None for part in (darkness, fraction, contrast, gap)}) != 1:
@@ -109,7 +109,7 @@ def _validate_arms(value, expected, horizon):
 def validate_feature_strength(
     value, nodes, edges, cycles, width, height, unit, min_contrast, min_coherence
 ):
-    value = _object(value, "feature_strength")
+    value = object_value(value, "feature_strength")
     if set(value) != {
         "method",
         "score",
@@ -128,7 +128,7 @@ def validate_feature_strength(
     horizon, stress_counts = _validate_policy_and_stress(
         value, unit, min_contrast, min_coherence, width * height
     )
-    raw = _array(value.get("candidates"), "feature_strength.candidates", 200_000)
+    raw = array_value(value.get("candidates"), "feature_strength.candidates", 200_000)
     if len(raw) != len(nodes) + len(cycles):
         raise ValueError("feature candidates must cover every raw node and isolated cycle")
     incidence = {node["id"]: [] for node in nodes}
@@ -138,10 +138,10 @@ def validate_feature_strength(
     candidates = []
     case_matches = [set() for _ in range(8)]
     for identifier, item in enumerate(raw):
-        item = _object(item, "feature candidate")
+        item = object_value(item, "feature candidate")
         if item.keys() != Candidate.__dataclass_fields__.keys():
             raise ValueError("feature candidate must declare exactly its native evidence fields")
-        if _id(item.get("id"), "feature id") != identifier:
+        if identifier_value(item.get("id"), "feature id") != identifier:
             raise ValueError("feature IDs must follow original nodes then isolated cycles")
         node = nodes[identifier] if identifier < len(nodes) else None
         cycle = cycles[identifier - len(nodes)] if node is None else None
@@ -151,7 +151,7 @@ def validate_feature_strength(
             if name not in item or item[name] != expected or isinstance(item[name], bool):
                 raise ValueError("feature source reference must match its original candidate")
             if item[name] is not None:
-                _id(item[name], "feature " + name)
+                identifier_value(item[name], "feature " + name)
         expected_arms = incidence[node["id"]] if node is not None else []
         kind = item.get("kind")
         expected_kind = (
@@ -166,10 +166,10 @@ def validate_feature_strength(
         position = _position(item.get("position"), width, height)
         if node is not None:
             for actual, expected in zip(position, (node["x"], node["y"]), strict=True):
-                _same(actual, expected, "feature node position")
+                require_close(actual, expected, "feature node position")
         else:
             for actual, expected in zip(position, _cycle_center(cycle["points"]), strict=True):
-                _same(actual, expected, "feature cycle position")
+                require_close(actual, expected, "feature cycle position")
         parts = {
             name: _component(item, name)
             for name in (
@@ -189,7 +189,9 @@ def validate_feature_strength(
         matches = _validate_matches(
             item.get("stress_matches"), stress_counts, case_matches, cycle is not None
         )
-        _same(stability, sum(match is not None for match in matches) / 8, "feature stability")
+        require_close(
+            stability, sum(match is not None for match in matches) / 8, "feature stability"
+        )
         p, g, q = (parts[name] for name in ("source_support", "geometry_support", "strength"))
         if coverage < 1 and p is not None:
             raise ValueError("partial source coverage requires unavailable source support")
@@ -199,7 +201,7 @@ def validate_feature_strength(
         elif q is None:
             raise ValueError("measured source and geometry evidence require measured Q")
         else:
-            _same(q, min(p, g) * (0.5 + 0.5 * stability), "feature combined strength")
+            require_close(q, min(p, g) * (0.5 + 0.5 * stability), "feature combined strength")
         reasons = _validate_reasons(item.get("reasons"))
         if ("stress_sensitive" in reasons) != (stability < 1):
             raise ValueError("feature stress-sensitive reason must match its stability")
@@ -245,7 +247,7 @@ def _validate_matches(value, counts, case_matches, is_cycle):
     result = []
     for index, match in enumerate(value):
         if match is not None:
-            match = _id(match, "feature stress match")
+            match = identifier_value(match, "feature stress match")
             node_count, cycle_count = counts[index]
             if match >= node_count + cycle_count:
                 raise ValueError("feature stress match exceeds that case's candidate count")
@@ -284,7 +286,7 @@ def _validate_reasons(value):
         "stress_sensitive",
         "no_interior_light",
     }
-    reasons = _array(value, "feature reasons", len(allowed))
+    reasons = array_value(value, "feature reasons", len(allowed))
     if any(not isinstance(reason, str) or reason not in allowed for reason in reasons):
         raise ValueError("feature reasons must contain only known native reason codes")
     if len(set(reasons)) != len(reasons):
@@ -293,7 +295,7 @@ def _validate_reasons(value):
 
 
 def _validate_policy_and_stress(value, unit, min_contrast, min_coherence, pixels):
-    policy = _object(value.get("policy"), "feature policy")
+    policy = object_value(value.get("policy"), "feature policy")
     expected_policy = {
         "reference_width_px": unit,
         "branch_horizon_px": 2 * unit,
@@ -306,10 +308,10 @@ def _validate_policy_and_stress(value, unit, min_contrast, min_coherence, pixels
         "contrast_reference": min_contrast,
     }
     for name, expected in expected_policy.items():
-        _same(_number(policy.get(name), name), expected, "feature policy " + name)
+        require_close(finite_number(policy.get(name), name), expected, "feature policy " + name)
     if policy.keys() != expected_policy.keys():
         raise ValueError("feature policy must declare exactly the native source controls")
-    stability = _object(value.get("stability_policy"), "feature stability policy")
+    stability = object_value(value.get("stability_policy"), "feature stability policy")
     expected_stability = {
         "max_position_shift_px": unit,
         "arm_radius_px": unit,
@@ -319,7 +321,9 @@ def _validate_policy_and_stress(value, unit, min_contrast, min_coherence, pixels
         "cycle_relative_tolerance": 0.2,
     }
     for name, expected in expected_stability.items():
-        _same(_number(stability.get(name), name), expected, "feature stability policy " + name)
+        require_close(
+            finite_number(stability.get(name), name), expected, "feature stability policy " + name
+        )
     if stability.keys() != expected_stability.keys():
         raise ValueError("feature stability policy must declare exactly the native match controls")
     delta = max(0.02, 0.1 * min_coherence)
@@ -339,13 +343,15 @@ def _validate_policy_and_stress(value, unit, min_contrast, min_coherence, pixels
         raise ValueError("feature assessment must declare exactly eight stress cases")
     counts = []
     for index, (item, expected) in enumerate(zip(raw_cases, cases, strict=True)):
-        item = _object(item, "feature stress case")
+        item = object_value(item, "feature stress case")
         if set(item) != {"directional_margin", "min_coherence", "node_count", "cycle_count"}:
             raise ValueError("feature stress case must declare parameters and variant counts")
         for name, number in zip(("directional_margin", "min_coherence"), expected, strict=True):
-            _same(_number(item.get(name), name), number, f"feature stress case {index} {name}")
-        node_count = _id(item.get("node_count"), "stress node_count")
-        cycle_count = _id(item.get("cycle_count"), "stress cycle_count")
+            require_close(
+                finite_number(item.get(name), name), number, f"feature stress case {index} {name}"
+            )
+        node_count = identifier_value(item.get("node_count"), "stress node_count")
+        cycle_count = identifier_value(item.get("cycle_count"), "stress cycle_count")
         if node_count + cycle_count > pixels:
             raise ValueError("stress candidate count exceeds source pixel count")
         counts.append((node_count, cycle_count))

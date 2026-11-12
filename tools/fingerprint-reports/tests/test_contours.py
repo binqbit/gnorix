@@ -12,11 +12,8 @@ from PIL import Image
 from test_structure import unchanged_contours
 
 from gnorix_reports.cleanup_evidence import validate_source_policy
-from gnorix_reports.contours import (
-    render_contour_comparison,
-    render_contour_overlay,
-    validate_contours,
-)
+from gnorix_reports.contour_render import render_contour_comparison, render_contour_overlay
+from gnorix_reports.contours import validate_contours
 
 
 def fixture(accepted=True):

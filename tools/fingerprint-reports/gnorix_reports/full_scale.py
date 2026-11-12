@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import matplotlib
 
+from .validation import finite_number, require_close
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -73,29 +75,17 @@ def validate_full_scale(value, width: int, height: int) -> FullScale:
         / measured_length
     )
     unit = _positive(value.get("unit_px"), "scale.unit_px")
-    _same(unit, expected, "scale.unit_px")
+    require_close(unit, expected, "scale.unit_px")
     coverage = _coverage(value.get("coverage"), maximum, width * height)
     if coverage.measured_links != len(observations):
         raise ValueError("scale measured_links does not match observations")
-    _same(coverage.measured_length_px, measured_length, "scale measured_length_px")
+    require_close(coverage.measured_length_px, measured_length, "scale measured_length_px")
     bands = validate_width_consistency(value.get("width_consistency"), widths, unit)
     return FullScale(unit, coverage, observations, bands)
 
 
-def _number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be finite")
-    try:
-        result = float(value)
-    except OverflowError as error:
-        raise ValueError(f"{name} must be finite") from error
-    if not math.isfinite(result):
-        raise ValueError(f"{name} must be finite")
-    return result
-
-
 def _positive(value, name):
-    result = _number(value, name)
+    result = finite_number(value, name)
     if result <= 0:
         raise ValueError(f"{name} must be positive")
     return result
@@ -107,15 +97,10 @@ def _count(value, maximum, name):
     return value
 
 
-def _same(actual, expected, name):
-    if not math.isclose(actual, expected, rel_tol=1e-8, abs_tol=1e-7):
-        raise ValueError(f"{name} does not match supplied evidence")
-
-
 def _point(value, width, height):
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError("scale width endpoints must contain x and y")
-    x, y = (_number(v, "scale width endpoint") for v in value)
+    x, y = (finite_number(v, "scale width endpoint") for v in value)
     if not 0 <= x <= width - 1 or not 0 <= y <= height - 1:
         raise ValueError("scale width endpoint lies outside source pixel centers")
     return x, y
@@ -134,7 +119,7 @@ def _observation(value, width, height):
     if max(dx, dy) != 1:
         raise ValueError("scale link must connect neighboring source pixels")
     length = _positive(value.get("represented_length_px"), "scale represented_length_px")
-    _same(length, math.hypot(dx, dy), "scale represented_length_px")
+    require_close(length, math.hypot(dx, dy), "scale represented_length_px")
     start, end = (_point(value.get(key), width, height) for key in ("start", "end"))
     if start == end:
         raise ValueError("scale width spans must have positive length")
@@ -147,7 +132,7 @@ def _observation(value, width, height):
     projection = sx * ux + sy * uy
     if abs(sx * uy - sy * ux) > precision or not -precision <= projection <= length_px + precision:
         raise ValueError("scale own-width span must contain its link midpoint on the segment")
-    gray = _number(value.get("mean_gray"), "scale observation mean_gray")
+    gray = finite_number(value.get("mean_gray"), "scale observation mean_gray")
     if not 0 <= gray <= 255:
         raise ValueError("scale observation mean_gray must be in [0, 255]")
     return WidthObservation((a, b), start, end, length, gray)
@@ -188,7 +173,7 @@ def validate_measurement_maps(scale: FullScale, images):
     total_links, total_length, isolated = _topology_counts(ridge)
     if total_links != scale.coverage.total_links or isolated != scale.coverage.isolated_pixels:
         raise ValueError("scale link/isolate coverage does not match measurement skeleton")
-    _same(scale.coverage.total_length_px, total_length, "scale total_length_px")
+    require_close(scale.coverage.total_length_px, total_length, "scale total_length_px")
 
 
 def _binary(image, name):

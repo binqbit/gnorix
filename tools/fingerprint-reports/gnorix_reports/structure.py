@@ -1,80 +1,39 @@
-"""PNG diagnostics for supplied native ridge graphs and processing stages."""
+"""Render validated native extraction data as a complete PNG report."""
 
 from __future__ import annotations
 
-import json
-import math
 import tempfile
-import textwrap
 from contextlib import ExitStack
-from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 
-from .clarity import IMAGE_KEYS as CLARITY_IMAGES
-from .clarity import (
-    OPACITY_LABEL,
-    UNKNOWN_COLOR,
-    Clarity,
-    clarity_lines,
-    render_clarity_analysis,
-    validate_clarity,
-    validate_clarity_maps,
-    validate_segment_clarity,
-)
-from .cleanup import validate_cleanup
-from .contours import (
-    Contours,
-    render_contour_comparison,
-    render_contour_overlay,
-    validate_contours,
-)
-from .feature_strength import FeatureStrength, validate_feature_strength
+from .clarity import render_clarity_analysis, validate_clarity_maps
+from .contour_render import render_contour_comparison, render_contour_overlay
 from .feature_strength_render import render_feature_strength
-from .full_scale import (
-    IMAGE_KEYS as MEASUREMENT_IMAGES,
-)
-from .full_scale import (
-    FullScale,
-    render_full_scale,
-    validate_full_scale,
-    validate_measurement_maps,
-)
-from .images import MAX_FRAME_PIXELS, MAX_FRAME_SIDE, load_image
-from .normalization import (
-    IMAGE_KEYS,
-    Normalization,
-    render_normalization_analysis,
-    validate_normalization,
-    validate_palette,
-)
-from .scale import ScaleAnalysis, render_scale_analysis, validate_scale
+from .full_scale import render_full_scale, validate_measurement_maps
+from .images import load_image
+from .normalization import render_normalization_analysis, validate_palette
+from .scale import render_scale_analysis
+from .snapshot import load_snapshot
+from .structure_render import render_overview, render_structure_overlay
+from .validation import finite_number
 
-_SCHEMA = "gnorix.ridge-extraction.v1"
-MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
-_MAX_ITEMS = 100_000
-_MAX_PATH_POINTS = 1_000_000
-_STAGES = (
-    ("source", "Source · 8-bit grayscale"),
-    ("normalized", "Normalized intensity · −3 to 3"),
-    ("denoised", "Denoised intensity · −3 to 3"),
-    ("coherence", "Orientation coherence · 0 to 1"),
-    ("usable", "Usable region · white = usable"),
-    ("binary", "Binary ridges · dark = ridge"),
-    ("skeleton", "Skeleton · dark = ridge"),
+REPORT_FILES = (
+    "overview.png",
+    "structure-overlay.png",
+    "scale-analysis.png",
+    "bootstrap-analysis.png",
+    "normalization-analysis.png",
+    "contour-comparison.png",
+    "contour-overlay.png",
+    "clarity-analysis.png",
+    "feature-strength.png",
 )
-_KINDS = {
-    "ending": ("o", "#0072b2", "Ending candidate"),
-    "junction": ("^", "#d55e00", "Junction candidate"),
-    "isolated": ("s", "#8a4c99", "Isolated node"),
-}
 _STYLE = {
     "font.family": "DejaVu Sans",
     "font.size": 10,
@@ -87,600 +46,75 @@ _STYLE = {
 }
 
 
-@dataclass(frozen=True)
-class _Node:
-    x: float
-    y: float
-    kind: str
-    touches_unobserved: bool
-
-
-@dataclass(frozen=True)
-class _Curve:
-    points: tuple[tuple[float, float], ...]
-    geometry_error: str | None
-    arc_length_units: float | None
-    segment_clarity: tuple[float | None, ...]
-
-
-@dataclass(frozen=True)
-class _Structure:
-    width: int
-    height: int
-    bootstrap: ScaleAnalysis
-    scale: FullScale
-    normalization: Normalization
-    contrast: float
-    coherence: float
-    nodes: tuple[_Node, ...]
-    edges: tuple[_Curve, ...]
-    cycles: tuple[_Curve, ...]
-    images: dict[str, Path]
-    graph_cycle_rank: int
-    contours: Contours
-    clarity: Clarity
-    feature_strength: FeatureStrength
-
-
 def render_structure(
     snapshot_path: Path, output: Path, dpi: int = 160, alpha: float = 0.5
 ) -> list[Path]:
-    """Validate a native extraction bundle and export nine PNG diagnostics.
+    """Validate all inputs and render nine PNGs before replacing report files.
 
-    All rasters must have the declared source dimensions. Coordinates are pixel
-    centers: (0, 0) is the center of the top-left pixel. Curves are displayed as
-    supplied, including curves whose descriptor failed; no graph repair, shape
-    fitting, matching tolerance, or confidence calculation is performed here.
-    Separate contour figures display the supplied native refinement and joins.
+    Coordinates remain source pixel centers. This pipeline displays supplied
+    measurements and geometry; it performs no biometric extraction or repair.
     """
-    if type(dpi) is not int or not 1 <= dpi <= 600:
-        raise ValueError("report DPI must be an integer in [1, 600]")
-    alpha = _number(alpha, "alpha")
-    if not 0 <= alpha <= 1:
-        raise ValueError("alpha must be in [0, 1]")
-    snapshot = _load_structure(Path(snapshot_path))
+    alpha = _render_options(dpi, alpha)
+    snapshot = load_snapshot(Path(snapshot_path))
     output = Path(output)
 
     with ExitStack() as stack:
-        images = {}
-        for key, path in snapshot.images.items():
-            image = load_image(path, (snapshot.width, snapshot.height))
-            stack.callback(image.close)
-            images[key] = image
+        images = _load_images(snapshot, stack)
         palette = validate_palette(images)
         validate_measurement_maps(snapshot.scale, images)
         clarity_maps = validate_clarity_maps(snapshot.clarity, images)
 
-        # Finish validation/decoding before creating output; finish all figures
-        # in a sibling directory before replacing any existing report files.
+        # Decode and validate everything before touching report output. Finish
+        # every figure in a sibling directory before replacing existing files.
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".ridge-report-", dir=output.parent) as temporary:
             staging = Path(temporary)
             with matplotlib.rc_context(_STYLE):
-                _save_figure(_overview(snapshot, images), staging / "overview.png", dpi)
-                _save_figure(
-                    _overlay(snapshot, images, alpha), staging / "structure-overlay.png", dpi
-                )
-                _save_figure(
-                    render_full_scale(snapshot.scale, images, alpha),
-                    staging / "scale-analysis.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_scale_analysis(snapshot.bootstrap, images["source"], alpha),
-                    staging / "bootstrap-analysis.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_normalization_analysis(snapshot.normalization, palette, images),
-                    staging / "normalization-analysis.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_contour_comparison(snapshot.contours, images["source"], alpha),
-                    staging / "contour-comparison.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_contour_overlay(snapshot.contours, images["source"], alpha),
-                    staging / "contour-overlay.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_clarity_analysis(
-                        snapshot.clarity, clarity_maps, images["source"], alpha
-                    ),
-                    staging / "clarity-analysis.png",
-                    dpi,
-                )
-                _save_figure(
-                    render_feature_strength(snapshot.feature_strength, images["source"]),
-                    staging / "feature-strength.png",
-                    dpi,
-                )
-            output.mkdir(parents=True, exist_ok=True)
-            paths = []
-            for name in (
-                "overview.png",
-                "structure-overlay.png",
-                "scale-analysis.png",
-                "bootstrap-analysis.png",
-                "normalization-analysis.png",
-                "contour-comparison.png",
-                "contour-overlay.png",
-                "clarity-analysis.png",
-                "feature-strength.png",
-            ):
-                target = output / name
-                (staging / name).replace(target)
-                paths.append(target)
-            return paths
+                figures = _figures(snapshot, images, palette, clarity_maps, alpha)
+                for name, figure in zip(REPORT_FILES, figures, strict=True):
+                    _save_figure(figure, staging / name, dpi)
+            return _publish_figures(staging, output)
 
 
-def _load_structure(path: Path) -> _Structure:
-    with path.open("rb") as stream:
-        encoded = stream.read(MAX_SNAPSHOT_BYTES + 1)
-    if len(encoded) > MAX_SNAPSHOT_BYTES:
-        raise ValueError("snapshot exceeds the 64 MiB JSON limit")
-    try:
-        data = json.loads(
-            encoded.decode("utf-8"),
-            object_pairs_hook=_unique_fields,
-            parse_constant=_reject_constant,
-        )
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
-        raise ValueError("snapshot must contain valid UTF-8 JSON") from error
-    data = _object(data, "snapshot")
-    if data.get("schema") != _SCHEMA:
-        raise ValueError(f"schema must be {_SCHEMA!r}")
-
-    width = _dimension(data.get("width"), "width")
-    height = _dimension(data.get("height"), "height")
-    if width * height > MAX_FRAME_PIXELS:
-        raise ValueError("snapshot exceeds the image pixel limit")
-    config = _object(data.get("config"), "config")
-    contrast = _number(config.get("min_contrast"), "config.min_contrast")
-    coherence = _number(config.get("min_coherence"), "config.min_coherence")
-    if not 0 <= contrast <= 1 or not 0 <= coherence <= 1:
-        raise ValueError("config thresholds must be in [0, 1]")
-    bootstrap = validate_scale(
-        data.get("bootstrap"), width, height, config.get("bootstrap_grid_locations")
-    )
-    scale = validate_full_scale(data.get("scale"), width, height)
-    normalization = validate_normalization(data.get("normalization"), bootstrap.ridge_period_px)
-    clarity = validate_clarity(data.get("clarity"), bootstrap.ridge_period_px, width, height)
-
-    raw_nodes = _array(data.get("nodes"), "nodes")
-    node_ids = _identifiers(raw_nodes, "nodes")
-    nodes = tuple(_node(node, width, height) for node in raw_nodes)
-    edges = _curves(data.get("edges"), "edges", width, height, node_ids, scale.unit_px)
-    cycles = _curves(data.get("cycles"), "cycles", width, height, node_ids, scale.unit_px)
-    if sum(len(curve.points) for curve in (*edges, *cycles)) > _MAX_PATH_POINTS:
-        raise ValueError("graph exceeds the total path point limit")
-    feature_strength = validate_feature_strength(
-        data.get("feature_strength"),
-        raw_nodes,
-        data["edges"],
-        data["cycles"],
-        width,
-        height,
-        scale.unit_px,
-        contrast,
-        coherence,
-    )
-
-    raw_images = _object(data.get("images"), "images")
-    base = path.resolve().parent
-    keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES, *CLARITY_IMAGES)
-    images = {key: _image_path(base, raw_images.get(key), key) for key in keys}
-    rank = _graph_cycle_rank(node_ids, data["edges"], len(cycles))
-    cleanup = validate_cleanup(
-        data.get("cleanup"), raw_nodes, data["edges"], data["cycles"], width, height, scale.unit_px
-    )
-    contours = validate_contours(
-        data.get("contours"),
-        cleanup.nodes,
-        cleanup.edges,
-        cleanup.cycles,
-        width,
-        height,
-        scale.unit_px,
-        cleanup_width=cleanup.width,
-        observed_edges=data["edges"],
-        observed_cycles=data["cycles"],
-        removed_spurs=cleanup.removed_spurs,
-        retained_ambiguous_edges=cleanup.retained_ambiguous_edges,
-        retained_unobserved_edges=cleanup.retained_unobserved_edges,
-        retained_unconfirmed_edges=cleanup.retained_unconfirmed_edges,
-        loops=cleanup.loops,
-    )
-    return _Structure(
-        width,
-        height,
-        bootstrap,
-        scale,
-        normalization,
-        contrast,
-        coherence,
-        nodes,
-        edges,
-        cycles,
-        images,
-        rank,
-        contours,
-        clarity,
-        feature_strength,
-    )
+def _render_options(dpi, alpha):
+    if type(dpi) is not int or not 1 <= dpi <= 600:
+        raise ValueError("report DPI must be an integer in [1, 600]")
+    alpha = finite_number(alpha, "alpha")
+    if not 0 <= alpha <= 1:
+        raise ValueError("alpha must be in [0, 1]")
+    return alpha
 
 
-def _graph_cycle_rank(node_ids, edges, isolated_cycles):
-    """Count independent cycles in the validated undirected multigraph.
-
-    E - V + C counts self-edges and parallel edges without interpreting their
-    biological meaning. Disconnected isolated nodes each add both V and C.
-    Node-free cycles stored separately each contribute one additional cycle.
-    """
-    parent = {node: node for node in node_ids}
-    components = len(node_ids)
-
-    def root(node):
-        while parent[node] != node:
-            parent[node] = parent[parent[node]]
-            node = parent[node]
-        return node
-
-    for edge in edges:
-        start, end = root(edge["start"]), root(edge["end"])
-        if start != end:
-            parent[start] = end
-            components -= 1
-
-    return len(edges) - len(node_ids) + components + isolated_cycles
+def _load_images(snapshot, stack):
+    images = {}
+    for key, path in snapshot.images.items():
+        image = load_image(path, (snapshot.width, snapshot.height))
+        stack.callback(image.close)
+        images[key] = image
+    return images
 
 
-def _unique_fields(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON field {key!r}")
-        result[key] = value
-    return result
+def _figures(snapshot, images, palette, clarity_maps, alpha):
+    """Construct one figure at a time in REPORT_FILES order to bound memory."""
+    yield render_overview(snapshot, images)
+    yield render_structure_overlay(snapshot, images, alpha)
+    yield render_full_scale(snapshot.scale, images, alpha)
+    yield render_scale_analysis(snapshot.bootstrap, images["source"], alpha)
+    yield render_normalization_analysis(snapshot.normalization, palette, images)
+    yield render_contour_comparison(snapshot.contours, images["source"], alpha)
+    yield render_contour_overlay(snapshot.contours, images["source"], alpha)
+    yield render_clarity_analysis(snapshot.clarity, clarity_maps, images["source"], alpha)
+    yield render_feature_strength(snapshot.feature_strength, images["source"])
 
 
-def _reject_constant(value):
-    raise ValueError(f"JSON number {value!r} must be finite")
-
-
-def _object(value, name):
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be an object")
-    return value
-
-
-def _array(value, name, limit=_MAX_ITEMS):
-    if not isinstance(value, list) or len(value) > limit:
-        raise ValueError(f"{name} must be an array with at most {limit} items")
-    return value
-
-
-def _number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite number")
-    try:
-        converted = float(value)
-    except OverflowError as error:
-        raise ValueError(f"{name} must be a finite number") from error
-    if not math.isfinite(converted):
-        raise ValueError(f"{name} must be a finite number")
-    return converted
-
-
-def _dimension(value, name):
-    if type(value) is not int or not 1 <= value <= MAX_FRAME_SIDE:
-        raise ValueError(f"{name} must be an integer in [1, {MAX_FRAME_SIDE}]")
-    return value
-
-
-def _identifier(value, name):
-    if type(value) is not int or not 0 <= value < 2**64:
-        raise ValueError(f"{name} must be a nonnegative 64-bit integer")
-    return value
-
-
-def _identifiers(items, name):
-    seen = set()
-    for item in items:
-        item = _object(item, name)
-        identifier = _identifier(item.get("id"), f"{name}.id")
-        if identifier in seen:
-            raise ValueError(f"{name} contains duplicate IDs")
-        seen.add(identifier)
-    return seen
-
-
-def _position(value, name, width, height):
-    if not isinstance(value, list) or len(value) != 2:
-        raise ValueError(f"{name} must contain x and y")
-    x, y = (_number(coordinate, name) for coordinate in value)
-    if not 0 <= x <= width - 1 or not 0 <= y <= height - 1:
-        raise ValueError(f"{name} lies outside source pixel centers")
-    return x, y
-
-
-def _node(data, width, height):
-    x, y = _position([data.get("x"), data.get("y")], "node position", width, height)
-    kind = data.get("kind")
-    if not isinstance(kind, str) or kind not in _KINDS:
-        raise ValueError("node kind must be ending, junction, or isolated")
-    boundary = data.get("touches_unobserved")
-    if type(boundary) is not bool:
-        raise ValueError("node touches_unobserved must be a boolean")
-    return _Node(x, y, kind, boundary)
-
-
-def _curves(value, name, width, height, node_ids, unit):
-    items = _array(value, name)
-    _identifiers(items, name)
-    curves = []
-    total = 0
-    for item in items:
-        if name == "edges":
-            for end in ("start", "end"):
-                identifier = _identifier(item.get(end), f"edge.{end}")
-                if identifier not in node_ids:
-                    raise ValueError(f"edge.{end} references an unknown node")
-        raw_points = _array(item.get("points"), f"{name}.points")
-        if len(raw_points) < (3 if name == "cycles" else 2):
-            raise ValueError(f"{name} contains too few path points")
-        total += len(raw_points)
-        if total > _MAX_PATH_POINTS:
-            raise ValueError("graph exceeds the total path point limit")
-        points = tuple(_position(point, name, width, height) for point in raw_points)
-        error = _geometry(item, width, height, unit)
-        arc_units = item["geometry"]["arc_length_units"] if error is None else None
-        scores = validate_segment_clarity(
-            item.get("segment_clarity"), len(points), name == "cycles"
-        )
-        curves.append(_Curve(points, error, arc_units, scores))
-    return tuple(curves)
-
-
-def _geometry(curve, width, height, unit):
-    if "geometry" not in curve or "geometry_error" not in curve:
-        raise ValueError("curve must declare geometry and geometry_error")
-    geometry, error = curve["geometry"], curve["geometry_error"]
-    if geometry is None:
-        if not isinstance(error, str) or not error.strip() or len(error) > 512:
-            raise ValueError("unavailable curve geometry requires a bounded error message")
-        return error
-    if error is not None:
-        raise ValueError("available curve geometry cannot also have an error")
-    geometry = _object(geometry, "geometry")
-    length = _number(geometry.get("arc_length"), "geometry.arc_length")
-    chord = _number(geometry.get("chord_length"), "geometry.chord_length")
-    if length <= 0 or chord < 0 or chord > length * (1 + 1e-12):
-        raise ValueError("geometry requires a positive length and a chord no longer than the path")
-    for key, pixels in (("arc_length_units", length), ("chord_length_units", chord)):
-        units = _number(geometry.get(key), "geometry." + key)
-        if not math.isclose(units, pixels / unit, rel_tol=1e-8, abs_tol=1e-7):
-            raise ValueError(
-                f"geometry.{key} must equal its source length divided by scale.unit_px"
-            )
-    _position(geometry.get("midpoint"), "geometry.midpoint", width, height)
-    turning = _array(geometry.get("turning"), "geometry.turning")
-    previous = -1.0
-    for item in turning:
-        item = _object(item, "turning sample")
-        fraction = _number(item.get("arc_fraction"), "turning.arc_fraction")
-        _number(item.get("angle_radians"), "turning.angle_radians")
-        if not previous < fraction <= 1:
-            raise ValueError("turning fractions must strictly increase within [0, 1]")
-        previous = fraction
-    if len(turning) < 2 or turning[0]["arc_fraction"] != 0 or previous != 1:
-        raise ValueError("turning profile must cover fractions zero through one")
-    return None
-
-
-def _image_path(base, value, name):
-    if not isinstance(value, str) or not value or "\\" in value:
-        raise ValueError(f"images.{name} must be a relative local image path")
-    relative = Path(value)
-    if relative.is_absolute() or PureWindowsPath(value).drive or ".." in relative.parts:
-        raise ValueError(f"images.{name} must stay inside the snapshot directory")
-    try:
-        path = (base / relative).resolve(strict=True)
-    except (OSError, RuntimeError, ValueError) as error:
-        raise ValueError(f"images.{name} cannot be resolved") from error
-    if not path.is_relative_to(base) or not path.is_file():
-        raise ValueError(f"images.{name} must be a file inside the snapshot directory")
-    return path
-
-
-def _image_axes(axis, image, snapshot):
-    extent = (-0.5, snapshot.width - 0.5, snapshot.height - 0.5, -0.5)
-    axis.imshow(
-        image, cmap="gray", vmin=0, vmax=255, extent=extent, alpha=1, interpolation="nearest"
-    )
-    axis.set(xlim=extent[:2], ylim=extent[2:], xlabel="x (source px)", ylabel="y (source px)")
-    axis.set_aspect("equal")
-    axis.xaxis.set_major_locator(MaxNLocator(4))
-    axis.yaxis.set_major_locator(MaxNLocator(4))
-
-
-def _overview(snapshot, images):
-    height = min(16, max(6, 6.5 * snapshot.height / snapshot.width + 1.5))
-    figure, axes = plt.subplots(2, 4, figsize=(16, height), layout="constrained")
-    try:
-        for axis, (key, label) in zip(axes.flat[:-1], _STAGES, strict=True):
-            _image_axes(axis, images[key], snapshot)
-            axis.set_title(label)
-        summary = axes.flat[-1]
-        summary.set_axis_off()
-        mean = snapshot.clarity.mean_score
-        mean_text = "unavailable" if mean is None else f"{mean:.4f}"
-        feature_count = len(snapshot.feature_strength.candidates)
-        measured = sum(c.strength is not None for c in snapshot.feature_strength.candidates)
-        summary.text(
-            0.1,
-            0.95,
-            "Extracted graph topology\n\n"
-            f"Nodes: {len(snapshot.nodes)}\n"
-            f"Paths: {len(snapshot.edges)}\n"
-            f"Graph cycle rank: {snapshot.graph_cycle_rank}\n"
-            f"Isolated cycles: {len(snapshot.cycles)}\n\n"
-            f"Described path length: {_described_length(snapshot):.6g} R\n\n"
-            "Cycle rank counts independent graph cycles.\n"
-            "Image coordinates use source pixels.\n"
-            "Described path length is expressed in R.\n\n"
-            f"Clarity mean: {mean_text}\n"
-            f"Clarity support: {snapshot.clarity.supported_pixels} / "
-            f"{snapshot.clarity.total_pixels} pixels\n"
-            "Includes supported background.\n"
-            "Diagnostic, not matching probability.\n\n"
-            f"Feature candidates: {feature_count}\n"
-            f"Measured Q: {measured} / {feature_count}\n"
-            "Feature strength: feature-strength.png\n"
-            "All original candidates remain visible.",
-            transform=summary.transAxes,
-            ha="left",
-            va="top",
-            fontsize=10,
-            linespacing=1.25,
-        )
-        figure.suptitle(
-            "Native ridge extraction · supplied processing stages\n"
-            f"{snapshot.width} × {snapshot.height} source px · "
-            f"full mean width R = {snapshot.scale.unit_px:.4g} px · "
-            f"bootstrap period {snapshot.bootstrap.ridge_period_px:.4g} px · "
-            f"contrast ≥ {snapshot.contrast:g} · "
-            f"coherence ≥ {snapshot.coherence:g}",
-            fontsize=14,
-        )
-        return figure
-    except Exception:
-        plt.close(figure)
-        raise
-
-
-def _described_length(snapshot):
-    return math.fsum(
-        curve.arc_length_units
-        for curve in (*snapshot.edges, *snapshot.cycles)
-        if curve.arc_length_units is not None
-    )
-
-
-def _overlay(snapshot, images, alpha):
-    height = min(16, max(7, 9 * snapshot.height / snapshot.width))
-    figure, axis = plt.subplots(figsize=(11, height), layout="constrained")
-    try:
-        _image_axes(axis, images["source"], snapshot)
-        _draw_curves(axis, snapshot.edges, False)
-        _draw_curves(axis, snapshot.cycles, True)
-        _draw_nodes(axis, snapshot.nodes, alpha)
-        _graph_legend(figure)
-        counts = {kind: sum(node.kind == kind for node in snapshot.nodes) for kind in _KINDS}
-        boundary = sum(node.touches_unobserved for node in snapshot.nodes)
-        errors = [curve.geometry_error for curve in (*snapshot.edges, *snapshot.cycles)]
-        errors = [error for error in errors if error is not None]
-        figure.suptitle(
-            "Extracted ridge graph · candidate structure\n"
-            f"Full mean ridge width: 1 R = {snapshot.scale.unit_px:.4g} px · "
-            f"bootstrap period: {snapshot.bootstrap.ridge_period_px:.4g} px\n"
-            f"Graph cycle rank: {snapshot.graph_cycle_rank} · "
-            f"isolated cycles: {len(snapshot.cycles)}\n"
-            f"Paths: {len(snapshot.edges)} · "
-            f"endings: {counts['ending']} · junctions: {counts['junction']} · "
-            f"isolated nodes: {counts['isolated']}\n"
-            f"Nodes touching unobserved regions: {boundary} · "
-            f"curves without geometry: {len(errors)} · marker opacity: {alpha:g}",
-            fontsize=12,
-        )
-        if not snapshot.nodes and not snapshot.edges and not snapshot.cycles:
-            axis.text(
-                0.5,
-                0.5,
-                "No extracted graph structure",
-                transform=axis.transAxes,
-                ha="center",
-                va="center",
-                bbox={"facecolor": "white", "alpha": 0.9},
-            )
-        if errors:
-            message = "; ".join(sorted(set(errors)))
-            axis.set_title(textwrap.fill("Geometry unavailable: " + message[:350], 100), fontsize=9)
-        axis.set_xlabel("x (source px)\n" + OPACITY_LABEL, fontsize=9)
-        return figure
-    except Exception:
-        plt.close(figure)
-        raise
-
-
-def _draw_curves(axis, curves, closed):
-    for failed in (False, True):
-        paths = [curve for curve in curves if (curve.geometry_error is not None) == failed]
-        if paths:
-            color = "#e69f00" if failed else ("#a44cad" if closed else "#00a6b2")
-            axis.add_collection(
-                clarity_lines(
-                    ((curve.points, closed, curve.segment_clarity) for curve in paths),
-                    color,
-                    linewidths=0.9,
-                    linestyles="dashed" if closed else "solid",
-                    zorder=3,
-                )
-            )
-
-
-def _draw_nodes(axis, nodes, alpha):
-    for kind, (marker, color, _) in _KINDS.items():
-        for boundary in (False, True):
-            selected = [
-                node for node in nodes if node.kind == kind and node.touches_unobserved == boundary
-            ]
-            if not selected:
-                continue
-            x, y = [node.x for node in selected], [node.y for node in selected]
-            axis.scatter(
-                x,
-                y,
-                marker=marker,
-                s=30,
-                facecolors="none" if boundary else color,
-                edgecolors=color,
-                linewidths=0.9,
-                alpha=alpha,
-                zorder=4,
-            )
-            if boundary:
-                axis.scatter(
-                    x, y, marker="x", s=13, color="#242424", linewidths=0.7, alpha=alpha, zorder=5
-                )
-
-
-def _graph_legend(figure):
-    handles = [
-        Line2D([], [], color="#00a6b2", label="Observed path"),
-        Line2D([], [], color="#a44cad", linestyle="--", label="Isolated closed cycle"),
-        Line2D([], [], color="#e69f00", label="Geometry unavailable"),
-        Line2D([], [], color=UNKNOWN_COLOR, alpha=0.4, label="Clarity unavailable"),
-    ]
-    handles.extend(
-        Line2D([], [], marker=marker, color=color, linestyle="none", label=label)
-        for marker, color, label in _KINDS.values()
-    )
-    handles.append(
-        Line2D(
-            [],
-            [],
-            marker="o",
-            markerfacecolor="none",
-            color="#242424",
-            linestyle="none",
-            label="Hollow + ×: touches unobserved region",
-        )
-    )
-    figure.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=9)
+def _publish_figures(staging, output):
+    output.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for name in REPORT_FILES:
+        target = output / name
+        (staging / name).replace(target)
+        paths.append(target)
+    return paths
 
 
 def _save_figure(figure, path, dpi):

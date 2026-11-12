@@ -86,6 +86,21 @@ The command refuses symlink destinations and unrecognized files in the managed r
 
 Previously generated native bundles may omit newer diagnostic files and still be refreshed. The command recognizes their native schema, core files and allowed generated filenames; it never renders an old data format or removes unknown personal files.
 
+## Implementation responsibilities
+
+`cli.py` runs native extraction and manages the report lock, replacement and recovery.
+`structure.py` orchestrates validation, staged figure generation and publication;
+`snapshot.py` owns bounded JSON loading and the validated snapshot model. Scalar
+JSON checks live in `validation.py`, while graph and provenance checks remain
+with their corresponding measurement modules.
+
+`structure_render.py`, `contour_render.py` and `feature_strength_render.py` draw
+already validated observations, reconstructed contours and feature evidence.
+They do not select biometric thresholds or change native measurements. Report
+filenames are declared once in `structure.py`; native raster names follow the
+snapshot image contract. Adding a figure must preserve the report sequence and
+complete-output checks.
+
 ## Verification
 
 ```sh

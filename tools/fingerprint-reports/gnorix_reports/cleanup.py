@@ -11,16 +11,8 @@ from .cleanup_evidence import (
     validate_source_policy,
     validate_spur_evidence,
 )
-from .graph_validation import (
-    _array,
-    _id,
-    _number,
-    _object,
-    _points,
-    _references,
-    _same,
-    _unique_items,
-)
+from .graph_validation import path_points, reference_ids, unique_items
+from .validation import array_value, finite_number, identifier_value, object_value, require_close
 
 
 @dataclass(frozen=True)
@@ -58,11 +50,15 @@ class Cleanup:
 
 def validate_cleanup(value, raw_nodes, raw_edges, raw_cycles, width, height, unit):
     """Check the declared transformation without running its pruning classifier."""
-    data = _object(value, "cleanup")
+    data = object_value(value, "cleanup")
     if data.get("method") != "source-supported-ridge-cleanup":
         raise ValueError("cleanup.method must be source-supported-ridge-cleanup")
-    policy = _object(data.get("policy"), "cleanup.policy")
-    _same(_number(policy.get("cursor_diameter_px"), "cleanup threshold"), unit, "cleanup threshold")
+    policy = object_value(data.get("policy"), "cleanup.policy")
+    require_close(
+        finite_number(policy.get("cursor_diameter_px"), "cleanup threshold"),
+        unit,
+        "cleanup threshold",
+    )
     if type(policy.get("pass_count")) is not int or policy["pass_count"] != 1:
         raise ValueError("cleanup requires exactly one pass")
     cleanup_width = validate_source_policy(policy.get("source"), unit)
@@ -131,12 +127,12 @@ def validate_cleanup(value, raw_nodes, raw_edges, raw_cycles, width, height, uni
 
 
 def _pixels(value, width, height):
-    pixels = _array(value, "node pixels")
+    pixels = array_value(value, "node pixels")
     result = set()
     for point in pixels:
         if not isinstance(point, list) or len(point) != 2:
             raise ValueError("node pixel must contain x and y")
-        x, y = (_number(v, "node pixel") for v in point)
+        x, y = (finite_number(v, "node pixel") for v in point)
         if not (x.is_integer() and y.is_integer() and 0 <= x < width and 0 <= y < height):
             raise ValueError("node pixels must be source raster coordinates")
         result.add((x, y))
@@ -147,9 +143,9 @@ def _pixels(value, width, height):
 
 def _source_clusters(value, nodes, width, height):
     clusters, used = {}, set()
-    for item in _array(value, "cleanup.source_node_pixels"):
-        item = _object(item, "source node pixels")
-        source = _id(item.get("source_node"), "source_node")
+    for item in array_value(value, "cleanup.source_node_pixels"):
+        item = object_value(item, "source node pixels")
+        source = identifier_value(item.get("source_node"), "source_node")
         if source not in nodes or source in clusters:
             raise ValueError("source node pixels must reference every observed node once")
         pixels = _pixels(item.get("pixels"), width, height)
@@ -172,9 +168,9 @@ def _spur_assessments(value, nodes, edges, maximum):
             if sum(math.dist(a, b) for a, b in zip(points, points[1:])) < maximum:
                 expected.add(identifier)
     result = {}
-    for item in _array(value, "cleanup.spur_assessments"):
-        item = _object(item, "spur assessment")
-        source = _id(item.get("source_edge"), "spur assessment source_edge")
+    for item in array_value(value, "cleanup.spur_assessments"):
+        item = object_value(item, "spur assessment")
+        source = identifier_value(item.get("source_edge"), "spur assessment source_edge")
         if source in result or source not in expected:
             raise ValueError("spur assessments must cover each original short terminal once")
         result[source] = validate_spur_evidence(item.get("evidence"), maximum)
@@ -215,10 +211,10 @@ def _loops(value, nodes, edges, maximum):
         and all(nodes[node]["kind"] == "junction" and len(incident[node]) == 3 for node in pair)
     }
     result, consumed, seen_pairs = [], set(), set()
-    for item in _array(value, "cleanup.loops"):
-        item = _object(item, "loop assessment")
-        source_edges = _references(item.get("source_edges"), "loop source_edges")
-        source_nodes = _references(item.get("source_nodes"), "loop source_nodes")
+    for item in array_value(value, "cleanup.loops"):
+        item = object_value(item, "loop assessment")
+        source_edges = reference_ids(item.get("source_edges"), "loop source_edges")
+        source_nodes = reference_ids(item.get("source_nodes"), "loop source_nodes")
         if len(source_edges) != 2 or len(source_nodes) != 2:
             raise ValueError("loop assessment requires two original edges and two nodes")
         if any(
@@ -235,7 +231,7 @@ def _loops(value, nodes, edges, maximum):
         evidence = validate_loop_evidence(item.get("evidence"), maximum)
         removed = item.get("removed_edge")
         if removed is not None:
-            removed = _id(removed, "loop removed_edge")
+            removed = identifier_value(removed, "loop removed_edge")
             if (
                 evidence["decision"] != "confirmed"
                 or removed != source_edges[1 - evidence["preferred_arm"]]
@@ -277,11 +273,11 @@ def _removals(value, nodes, edges, maximum, assessments):
     for key, edge in edges.items():
         incident[edge["start"]].add(key)
         incident[edge["end"]].add(key)
-    for item in _array(value, "cleanup.removed_spurs"):
-        item = _object(item, "removed spur")
-        edge_id = _id(item.get("source_edge"), "removed source_edge")
-        attachment = _id(item.get("attachment_node"), "attachment_node")
-        terminal = _id(item.get("terminal_node"), "terminal_node")
+    for item in array_value(value, "cleanup.removed_spurs"):
+        item = object_value(item, "removed spur")
+        edge_id = identifier_value(item.get("source_edge"), "removed source_edge")
+        attachment = identifier_value(item.get("attachment_node"), "attachment_node")
+        terminal = identifier_value(item.get("terminal_node"), "terminal_node")
         if edge_id not in edges or edge_id in seen:
             raise ValueError("removed spur must reference a unique observed edge")
         edge = edges[edge_id]
@@ -291,10 +287,10 @@ def _removals(value, nodes, edges, maximum, assessments):
             raise ValueError("cleanup may remove only original junction-to-ending branches")
         if edge_id not in assessments or assessments[edge_id]["decision"] != "confirmed":
             raise ValueError("removed terminal branch requires confirmed source evidence")
-        length = _number(item.get("arc_length_px"), "removed arc length")
+        length = finite_number(item.get("arc_length_px"), "removed arc length")
         points = tuple(tuple(point) for point in edge["points"])
         observed_length = sum(math.dist(a, b) for a, b in zip(points, points[1:]))
-        _same(length, observed_length, "removed arc length")
+        require_close(length, observed_length, "removed arc length")
         if not (0 < length < maximum and 0 < observed_length < maximum):
             raise ValueError(
                 "removed terminal arc length must be strictly below the upper tolerance bound"
@@ -309,7 +305,7 @@ def _removals(value, nodes, edges, maximum, assessments):
 
 
 def _retained_candidates(value, reason, nodes, edges, maximum):
-    references = _references(value, "retained " + reason + " edges")
+    references = reference_ids(value, "retained " + reason + " edges")
     for identifier in references:
         if identifier not in edges:
             raise ValueError("retained cleanup candidate must reference an observed edge")
@@ -328,14 +324,14 @@ def _nodes(value, originals, clusters, removed, width, height):
     result, used = [], set()
     by_source = defaultdict(list)
     deleted = {spur.terminal_node for spur in removed}
-    for node in _unique_items(value, "cleanup.nodes"):
-        source = _id(node.get("source_node"), "cleaned source_node")
+    for node in unique_items(value, "cleanup.nodes"):
+        source = identifier_value(node.get("source_node"), "cleaned source_node")
         if source not in originals or source in deleted:
             raise ValueError("cleaned node must retain an undeleted observed node")
         pixels = _pixels(node.get("pixels"), width, height)
         if not pixels <= clusters[source] or pixels & used:
             raise ValueError("cleaned node pixels must be disjoint subsets of their source cluster")
-        position = (_number(node.get("x"), "node.x"), _number(node.get("y"), "node.y"))
+        position = (finite_number(node.get("x"), "node.x"), finite_number(node.get("y"), "node.y"))
         if position not in pixels:
             raise ValueError("cleaned node representative must be an observed member pixel")
         if node.get("kind") not in {"ending", "junction", "isolated"}:
@@ -360,11 +356,11 @@ def _nodes(value, originals, clusters, removed, width, height):
 
 def _routes(value, originals, clusters, observed_pixels, width, height):
     routes, used_links = {}, set()
-    for item in _unique_items(value, "cleanup.junction_routes"):
-        source = _id(item.get("source_node"), "route source_node")
+    for item in unique_items(value, "cleanup.junction_routes"):
+        source = identifier_value(item.get("source_node"), "route source_node")
         if source not in originals or originals[source]["kind"] != "junction":
             raise ValueError("junction route must belong to an observed junction")
-        points = _points(item.get("points"), False, width, height)
+        points = path_points(item.get("points"), False, width, height)
         if any(point not in clusters[source] for point in points):
             raise ValueError("junction route must use actual source cluster pixels")
         if any(not 0 < math.dist(a, b) <= math.sqrt(2) for a, b in zip(points, points[1:])):
@@ -387,17 +383,19 @@ def _routes(value, originals, clusters, observed_pixels, width, height):
 def _paths(value, closed, nodes, width, height):
     result = []
     pixels = {node["id"]: {tuple(point) for point in node["pixels"]} for node in nodes}
-    for path in _unique_items(value, "cleanup paths"):
-        points = _points(path.get("points"), closed, width, height)
+    for path in unique_items(value, "cleanup paths"):
+        points = path_points(path.get("points"), closed, width, height)
         validate_segment_clarity(path.get("segment_clarity"), len(points), closed)
         if not closed:
-            start, end = (_id(path.get(key), "cleanup endpoint") for key in ("start", "end"))
+            start, end = (
+                identifier_value(path.get(key), "cleanup endpoint") for key in ("start", "end")
+            )
             if start not in pixels or end not in pixels:
                 raise ValueError("cleanup edge references unknown node")
             if points[0] not in pixels[start] or points[-1] not in pixels[end]:
                 raise ValueError("cleanup edge ports must belong to their retained node pixels")
         origins = [
-            _references(path.get(key), key)
+            reference_ids(path.get(key), key)
             for key in ("source_edges", "source_cycles", "source_routes")
         ]
         if not any(origins):

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import matplotlib
 
+from .validation import finite_number
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -45,18 +47,6 @@ class ClarityMaps:
     supported: np.ndarray
 
 
-def _number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite number")
-    try:
-        number = float(value)
-    except OverflowError as error:
-        raise ValueError(f"{name} must be a finite number") from error
-    if not math.isfinite(number):
-        raise ValueError(f"{name} must be a finite number")
-    return number
-
-
 def validate_clarity(value, period: float, width: int, height: int) -> Clarity:
     if not isinstance(value, dict):
         raise ValueError("clarity must be an object")
@@ -68,7 +58,7 @@ def validate_clarity(value, period: float, width: int, height: int) -> Clarity:
     ):
         if value.get(key) != expected:
             raise ValueError(f"clarity.{key} must be {expected!r}")
-    native_period = _number(value.get("period_px"), "clarity.period_px")
+    native_period = finite_number(value.get("period_px"), "clarity.period_px")
     if native_period <= 0 or not math.isclose(native_period, period, rel_tol=1e-8):
         raise ValueError("clarity.period_px must equal bootstrap.ridge_period_px")
     spacing = value.get("grid_spacing_px")
@@ -87,7 +77,7 @@ def validate_clarity(value, period: float, width: int, height: int) -> Clarity:
         if mean is not None:
             raise ValueError("unsupported clarity must have a null mean_score")
     else:
-        mean = _number(mean, "clarity.mean_score")
+        mean = finite_number(mean, "clarity.mean_score")
         if not 0 <= mean <= 1:
             raise ValueError("clarity.mean_score must be in [0, 1]")
     return Clarity(native_period, spacing, supported, total, mean)
@@ -178,7 +168,7 @@ def validate_segment_clarity(value, point_count: int, closed: bool) -> tuple[flo
         raise ValueError("segment_clarity must contain one value per supplied path segment")
     result = []
     for item in value:
-        score = None if item is None else _number(item, "segment_clarity")
+        score = None if item is None else finite_number(item, "segment_clarity")
         if score is not None and not 0 <= score <= 1:
             raise ValueError("segment_clarity values must be null or in [0, 1]")
         result.append(score)

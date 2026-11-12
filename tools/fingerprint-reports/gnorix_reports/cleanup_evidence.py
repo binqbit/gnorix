@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from .graph_validation import _number, _object, _same
+from .validation import finite_number, object_value, require_close
 
 _DECISIONS = {
     "confirmed",
@@ -21,11 +21,11 @@ class CleanupWidth:
 
 
 def validate_source_policy(value, unit):
-    policy = _object(value, "cleanup.policy.source")
-    relative = _number(policy.get("relative_width_tolerance"), "relative_width_tolerance")
-    maximum = _number(policy.get("max_ridge_width_px"), "max_ridge_width_px")
-    _same(relative, 0.2, "cleanup relative width tolerance")
-    _same(maximum, 1.2 * unit, "cleanup maximum ridge width")
+    policy = object_value(value, "cleanup.policy.source")
+    relative = finite_number(policy.get("relative_width_tolerance"), "relative_width_tolerance")
+    maximum = finite_number(policy.get("max_ridge_width_px"), "max_ridge_width_px")
+    require_close(relative, 0.2, "cleanup relative width tolerance")
+    require_close(maximum, 1.2 * unit, "cleanup maximum ridge width")
     for name, expected in (
         ("dark_midpoint", 0.5),
         ("sample_spacing_px", 0.5),
@@ -37,7 +37,9 @@ def validate_source_policy(value, unit):
         ("loop_flank_search_px", maximum),
         ("loop_min_valley_length_px", 1.0),
     ):
-        _same(_number(policy.get(name), name), expected, "cleanup source policy " + name)
+        require_close(
+            finite_number(policy.get(name), name), expected, "cleanup source policy " + name
+        )
     return CleanupWidth(relative, maximum)
 
 
@@ -82,7 +84,7 @@ def validate_loop_evidence(value, maximum):
         if pair is not None:
             if not isinstance(pair, list) or len(pair) != 2:
                 raise ValueError("loop arm evidence must contain exactly two values")
-            values = [_number(item, name) for item in pair]
+            values = [finite_number(item, name) for item in pair]
             if name.endswith("_px") and min(values) < 0:
                 raise ValueError("loop arm distances cannot be negative")
     if "preferred_arm" not in evidence:
@@ -108,7 +110,7 @@ def validate_loop_evidence(value, maximum):
 
 
 def _evidence(value, kind):
-    evidence = _object(value, kind + " source evidence")
+    evidence = object_value(value, kind + " source evidence")
     decision = evidence.get("decision")
     if not isinstance(decision, str) or decision not in _DECISIONS:
         raise ValueError("unknown cleanup source decision")
@@ -119,7 +121,7 @@ def _optional_number(evidence, name):
     if name not in evidence:
         raise ValueError("cleanup source evidence is missing " + name)
     value = evidence[name]
-    return None if value is None else _number(value, name)
+    return None if value is None else finite_number(value, name)
 
 
 def _require_values(evidence, names):

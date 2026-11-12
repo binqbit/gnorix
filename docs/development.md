@@ -63,6 +63,8 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 
 The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` handles image I/O, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
 
+In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
+
 ## Connecting algorithms
 
 The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance; it does not implement registration, tolerance selection or biometric candidate encoding.

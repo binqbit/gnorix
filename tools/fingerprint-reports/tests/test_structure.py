@@ -15,7 +15,8 @@ from matplotlib.collections import LineCollection, PathCollection
 from matplotlib.text import Text
 from PIL import Image
 
-from gnorix_reports.structure import _load_structure, _save_figure, render_structure
+from gnorix_reports.snapshot import load_snapshot
+from gnorix_reports.structure import _save_figure, render_structure
 
 
 def fixture():
@@ -503,7 +504,7 @@ class StructureTests(unittest.TestCase):
         data["contours"] = unchanged_contours(data)
         # One cycle from the parallel pair, one self-edge, one isolated cycle.
         # The two isolated nodes must not change the cycle count.
-        self.assertEqual(_load_structure(self.write(data)).graph_cycle_rank, 3)
+        self.assertEqual(load_snapshot(self.write(data)).graph_cycle_rank, 3)
         self.render(data)
         self.assertIn("Graph cycle rank: 3", self.labels(self.figures[0]))
         self.assertIn("Graph cycle rank: 3", self.labels(self.figures[1]))
@@ -577,7 +578,7 @@ class StructureTests(unittest.TestCase):
         for data in cases:
             with self.subTest(data=data):
                 with self.assertRaises(ValueError):
-                    _load_structure(self.write(data))
+                    load_snapshot(self.write(data))
 
     def test_rejects_dimensions_nonfinite_values_and_outside_coordinates(self):
         modifications = [
@@ -611,7 +612,7 @@ class StructureTests(unittest.TestCase):
             data = fixture()
             change(data)
             with self.assertRaises(ValueError):
-                _load_structure(self.write(data))
+                load_snapshot(self.write(data))
 
     def test_all_images_are_decoded_and_size_checked_before_report_output(self):
         for invalid in (b"not an image", None):
@@ -630,11 +631,11 @@ class StructureTests(unittest.TestCase):
         data = fixture()
         data["schema"] = "other"
         with self.assertRaises(ValueError):
-            _load_structure(self.write(data))
+            load_snapshot(self.write(data))
         path = self.base / "snapshot.json"
         path.write_text('{"schema":"a","schema":"b"}', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            _load_structure(path)
+            load_snapshot(path)
         for options in (
             {"dpi": 0},
             {"dpi": 601},

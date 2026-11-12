@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 import matplotlib
 
+from .validation import finite_number
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -96,7 +98,7 @@ def validate_scale(value, width: int, height: int, max_profiles) -> ScaleAnalysi
     expected["ridge_period_mad_px"] = _mad(periods, expected["ridge_period_px"])
     declared = {}
     for name, measurement in expected.items():
-        actual = _finite(value.get(name), f"scale.{name}")
+        actual = finite_number(value.get(name), f"scale.{name}")
         if actual < 0 or (name.endswith("_px") and "mad" not in name and actual == 0):
             raise ValueError(f"scale.{name} must be positive, or nonnegative for MAD")
         if name.endswith("_gray") and actual > 255:
@@ -127,7 +129,7 @@ def _gray_means(profiles, name, count):
         if not isinstance(supplied, list) or len(supplied) != count:
             raise ValueError(f"scale profile {name} must contain exactly {count} means")
         for raw in supplied:
-            value = _finite(raw, f"scale profile {name}")
+            value = finite_number(raw, f"scale profile {name}")
             if not 0 <= value <= 255:
                 raise ValueError(f"scale profile {name} must be in [0, 255]")
             values.append(value)
@@ -140,18 +142,6 @@ def _weighted_mean(values, lengths):
     ) / math.fsum(lengths)
 
 
-def _finite(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite number")
-    try:
-        result = float(value)
-    except OverflowError as error:
-        raise ValueError(f"{name} must be a finite number") from error
-    if not math.isfinite(result):
-        raise ValueError(f"{name} must be a finite number")
-    return result
-
-
 def _count(value, name, minimum, maximum):
     if type(value) is not int or not minimum <= value <= maximum:
         raise ValueError(f"{name} must be an integer in [{minimum}, {maximum}]")
@@ -161,7 +151,7 @@ def _count(value, name, minimum, maximum):
 def _point(value, width, height):
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError("scale span endpoints must contain x and y")
-    x, y = (_finite(coordinate, "scale endpoint") for coordinate in value)
+    x, y = (finite_number(coordinate, "scale endpoint") for coordinate in value)
     if not 0 <= x <= width - 1 or not 0 <= y <= height - 1:
         raise ValueError("scale endpoint lies outside source pixel centers")
     return x, y
@@ -232,7 +222,7 @@ def validate_width_consistency(value, widths, median):
     for raw, tolerance in zip(value, _TOLERANCES, strict=True):
         if (
             not isinstance(raw, dict)
-            or _finite(raw.get("relative_tolerance"), "tolerance") != tolerance
+            or finite_number(raw.get("relative_tolerance"), "tolerance") != tolerance
         ):
             raise ValueError("width_consistency bands must be ordered as 0.1, 0.2, 0.3")
         supplied_total = _count(raw.get("total_measurements"), "total_measurements", total, total)
@@ -240,7 +230,7 @@ def validate_width_consistency(value, widths, median):
         expected = sum(_within_width_band(width, median, tolerance) for width in widths)
         if accepted != expected:
             raise ValueError("width consistency count does not match all width observations")
-        fraction = _finite(raw.get("fraction"), "width consistency fraction")
+        fraction = finite_number(raw.get("fraction"), "width consistency fraction")
         if not 0 <= fraction <= 1 or not math.isclose(
             fraction, accepted / total, rel_tol=1e-12, abs_tol=1e-12
         ):

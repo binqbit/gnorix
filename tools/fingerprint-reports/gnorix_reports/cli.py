@@ -12,39 +12,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import mkdtemp
 
-from .structure import MAX_SNAPSHOT_BYTES, render_structure
+from .snapshot import MAX_SNAPSHOT_BYTES, SCHEMA, SOURCE_IMAGE_FILES
+from .structure import REPORT_FILES, render_structure
 
-_REPORTS = (
-    "overview.png",
-    "structure-overlay.png",
-    "scale-analysis.png",
-    "bootstrap-analysis.png",
-    "normalization-analysis.png",
-    "contour-comparison.png",
-    "contour-overlay.png",
-    "clarity-analysis.png",
-    "feature-strength.png",
-)
-_DATA_FILES = {
-    "features.json",
-    "source.png",
-    "normalized.png",
-    "denoised.png",
-    "coherence.png",
-    "usable.png",
-    "binary.png",
-    "skeleton.png",
-    "ridge-level.png",
-    "valley-level.png",
-    "normalization-support.png",
-    "measurement-skeleton.png",
-    "pattern-support.png",
-    "clarity.png",
-    "clarity-contrast.png",
-    "clarity-separation.png",
-    "clarity-repetition.png",
-    "clarity-support.png",
-}
+_DATA_FILES = {"features.json", *SOURCE_IMAGE_FILES}
 
 
 class _RecoveryRequired(RuntimeError):
@@ -89,7 +60,7 @@ def _validate_existing(output: Path) -> None:
         raise ValueError("reports/fingerprint must be a real directory")
     if not output.exists() or not any(output.iterdir()):
         return
-    expected = {*_REPORTS, "README.md", "data"}
+    expected = {*REPORT_FILES, "README.md", "data"}
     children = {path.name: path for path in output.iterdir()}
     # Recognize owned output by its core files and known filenames. A new
     # diagnostic may be absent in a previous run; it needs no legacy renderer.
@@ -118,7 +89,7 @@ def _validate_existing(output: Path) -> None:
         snapshot = json.loads(encoded)
     except (ValueError, UnicodeError, RecursionError) as error:
         raise ValueError("existing report does not contain identifiable native output") from error
-    if not isinstance(snapshot, dict) or snapshot.get("schema") != "gnorix.ridge-extraction.v1":
+    if not isinstance(snapshot, dict) or snapshot.get("schema") != SCHEMA:
         raise ValueError("existing report is not a native Gnorix extraction")
 
 

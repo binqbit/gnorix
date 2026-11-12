@@ -12,7 +12,8 @@ from test_cleanup import fixture, validate
 from test_structure import unchanged_contours
 
 from gnorix_reports.cleanup import validate_cleanup
-from gnorix_reports.contours import _detail, render_contour_comparison, validate_contours
+from gnorix_reports.contour_render import _detail, render_contour_comparison
+from gnorix_reports.contours import validate_contours
 
 
 def loop_fixture(confirmed=True):
