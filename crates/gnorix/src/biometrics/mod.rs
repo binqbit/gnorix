@@ -1,6 +1,7 @@
 //! Acquisition data and the boundary for an explicitly chosen measurement model.
 
 pub mod capture;
+pub mod fingerprint;
 pub mod geometry;
 
 use std::fmt;

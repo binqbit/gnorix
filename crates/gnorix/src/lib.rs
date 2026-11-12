@@ -1,8 +1,9 @@
 //! Gnorix's independent enrollment, signing and verification foundation.
 //!
 //! Applications supply a [`biometrics::MeasurementEngine`] and a
-//! [`crypto::CryptoProvider`]. No biometric interpretation, tolerance, key
-//! derivation or signature algorithm is selected by this crate.
+//! [`crypto::CryptoProvider`]. Per-capture ridge extraction is available in
+//! [`biometrics::fingerprint`]; registration, matching tolerances, candidate
+//! encoding, key derivation and signature algorithms remain explicit choices.
 //! Public verification alone requires only [`crypto::SignatureVerifier`].
 //!
 //! [`authorization::verify`] checks evidence against an independently trusted
