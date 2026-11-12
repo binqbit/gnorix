@@ -169,6 +169,12 @@ def _extract(root: Path, image: Path, destination: Path) -> None:
 def _write_readme(staging: Path) -> None:
     data = json.loads((staging / "data" / "features.json").read_text(encoding="utf-8"))
     contours = data["contours"]
+    cleanup = data["cleanup"]
+    source_policy = cleanup["policy"]["source"]
+    relative = source_policy["relative_width_tolerance"]
+    lower = (1 - relative) * data["scale"]["unit_px"]
+    upper = source_policy["max_ridge_width_px"]
+    collapsed = sum(loop["removed_edge"] is not None for loop in cleanup["loops"])
     adjustments = contours["smoothing"]["edges"] + contours["smoothing"]["cycles"]
     accepted = sum(join["status"] == "accepted" for join in contours["joins"])
     applied = sum(item["smoothing_applied"] for item in adjustments)
@@ -188,12 +194,22 @@ Start with [the overview](overview.png). This folder contains the latest success
 - [Local clarity and components](clarity-analysis.png)
 
 Common width unit R: **{data["scale"]["unit_px"]:.6g} source pixels**.
+Global width tolerance: **±{relative:.0%}**, **{lower:.6g}–{upper:.6g} px** (0.8R–1.2R).
+The lower reference does not exclude smaller artifacts; R remains the measured mean.
+Source-confirmed terminal spurs removed: **{len(cleanup["removed_spurs"])}**, in one pass with
+branch arc length strictly less than the upper tolerance bound **{upper:.6g} px** (1.2R).
+Ambiguous branches retained: **{len(cleanup["retained_ambiguous_edges"])}**.
+Branches retained due to missing source support: **{len(cleanup["retained_unobserved_edges"])}**.
+Unconfirmed terminal branches retained: **{len(cleanup["retained_unconfirmed_edges"])}**.
+Split/rejoin loops collapsed: **{collapsed}**.
+Each collapse retains a source-supported observed arm; the split between the arms is less than 1.2R.
 Smoothing applied to **{applied} / {len(adjustments)} paths**.
 Accepted source-supported joins: **{accepted}**.
 Candidates kept separate: **{len(contours["joins"]) - accepted}**.
 Native mean clarity over supported pixels: **{mean_text}**.
 Clarity support: **{clarity["supported_pixels"]} / {clarity["total_pixels"]} pixels**.
 
+Vermillion dashed paths show removed terminal spurs and duplicate loop arms.
 Overlays retain source coordinates. Green joins were accepted using image evidence;
 amber dashed candidates remain disconnected. Smoothed geometry is an estimate,
 not verified anatomy or a biometric matching score.

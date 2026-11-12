@@ -23,18 +23,95 @@ const OFFSETS: [(isize, isize); 8] = [
     (1, 1),
 ];
 
-pub(super) fn trace(map: &RidgeMap) -> Result<RidgeGraph, FingerprintError> {
-    validate_map(map)?;
-    let degrees = pixel_degrees(map);
-    let (nodes, node_pixels, ownership) = collect_nodes(map, &degrees)?;
-    let mut visited = vec![0_u8; map.ridges.len()];
-    let edges = trace_edges(map, &node_pixels, &ownership, &mut visited)?;
-    let cycles = trace_cycles(map, &ownership, &mut visited)?;
+pub(super) struct TracedGraph {
+    pub graph: RidgeGraph,
+    pub node_pixels: Vec<Vec<usize>>,
+}
 
-    Ok(RidgeGraph {
-        nodes,
-        edges,
-        cycles,
+pub(super) fn trace(map: &RidgeMap) -> Result<RidgeGraph, FingerprintError> {
+    Ok(trace_with_pixels(map)?.graph)
+}
+
+pub(super) fn trace_with_pixels(map: &RidgeMap) -> Result<TracedGraph, FingerprintError> {
+    trace_view(TraceView {
+        source: map,
+        retained: None,
+        source_nodes: None,
+    })
+}
+
+/// Trace a subset without inventing diagonals when removed pixels change corner
+/// occupancy. All retained links are links of the original source skeleton.
+pub(super) fn trace_subset(
+    map: &RidgeMap,
+    retained: &[bool],
+    source_nodes: &[usize],
+) -> Result<TracedGraph, FingerprintError> {
+    if retained.len() != map.ridges.len()
+        || source_nodes.len() != map.ridges.len()
+        || retained
+            .iter()
+            .zip(&map.ridges)
+            .any(|(&keep, &ridge)| keep && !ridge)
+    {
+        return Err(FingerprintError::InvalidMap(
+            "retained skeleton is not a source subset",
+        ));
+    }
+    trace_view(TraceView {
+        source: map,
+        retained: Some(retained),
+        source_nodes: Some(source_nodes),
+    })
+}
+
+struct TraceView<'a> {
+    source: &'a RidgeMap,
+    retained: Option<&'a [bool]>,
+    source_nodes: Option<&'a [usize]>,
+}
+
+impl std::ops::Deref for TraceView<'_> {
+    type Target = RidgeMap;
+    fn deref(&self) -> &Self::Target {
+        self.source
+    }
+}
+
+impl TraceView<'_> {
+    fn contains(&self, pixel: usize) -> bool {
+        is_ridge(self.source, pixel) && self.retained.is_none_or(|kept| kept[pixel])
+    }
+
+    fn neighbors(&self, pixel: usize) -> [Option<usize>; 8] {
+        neighbors(self.source, pixel).map(|next| next.filter(|&next| self.contains(next)))
+    }
+
+    fn cluster_neighbors(&self, pixel: usize) -> [Option<usize>; 8] {
+        self.neighbors(pixel).map(|next| {
+            next.filter(|&next| {
+                self.source_nodes
+                    .is_none_or(|sources| sources[pixel] == sources[next])
+            })
+        })
+    }
+}
+
+fn trace_view(map: TraceView<'_>) -> Result<TracedGraph, FingerprintError> {
+    validate_map(&map)?;
+    let degrees = pixel_degrees(&map);
+    let (nodes, node_pixels, ownership) = collect_nodes(&map, &degrees)?;
+    let mut visited = vec![0_u8; map.ridges.len()];
+    let edges = trace_edges(&map, &node_pixels, &ownership, &mut visited)?;
+    let cycles = trace_cycles(&map, &ownership, &mut visited)?;
+
+    Ok(TracedGraph {
+        graph: RidgeGraph {
+            nodes,
+            edges,
+            cycles,
+        },
+        node_pixels,
     })
 }
 
@@ -51,11 +128,11 @@ fn validate_map(map: &RidgeMap) -> Result<(), FingerprintError> {
     Ok(())
 }
 
-fn pixel_degrees(map: &RidgeMap) -> Vec<u8> {
+fn pixel_degrees(map: &TraceView<'_>) -> Vec<u8> {
     (0..map.ridges.len())
         .map(|pixel| {
-            if is_ridge(map, pixel) {
-                neighbors(map, pixel).iter().flatten().count() as u8
+            if map.contains(pixel) {
+                map.neighbors(pixel).iter().flatten().count() as u8
             } else {
                 0
             }
@@ -65,13 +142,13 @@ fn pixel_degrees(map: &RidgeMap) -> Vec<u8> {
 
 type CollectedNodes = (Vec<RidgeNode>, Vec<Vec<usize>>, Vec<usize>);
 
-fn collect_nodes(map: &RidgeMap, degrees: &[u8]) -> Result<CollectedNodes, FingerprintError> {
+fn collect_nodes(map: &TraceView<'_>, degrees: &[u8]) -> Result<CollectedNodes, FingerprintError> {
     let mut nodes = Vec::new();
     let mut node_pixels = Vec::new();
     let mut ownership = vec![NO_NODE; map.ridges.len()];
 
     for pixel in 0..map.ridges.len() {
-        if !is_ridge(map, pixel) || degrees[pixel] == 2 || ownership[pixel] != NO_NODE {
+        if !map.contains(pixel) || degrees[pixel] == 2 || ownership[pixel] != NO_NODE {
             continue;
         }
         let node_index = nodes.len();
@@ -94,7 +171,11 @@ fn collect_nodes(map: &RidgeMap, degrees: &[u8]) -> Result<CollectedNodes, Finge
     Ok((nodes, node_pixels, ownership))
 }
 
-fn make_node(map: &RidgeMap, degree: u8, pixels: &[usize]) -> Result<RidgeNode, FingerprintError> {
+fn make_node(
+    map: &TraceView<'_>,
+    degree: u8,
+    pixels: &[usize],
+) -> Result<RidgeNode, FingerprintError> {
     Ok(RidgeNode {
         position: point(map, pixels[0])?,
         kind: match degree {
@@ -106,13 +187,13 @@ fn make_node(map: &RidgeMap, degree: u8, pixels: &[usize]) -> Result<RidgeNode, 
     })
 }
 
-fn is_cyclic_junction_cluster(map: &RidgeMap, degrees: &[u8], pixels: &[usize]) -> bool {
+fn is_cyclic_junction_cluster(map: &TraceView<'_>, degrees: &[u8], pixels: &[usize]) -> bool {
     if degrees[pixels[0]] < 3 {
         return false;
     }
     let mut links = 0;
     for &pixel in pixels {
-        for next in neighbors(map, pixel).into_iter().flatten() {
+        for next in map.cluster_neighbors(pixel).into_iter().flatten() {
             if next > pixel && degrees[next] >= 3 {
                 links += 1;
                 // grow_node returns a connected cluster. It contains a cycle
@@ -127,7 +208,7 @@ fn is_cyclic_junction_cluster(map: &RidgeMap, degrees: &[u8], pixels: &[usize]) 
 }
 
 fn grow_node(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     degrees: &[u8],
     ownership: &mut [usize],
     seed: usize,
@@ -142,7 +223,7 @@ fn grow_node(
     // A queue cursor avoids recursion and visits every junction pixel once.
     let mut cursor = 0;
     while cursor < pixels.len() {
-        for neighbor in neighbors(map, pixels[cursor]).into_iter().flatten() {
+        for neighbor in map.cluster_neighbors(pixels[cursor]).into_iter().flatten() {
             if degrees[neighbor] >= 3 && ownership[neighbor] == NO_NODE {
                 ownership[neighbor] = node;
                 pixels.push(neighbor);
@@ -154,7 +235,7 @@ fn grow_node(
 }
 
 fn trace_edges(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     node_pixels: &[Vec<usize>],
     ownership: &[usize],
     visited: &mut [u8],
@@ -162,7 +243,7 @@ fn trace_edges(
     let mut edges = Vec::new();
     for (start, pixels) in node_pixels.iter().enumerate() {
         for &pixel in pixels {
-            for (direction, neighbor) in neighbors(map, pixel).into_iter().enumerate() {
+            for (direction, neighbor) in map.neighbors(pixel).into_iter().enumerate() {
                 let Some(neighbor) = neighbor else { continue };
                 if ownership[neighbor] == start || is_visited(visited, pixel, direction) {
                     continue;
@@ -176,7 +257,7 @@ fn trace_edges(
 }
 
 fn walk_edge(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     ownership: &[usize],
     visited: &mut [u8],
     start: usize,
@@ -203,13 +284,13 @@ fn walk_edge(
 }
 
 fn trace_cycles(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     ownership: &[usize],
     visited: &mut [u8],
 ) -> Result<Vec<RidgeCycle>, FingerprintError> {
     let mut cycles = Vec::new();
     for seed in 0..map.ridges.len() {
-        if !is_ridge(map, seed) || ownership[seed] != NO_NODE || visited[seed] != 0 {
+        if !map.contains(seed) || ownership[seed] != NO_NODE || visited[seed] != 0 {
             continue;
         }
         cycles.push(RidgeCycle {
@@ -220,13 +301,14 @@ fn trace_cycles(
 }
 
 fn walk_cycle(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     ownership: &[usize],
     visited: &mut [u8],
     seed: usize,
 ) -> Result<Vec<Point>, FingerprintError> {
     let mut points = vec![point(map, seed)?];
-    let (direction, first) = neighbors(map, seed)
+    let (direction, first) = map
+        .neighbors(seed)
         .into_iter()
         .enumerate()
         .find_map(|(direction, pixel)| pixel.map(|pixel| (direction, pixel)))
@@ -258,11 +340,11 @@ fn walk_cycle(
 }
 
 fn continuation(
-    map: &RidgeMap,
+    map: &TraceView<'_>,
     current: usize,
     previous: usize,
 ) -> Result<(usize, usize), FingerprintError> {
-    let adjacent = neighbors(map, current);
+    let adjacent = map.neighbors(current);
     let mut onward = adjacent
         .into_iter()
         .enumerate()
@@ -317,7 +399,7 @@ fn is_ridge(map: &RidgeMap, pixel: usize) -> bool {
     map.usable[pixel] && map.ridges[pixel]
 }
 
-fn touches_unknown(map: &RidgeMap, pixel: usize) -> bool {
+pub(super) fn touches_unknown(map: &RidgeMap, pixel: usize) -> bool {
     if map.boundary_origin[pixel] {
         return true;
     }

@@ -1,6 +1,6 @@
 use gnorix::biometrics::{
     Capture,
-    fingerprint::{self, ExtractionConfig, FingerprintError, NodeKind, RidgeMap},
+    fingerprint::{self, ExtractionConfig, FingerprintError, NodeKind, RidgeMap, SourceDecision},
 };
 
 #[test]
@@ -136,6 +136,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert_eq!(result.edge_geometry.len(), result.graph.edges.len());
     assert_eq!(result.cycle_geometry.len(), result.graph.cycles.len());
     assert_contour_provenance(&result);
+    assert_reported_artifacts_removed(&result);
     assert_clarity_map(&result);
     assert_eq!(result.normalized.len(), capture.pixels().len());
     assert_eq!(result.palette.ridge_gray.len(), capture.pixels().len());
@@ -202,19 +203,158 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert!(!format!("{result:?}").contains("Point"));
 }
 
-fn assert_contour_provenance(result: &fingerprint::Fingerprint) {
-    let contours = &result.contours;
-    assert_eq!(contours.edge_geometry.len(), contours.graph.edges.len());
-    assert_eq!(contours.cycle_geometry.len(), contours.graph.cycles.len());
-    assert_eq!(contours.edge_smoothing.len(), result.graph.edges.len());
-    assert_eq!(contours.cycle_smoothing.len(), result.graph.cycles.len());
-    assert_eq!(contours.node_sources.len(), contours.graph.nodes.len());
-    for (node, &source) in contours.graph.nodes.iter().zip(&contours.node_sources) {
-        assert_eq!(node, &result.graph.nodes[source]);
+fn assert_reported_artifacts_removed(result: &fingerprint::Fingerprint) {
+    let cleanup = &result.contours.cleanup;
+    // These exact source-image landmarks identify the reported H-shaped
+    // processing artifact. They are regression locations, not algorithm knobs.
+    for (x, y) in [(926.0, 1322.0), (934.0, 1323.0), (925.0, 1335.0)] {
+        let terminal = result
+            .graph
+            .nodes
+            .iter()
+            .position(|node| {
+                node.kind == NodeKind::Ending && node.position.x() == x && node.position.y() == y
+            })
+            .expect("reported short branch must remain in the original observation");
+        assert!(
+            cleanup
+                .removed_spurs
+                .iter()
+                .any(|spur| spur.terminal_node == terminal),
+            "reported short branch at ({x}, {y}) was not corrected"
+        );
     }
 
-    let mut edges = vec![0; result.graph.edges.len()];
-    let mut cycles = vec![0; result.graph.cycles.len()];
+    // The fourth arm has a source-dark lateral continuation from (934, 1336)
+    // to (920, 1336). A light pixel at (920, 1335) prevents explaining it as
+    // the retained parent's normal footprint. Preserve this uncertainty.
+    let uncertain_terminal = result
+        .graph
+        .nodes
+        .iter()
+        .position(|node| node.position.x() == 934.0 && node.position.y() == 1340.0)
+        .expect("reported uncertain terminal must remain observed");
+    let uncertain_edge = result
+        .graph
+        .edges
+        .iter()
+        .position(|edge| edge.start == uncertain_terminal || edge.end == uncertain_terminal)
+        .unwrap();
+    assert!(cleanup.retained_unconfirmed_edges.contains(&uncertain_edge));
+    assert!(cleanup.spur_assessments.iter().any(|assessment| {
+        assessment.source_edge == uncertain_edge
+            && assessment.evidence.decision == fingerprint::SourceDecision::PossibleContinuation
+    }));
+
+    let arms: Vec<_> = result
+        .graph
+        .edges
+        .iter()
+        .enumerate()
+        .filter_map(|(id, edge)| {
+            let first = edge.points.first().unwrap();
+            let last = edge.points.last().unwrap();
+            ((first.x(), first.y()) == (833.0, 423.0) && (last.x(), last.y()) == (850.0, 436.0))
+                .then_some(id)
+        })
+        .collect();
+    assert_eq!(
+        arms.len(),
+        2,
+        "reported lens must remain in the original observation"
+    );
+    assert!(
+        cleanup.loops.iter().any(|assessment| {
+            assessment.source_edges.as_slice() == arms.as_slice()
+                && assessment.removed_edge.is_some()
+        }),
+        "reported duplicate ridge was not collapsed"
+    );
+}
+
+fn assert_contour_provenance(result: &fingerprint::Fingerprint) {
+    let contours = &result.contours;
+    let cleanup = &contours.cleanup;
+    let cleaned = &cleanup.graph;
+    assert_eq!(cleanup.cursor_diameter_px, result.scale.unit_px);
+    assert_eq!(cleanup.source_policy.relative_width_tolerance, 0.2);
+    assert_eq!(
+        cleanup.source_policy.max_ridge_width_px,
+        1.2 * result.scale.unit_px
+    );
+    let mut raw_edges = vec![0; result.graph.edges.len()];
+    let mut raw_cycles = vec![0; result.graph.cycles.len()];
+    let mut routes = vec![0; cleanup.junction_routes.len()];
+    for origin in cleanup.edge_origins.iter().chain(&cleanup.cycle_origins) {
+        for &id in &origin.source_edges {
+            raw_edges[id] += 1;
+        }
+        for &id in &origin.source_cycles {
+            raw_cycles[id] += 1;
+        }
+        for &id in &origin.source_routes {
+            routes[id] += 1;
+        }
+    }
+    for removed in &cleanup.removed_spurs {
+        assert!(removed.arc_length_px < cleanup.source_policy.max_ridge_width_px);
+        raw_edges[removed.source_edge] += 1;
+        assert_eq!(
+            result.graph.nodes[removed.terminal_node].kind,
+            NodeKind::Ending
+        );
+        let assessment = cleanup
+            .spur_assessments
+            .iter()
+            .find(|assessment| assessment.source_edge == removed.source_edge)
+            .unwrap();
+        assert_eq!(assessment.evidence.decision, SourceDecision::Confirmed);
+    }
+    for assessment in &cleanup.loops {
+        if let Some(removed) = assessment.removed_edge {
+            assert_eq!(assessment.evidence.decision, SourceDecision::Confirmed);
+            assert!(assessment.source_edges.contains(&removed));
+            let retained = assessment.source_edges[assessment.evidence.preferred_arm.unwrap()];
+            assert_ne!(removed, retained);
+            assert!(
+                assessment.evidence.max_width_px.unwrap()
+                    < cleanup.source_policy.max_ridge_width_px
+            );
+            raw_edges[removed] += 1;
+        }
+    }
+    assert!(
+        raw_edges
+            .iter()
+            .chain(&raw_cycles)
+            .chain(&routes)
+            .all(|&count| count == 1)
+    );
+    assert_eq!(cleanup.node_sources.len(), cleaned.nodes.len());
+    for ((node, pixels), &source) in cleaned
+        .nodes
+        .iter()
+        .zip(&cleanup.node_pixels)
+        .zip(&cleanup.node_sources)
+    {
+        assert!(pixels.contains(&node.position));
+        assert!(
+            pixels
+                .iter()
+                .all(|pixel| cleanup.source_node_pixels[source].contains(pixel))
+        );
+    }
+    assert_eq!(contours.edge_geometry.len(), contours.graph.edges.len());
+    assert_eq!(contours.cycle_geometry.len(), contours.graph.cycles.len());
+    assert_eq!(contours.edge_smoothing.len(), cleaned.edges.len());
+    assert_eq!(contours.cycle_smoothing.len(), cleaned.cycles.len());
+    assert_eq!(contours.node_sources.len(), contours.graph.nodes.len());
+    for (node, &source) in contours.graph.nodes.iter().zip(&contours.node_sources) {
+        assert_eq!(node, &cleaned.nodes[source]);
+    }
+
+    let mut edges = vec![0; cleaned.edges.len()];
+    let mut cycles = vec![0; cleaned.cycles.len()];
     let mut joins = vec![0; contours.joins.len()];
     for origin in contours.edge_origins.iter().chain(&contours.cycle_origins) {
         for &index in &origin.source_edges {

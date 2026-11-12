@@ -1,6 +1,6 @@
-//! Raw grayscale line integrals over the already confirmed source spans.
+//! Original-image photometry and source-validity checks.
 
-use super::{Capture, FingerprintError, raster};
+use super::{Capture, FingerprintError, LocalPalette, raster};
 use crate::biometrics::geometry::Point;
 
 /// Integrates the piecewise-bilinear source image, with no normalization or
@@ -71,6 +71,87 @@ pub(super) fn mean_gray(
         "photometry span crosses unobserved source pixels",
     ))?;
     Ok(integral.clamp(0.0, 255.0))
+}
+
+/// Requires valid capture and local reference support in every crossed interpolation cell.
+pub(super) fn segment_observed(
+    capture: &Capture,
+    palette: &LocalPalette,
+    start: Point,
+    end: Point,
+) -> Option<()> {
+    sample_darkness(capture, palette, start)?;
+    sample_darkness(capture, palette, end)?;
+    let (width, height) = (capture.width() as usize, capture.height() as usize);
+    raster::visit_cells(start, end, width, height, |cell| {
+        let (right, bottom) = ((cell.x + 1).min(width - 1), (cell.y + 1).min(height - 1));
+        let corners = [
+            cell.y * width + cell.x,
+            cell.y * width + right,
+            bottom * width + cell.x,
+            bottom * width + right,
+        ];
+        corners
+            .iter()
+            .all(|&index| {
+                let dark = palette.ridge_gray[index];
+                let light = palette.valley_gray[index];
+                palette.usable[index]
+                    && capture.valid_mask().is_none_or(|mask| mask[index])
+                    && dark.is_finite()
+                    && light.is_finite()
+                    && (0.0..=255.0).contains(&dark)
+                    && (0.0..=255.0).contains(&light)
+                    && light > dark
+            })
+            .then_some(())
+    })
+}
+
+/// Bilinear source darkness relative to local dark/light levels; not clamped to [0, 1].
+pub(super) fn sample_darkness(
+    capture: &Capture,
+    palette: &LocalPalette,
+    point: Point,
+) -> Option<f64> {
+    let (width, height) = (capture.width() as usize, capture.height() as usize);
+    if point.x() < 0.0
+        || point.y() < 0.0
+        || point.x() > (width - 1) as f64
+        || point.y() > (height - 1) as f64
+    {
+        return None;
+    }
+    let (x, y) = (point.x().floor() as usize, point.y().floor() as usize);
+    let (tx, ty) = (point.x() - x as f64, point.y() - y as f64);
+    let corners = [
+        y * width + x,
+        y * width + (x + 1).min(width - 1),
+        (y + 1).min(height - 1) * width + x,
+        (y + 1).min(height - 1) * width + (x + 1).min(width - 1),
+    ];
+    if corners
+        .iter()
+        .any(|&i| !palette.usable[i] || capture.valid_mask().is_some_and(|mask| !mask[i]))
+    {
+        return None;
+    }
+    let interpolate = |values: [f64; 4]| {
+        (values[0] * (1.0 - tx) + values[1] * tx) * (1.0 - ty)
+            + (values[2] * (1.0 - tx) + values[3] * tx) * ty
+    };
+    let dark = interpolate(corners.map(|i| f64::from(palette.ridge_gray[i])));
+    let light = interpolate(corners.map(|i| f64::from(palette.valley_gray[i])));
+    if !dark.is_finite()
+        || !light.is_finite()
+        || !(0.0..=255.0).contains(&dark)
+        || !(0.0..=255.0).contains(&light)
+        || light <= dark
+    {
+        return None;
+    }
+    let gray = interpolate(corners.map(|i| f64::from(capture.pixels()[i])));
+    Some((light - gray) / (light - dark))
 }
 
 #[cfg(test)]

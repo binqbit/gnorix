@@ -11,6 +11,7 @@ from matplotlib.text import Text
 from PIL import Image
 from test_structure import unchanged_contours
 
+from gnorix_reports.cleanup_evidence import validate_source_policy
 from gnorix_reports.contours import (
     render_contour_comparison,
     render_contour_overlay,
@@ -72,7 +73,16 @@ def fixture(accepted=True):
 
 
 def validate(raw, data):
-    return validate_contours(data, raw["nodes"], raw["edges"], raw["cycles"], 40, 32, 4)
+    return validate_contours(
+        data,
+        raw["nodes"],
+        raw["edges"],
+        raw["cycles"],
+        40,
+        32,
+        4,
+        cleanup_width=validate_source_policy(raw["cleanup"]["policy"]["source"], 4),
+    )
 
 
 class ContourTests(unittest.TestCase):

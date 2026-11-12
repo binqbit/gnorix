@@ -17,14 +17,26 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
 
 from .clarity import OPACITY_LABEL, UNKNOWN_COLOR, clarity_lines, validate_segment_clarity
+from .cleanup import LoopAssessment, RemovedSpur
+from .cleanup_evidence import CleanupWidth
+from .graph_validation import (
+    _array,
+    _id,
+    _number,
+    _object,
+    _points,
+    _references,
+    _same,
+    _unique_items,
+)
 
-_MAX_ITEMS = 100_000
 _MAX_POINTS = 1_000_000
 _STATUSES = {"accepted", "image_unsupported", "unobserved", "ambiguous", "obstructed"}
 _RAW_COLOR = "#a34981"
 _SMOOTH_COLOR = "#00a6b2"
 _JOIN_COLOR = "#009e73"
 _CANDIDATE_COLOR = "#e69f00"
+_REMOVED_COLOR = "#d55e00"
 
 
 @dataclass(frozen=True)
@@ -63,9 +75,16 @@ class Contours:
     width: int
     height: int
     unit_px: float
+    cleanup_width: CleanupWidth
     nodes: tuple[dict, ...]
     paths: tuple[ContourPath, ...]
     raw_paths: tuple[ContourPath, ...]
+    input_paths: tuple[ContourPath, ...]
+    removed_spurs: tuple[RemovedSpur, ...]
+    retained_ambiguous_edges: tuple[int, ...]
+    retained_unobserved_edges: tuple[int, ...]
+    retained_unconfirmed_edges: tuple[int, ...]
+    loops: tuple[LoopAssessment, ...]
     joins: tuple[GapJoin, ...]
     adjustments: tuple[SmoothingAdjustment, ...]
     sigma_px: float
@@ -73,8 +92,25 @@ class Contours:
     max_displacement_px: float
 
 
-def validate_contours(value, raw_nodes, raw_edges, raw_cycles, width, height, unit) -> Contours:
-    """Require complete provenance against the already validated observed graph.
+def validate_contours(
+    value,
+    raw_nodes,
+    raw_edges,
+    raw_cycles,
+    width,
+    height,
+    unit,
+    *,
+    cleanup_width,
+    observed_edges=None,
+    observed_cycles=None,
+    removed_spurs=(),
+    retained_ambiguous_edges=(),
+    retained_unobserved_edges=(),
+    retained_unconfirmed_edges=(),
+    loops=(),
+) -> Contours:
+    """Require complete provenance against the already validated cleaned input graph.
 
     Geometry and photometric scores describe the supplied native reconstruction.
     Validation does not reinterpret those scores as biometric confidence, nor
@@ -114,25 +150,25 @@ def validate_contours(value, raw_nodes, raw_edges, raw_cycles, width, height, un
     adjustments, sigma, spacing, displacement = _smoothing(
         data.get("smoothing"), edge_ids, cycle_ids, unit
     )
-    raw_paths = tuple(
-        ContourPath(
-            tuple(tuple(point) for point in item["points"]),
-            closed,
-            validate_segment_clarity(item.get("segment_clarity"), len(item["points"]), closed),
-            () if closed else (item["id"],),
-            (item["id"],) if closed else (),
-            (),
-        )
-        for closed, items in ((False, raw_edges), (True, raw_cycles))
-        for item in items
+    input_paths = _input_paths(raw_edges, raw_cycles)
+    raw_paths = _input_paths(
+        raw_edges if observed_edges is None else observed_edges,
+        raw_cycles if observed_cycles is None else observed_cycles,
     )
     return Contours(
         width,
         height,
         unit,
+        cleanup_width,
         nodes,
         paths,
         raw_paths,
+        input_paths,
+        removed_spurs,
+        retained_ambiguous_edges,
+        retained_unobserved_edges,
+        retained_unconfirmed_edges,
+        loops,
         joins,
         adjustments,
         sigma,
@@ -141,75 +177,19 @@ def validate_contours(value, raw_nodes, raw_edges, raw_cycles, width, height, un
     )
 
 
-def _object(value, name):
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be an object")
-    return value
-
-
-def _array(value, name, limit=_MAX_ITEMS):
-    if not isinstance(value, list) or len(value) > limit:
-        raise ValueError(f"{name} must be an array with at most {limit} items")
-    return value
-
-
-def _number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be finite")
-    try:
-        number = float(value)
-    except OverflowError as error:
-        raise ValueError(f"{name} must be finite") from error
-    if not math.isfinite(number):
-        raise ValueError(f"{name} must be finite")
-    return number
-
-
-def _same(actual, expected, name):
-    if not math.isclose(actual, expected, rel_tol=1e-8, abs_tol=1e-7):
-        raise ValueError(f"{name} does not match its source evidence")
-
-
-def _id(value, name):
-    if type(value) is not int or not 0 <= value < 2**64:
-        raise ValueError(f"{name} must be a nonnegative 64-bit integer")
-    return value
-
-
-def _unique_items(value, name):
-    items = _array(value, name)
-    seen = set()
-    for item in items:
-        item = _object(item, name)
-        identifier = _id(item.get("id"), name + ".id")
-        if identifier in seen:
-            raise ValueError(f"{name} contains duplicate IDs")
-        seen.add(identifier)
-    return items
-
-
-def _points(value, closed, width, height):
-    points = _array(value, "contour points")
-    if len(points) < (3 if closed else 2):
-        raise ValueError("contour contains too few points")
-    result = []
-    for point in points:
-        if not isinstance(point, list) or len(point) != 2:
-            raise ValueError("contour point must contain x and y")
-        x, y = (_number(v, "contour coordinate") for v in point)
-        if not 0 <= x <= width - 1 or not 0 <= y <= height - 1:
-            raise ValueError("contour coordinate lies outside source pixel centers")
-        result.append((x, y))
-    if all(point == result[0] for point in result):
-        raise ValueError("contour must contain a nonzero segment")
-    return tuple(result)
-
-
-def _references(value, name):
-    references = tuple(_id(item, name) for item in _array(value, name))
-    if len(set(references)) != len(references):
-        raise ValueError(f"{name} contains duplicate references")
-    return references
+def _input_paths(edges, cycles):
+    return tuple(
+        ContourPath(
+            tuple(tuple(point) for point in item["points"]),
+            closed,
+            validate_segment_clarity(item.get("segment_clarity"), len(item["points"]), closed),
+            () if closed else (item["id"],),
+            (item["id"],) if closed else (),
+            (),
+        )
+        for closed, items in ((False, edges), (True, cycles))
+        for item in items
+    )
 
 
 def _policy(value, unit):
@@ -415,7 +395,7 @@ def _smoothing(value, edge_ids, cycle_ids, unit):
 def render_contour_comparison(contours: Contours, source, alpha):
     """Show all raw/refined contours and a deterministic same-coordinate detail."""
     figure = plt.figure(figsize=(15, 16), layout="constrained")
-    grid = figure.add_gridspec(3, 2, height_ratios=(1, 1, 0.25))
+    grid = figure.add_gridspec(3, 2, height_ratios=(1, 1, 0.29))
     axes = [[figure.add_subplot(grid[row, column]) for column in range(2)] for row in range(2)]
     try:
         crop, detail = _detail(contours)
@@ -430,6 +410,7 @@ def render_contour_comparison(contours: Contours, source, alpha):
                         _draw_paths(axis, contours.raw_paths, _RAW_COLOR, reference=True)
                     _draw_paths(axis, contours.paths, _SMOOTH_COLOR)
                     _draw_joins(axis, contours.joins, alpha)
+                _draw_removed(axis, contours, alpha)
                 if row == 0:
                     x, y, width, height = crop
                     axis.add_patch(
@@ -438,9 +419,9 @@ def render_contour_comparison(contours: Contours, source, alpha):
                 else:
                     axis.set(xlim=(crop[0], crop[0] + crop[2]), ylim=(crop[1] + crop[3], crop[1]))
         axes[0][0].set_title("Observed raster paths · before geometric refinement")
-        axes[0][1].set_title("Refined contours · accepted joins included")
+        axes[0][1].set_title("Cleaned + refined contours · removed artifacts marked")
         axes[1][0].set_title("Same source detail · observed paths")
-        axes[1][1].set_title("Same source detail · refined + faint observed paths")
+        axes[1][1].set_title("Same source detail · retained contours + removed artifacts")
         figure.suptitle(_title(contours, "Geometric contour refinement"), fontsize=13)
         _footer(
             figure.add_subplot(grid[2, :]),
@@ -456,8 +437,8 @@ def render_contour_comparison(contours: Contours, source, alpha):
 
 def render_contour_overlay(contours: Contours, source, alpha):
     height = min(17, max(7, 9 * contours.height / contours.width))
-    figure = plt.figure(figsize=(11, height + 1), layout="constrained")
-    grid = figure.add_gridspec(2, 1, height_ratios=(height, 1.2))
+    figure = plt.figure(figsize=(11, height + 1.5), layout="constrained")
+    grid = figure.add_gridspec(2, 1, height_ratios=(height, 1.7))
     axis = figure.add_subplot(grid[0, 0])
     try:
         _image(axis, source, contours)
@@ -484,13 +465,24 @@ def _title(contours, title):
     applied = sum(item.smoothing_applied for item in contours.adjustments)
     limited = sum(item.retained_reason is not None for item in contours.adjustments)
     maximum = max((item.max_displacement_px for item in contours.adjustments), default=0)
+    relative = contours.cleanup_width.relative_tolerance
+    lower = (1 - relative) * contours.unit_px
+    upper = contours.cleanup_width.maximum_px
     return (
         f"{title}\n"
-        f"Raw paths: {len(contours.raw_paths)} → refined contours: {len(contours.paths)} · "
+        f"Raw paths: {len(contours.raw_paths)} → cleaned: {len(contours.input_paths)} "
+        f"→ refined contours: {len(contours.paths)} · "
         f"accepted joins: {accepted} · kept separate: {len(contours.joins) - accepted}\n"
+        f"Removed: {len(contours.removed_spurs)} terminal spurs, "
+        f"{sum(loop.removed_edge is not None for loop in contours.loops)} duplicate loop arms · "
+        f"retained spurs: {len(contours.retained_ambiguous_edges)} ambiguous, "
+        f"{len(contours.retained_unobserved_edges)} missing support, "
+        f"{len(contours.retained_unconfirmed_edges)} unconfirmed\n"
         f"Smoothing applied: {applied} / {len(contours.adjustments)} paths · "
         f"limited by safeguards: {limited} · largest displacement: {maximum:.3g} px\n"
-        f"R = {contours.unit_px:.4g} px · smoothing σ = {contours.sigma_px:.4g} px · "
+        f"Mean R = {contours.unit_px:.4g} px · ±{relative:.0%}: "
+        f"{lower:.3g}–{upper:.3g} px · spur arc, loop width < 1.2R · "
+        f"σ = {contours.sigma_px:.4g} px · "
         f"displacement bound = {contours.max_displacement_px:.4g} px"
     )
 
@@ -526,6 +518,25 @@ def _draw_paths(axis, paths, color, *, reference=False):
         axis.add_collection(lines)
 
 
+def _draw_removed(axis, contours, alpha):
+    # Removal is a native decision, independent of diagnostic clarity opacity.
+    paths = [spur.points for spur in contours.removed_spurs]
+    paths.extend(loop.removed_points for loop in contours.loops if loop.removed_edge is not None)
+    if paths:
+        from matplotlib.collections import LineCollection
+
+        axis.add_collection(
+            LineCollection(
+                paths,
+                colors=_REMOVED_COLOR,
+                alpha=alpha,
+                linewidths=1.6,
+                linestyles="--",
+                zorder=7,
+            )
+        )
+
+
 def _draw_joins(axis, joins, alpha):
     for accepted in (False, True):
         selected = [join for join in joins if (join.status == "accepted") == accepted]
@@ -558,7 +569,31 @@ def _draw_joins(axis, joins, alpha):
 
 def _detail(contours):
     accepted = [join for join in contours.joins if join.status == "accepted"]
-    if accepted:
+    collapsed = [loop for loop in contours.loops if loop.removed_edge is not None]
+    detail_bounds = None
+    if collapsed:
+        loop = max(collapsed, key=lambda item: (item.max_width_px, -item.removed_edge))
+        points = (*loop.removed_points, *loop.retained_points)
+        xs, ys = zip(*points, strict=True)
+        detail_bounds = (min(xs), min(ys), max(xs), max(ys))
+        center = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+        label = (
+            "Detail selected by widest source-confirmed collapsed loop: "
+            f"edges {loop.source_edges}; "
+            f"removed duplicate arm {loop.removed_edge}, width {loop.max_width_px:.3g} px "
+            f"< 1.2R = {contours.cleanup_width.maximum_px:.3g} px. "
+            "Vermillion is removed evidence."
+        )
+    elif contours.removed_spurs:
+        spur = max(contours.removed_spurs, key=lambda item: (item.arc_length_px, -item.source_edge))
+        center = spur.points[len(spur.points) // 2]
+        label = (
+            f"Detail selected by longest removed terminal spur: observed edge {spur.source_edge}, "
+            f"arc length {spur.arc_length_px:.3g} px "
+            f"< 1.2R = {contours.cleanup_width.maximum_px:.3g} px. "
+            "Vermillion marks removed evidence, not a retained contour."
+        )
+    elif accepted:
         join = max(accepted, key=lambda item: (item.gap_px, -item.identifier))
         center = tuple(
             (start + end) / 2 for start, end in zip(join.points[0], join.points[-1], strict=True)
@@ -571,12 +606,13 @@ def _detail(contours):
         adjustment = max(contours.adjustments, key=lambda item: item.max_displacement_px)
         path = next(
             path
-            for path in contours.raw_paths
+            for path in contours.input_paths
             if adjustment.source in (path.source_cycles if adjustment.closed else path.source_edges)
         )
         center = path.points[len(path.points) // 2]
         label = (
-            "No accepted joins. Detail uses the path with largest smoothing displacement: "
+            "No removed artifacts or accepted joins. "
+            "Detail uses the largest smoothing displacement: "
             f"{'cycle' if adjustment.closed else 'edge'} {adjustment.source}."
         )
     else:
@@ -584,6 +620,13 @@ def _detail(contours):
         label = "No paths available; showing the image center."
     span = max(8 * contours.unit_px, 24)
     width, height = min(span, contours.width), min(span, contours.height)
+    if detail_bounds is not None:
+        width = min(
+            contours.width, max(span, detail_bounds[2] - detail_bounds[0] + 2 * contours.unit_px)
+        )
+        height = min(
+            contours.height, max(span, detail_bounds[3] - detail_bounds[1] + 2 * contours.unit_px)
+        )
     x = max(-0.5, min(center[0] - width / 2, contours.width - 0.5 - width))
     y = max(-0.5, min(center[1] - height / 2, contours.height - 0.5 - height))
     return (x, y, width, height), label
@@ -594,6 +637,15 @@ def _footer(axis, text, width, raw=True):
     handles = []
     if raw:
         handles.append(Line2D([], [], color=_RAW_COLOR, label="Observed raster path"))
+        handles.append(
+            Line2D(
+                [],
+                [],
+                color=_REMOVED_COLOR,
+                linestyle="--",
+                label="Removed artifact: spur / loop arm",
+            )
+        )
     handles.extend(
         [
             Line2D([], [], color=_SMOOTH_COLOR, label="Refined contour"),

@@ -29,6 +29,7 @@ from .clarity import (
     validate_clarity_maps,
     validate_segment_clarity,
 )
+from .cleanup import validate_cleanup
 from .contours import (
     Contours,
     render_contour_comparison,
@@ -247,14 +248,30 @@ def _load_structure(path: Path) -> _Structure:
     cycles = _curves(data.get("cycles"), "cycles", width, height, node_ids, scale.unit_px)
     if sum(len(curve.points) for curve in (*edges, *cycles)) > _MAX_PATH_POINTS:
         raise ValueError("graph exceeds the total path point limit")
-
     raw_images = _object(data.get("images"), "images")
     base = path.resolve().parent
     keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES, *CLARITY_IMAGES)
     images = {key: _image_path(base, raw_images.get(key), key) for key in keys}
     rank = _graph_cycle_rank(node_ids, data["edges"], len(cycles))
+    cleanup = validate_cleanup(
+        data.get("cleanup"), raw_nodes, data["edges"], data["cycles"], width, height, scale.unit_px
+    )
     contours = validate_contours(
-        data.get("contours"), raw_nodes, data["edges"], data["cycles"], width, height, scale.unit_px
+        data.get("contours"),
+        cleanup.nodes,
+        cleanup.edges,
+        cleanup.cycles,
+        width,
+        height,
+        scale.unit_px,
+        cleanup_width=cleanup.width,
+        observed_edges=data["edges"],
+        observed_cycles=data["cycles"],
+        removed_spurs=cleanup.removed_spurs,
+        retained_ambiguous_edges=cleanup.retained_ambiguous_edges,
+        retained_unobserved_edges=cleanup.retained_unobserved_edges,
+        retained_unconfirmed_edges=cleanup.retained_unconfirmed_edges,
+        loops=cleanup.loops,
     )
     return _Structure(
         width,

@@ -50,7 +50,7 @@ Locations in this table are relative to `crates/gnorix`. High-level functions ca
 
 ## Connecting algorithms
 
-The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry and separately reconstructed smooth contours with source-pixel coordinates and explicit join provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
+The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
 
 Implement `MeasurementEngine` for the selected measurement strategy. It supplies a profile identifier, builds its own reconstruction model, enumerates all accepted enrollment candidates, and reconstructs candidates from a new capture under that same model. Its identifier must cover every setting that affects interpretation or candidate bytes.
 
@@ -107,7 +107,7 @@ uv run --project tools/fingerprint-reports --locked gnorix-report \
 
 The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization, source-based clarity and reconstructed contours. Geometry visibility follows the native segment clarity while unsupported measurements remain explicit. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.
 
-Geometry overlays default to a maximum opacity of 50% and retain source coordinates. `--overlay-alpha` and `--dpi` affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
+Clarity-colored lines use a fixed 40–90% opacity range and retain source coordinates. Other maps and annotations default to 50% opacity through `--overlay-alpha`; `--dpi` controls PNG resolution. Both options affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
 
 ## Change discipline
 

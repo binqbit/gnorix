@@ -2,6 +2,8 @@
 
 #[path = "fingerprint/clarity.rs"]
 mod clarity;
+#[path = "fingerprint/cleanup.rs"]
+mod cleanup;
 #[path = "fingerprint/contours.rs"]
 mod contours;
 
@@ -253,7 +255,7 @@ fn snapshot(
         .collect();
     Ok(json!({
         "schema":"gnorix.ridge-extraction.v1", "width":result.binary.width(),"height":result.binary.height(),
-        "algorithm":"Native local dark/light normalization, directional ridge enhancement, Zhang-Suen thinning, topology tracing, constrained Gaussian contours and source-supported cubic gap reconstruction",
+        "algorithm":"Native local dark/light normalization, directional ridge enhancement, Zhang-Suen thinning, topology tracing, source-supported ridge cleanup, constrained Gaussian contours and source-supported cubic gap reconstruction",
         "config":{"bootstrap_grid_locations":config.bootstrap_grid_locations,"min_contrast":config.min_contrast,"min_coherence":config.min_coherence},
         "bootstrap":bootstrap_snapshot(result)?,
         "scale":full_scale_snapshot(result),
@@ -263,6 +265,7 @@ fn snapshot(
         "qualifications":["Extraction controls are not biometric acceptance tolerances.","Topology is measured from the processed image, not confirmed anatomy.","No matching, key reconstruction or real-capture qualification is provided."],
         "images":{"source":"source.png","normalized":"normalized.png","denoised":"denoised.png","coherence":"coherence.png","usable":"usable.png","binary":"binary.png","skeleton":"skeleton.png","ridge_level":"ridge-level.png","valley_level":"valley-level.png","normalization_support":"normalization-support.png","measurement_skeleton":"measurement-skeleton.png","pattern_support":"pattern-support.png","clarity":"clarity.png","clarity_contrast":"clarity-contrast.png","clarity_separation":"clarity-separation.png","clarity_repetition":"clarity-repetition.png","clarity_support":"clarity-support.png"},
         "nodes":nodes,"edges":edges,"cycles":cycles,
+        "cleanup":cleanup::snapshot(&result.contours.cleanup, &result.clarity),
         "contours":contours::snapshot(&result.contours, result.scale.unit_px, &result.clarity),
     }))
 }

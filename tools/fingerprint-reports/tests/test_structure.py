@@ -2,6 +2,7 @@
 
 import copy
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -114,6 +115,7 @@ def fixture():
             {"id": 20, "x": 14, "y": 5, "kind": "junction", "touches_unobserved": False},
             {"id": 30, "x": 31, "y": 7, "kind": "ending", "touches_unobserved": True},
             {"id": 40, "x": 3, "y": 17, "kind": "isolated", "touches_unobserved": False},
+            {"id": 50, "x": 15, "y": 17, "kind": "ending", "touches_unobserved": False},
         ],
         "edges": [
             {
@@ -172,8 +174,91 @@ def fixture():
         },
     }
 
+    data["edges"].append(
+        {
+            "id": 100,
+            "start": 20,
+            "end": 50,
+            "points": [[14, 5], [14, 10], [15, 17]],
+            "geometry": None,
+            "geometry_error": "synthetic additional branch",
+        }
+    )
     data["contours"] = unchanged_contours(data)
     return data
+
+
+def cleanup_source_policy(unit):
+    return {
+        "relative_width_tolerance": 0.2,
+        "max_ridge_width_px": 1.2 * unit,
+        "dark_midpoint": 0.5,
+        "sample_spacing_px": 0.5,
+        "tangent_radius_px": unit / 2,
+        "max_backbone_extension_px": 2 * unit,
+        "terminal_lookahead_px": 1.2 * unit,
+        "terminal_barrier_width_px": unit,
+        "terminal_barrier_depth_px": unit / 4,
+        "loop_flank_search_px": 1.2 * unit,
+        "loop_min_valley_length_px": 1.0,
+    }
+
+
+def unchanged_cleanup(data):
+    unit = data["scale"]["unit_px"]
+    nodes = {node["id"]: node for node in data["nodes"]}
+    candidates = [
+        edge["id"]
+        for edge in data["edges"]
+        if {nodes[edge[key]]["kind"] for key in ("start", "end")} == {"junction", "ending"}
+        and sum(math.dist(a, b) for a, b in zip(edge["points"], edge["points"][1:])) < 1.2 * unit
+    ]
+    return {
+        "method": "source-supported-ridge-cleanup",
+        "policy": {
+            "cursor_diameter_px": unit,
+            "pass_count": 1,
+            "source": cleanup_source_policy(unit),
+        },
+        "nodes": [
+            {**node, "source_node": node["id"], "pixels": [[node["x"], node["y"]]]}
+            for node in data["nodes"]
+        ],
+        "source_node_pixels": [
+            {"source_node": node["id"], "pixels": [[node["x"], node["y"]]]}
+            for node in data["nodes"]
+        ],
+        **{
+            kind: [
+                {
+                    **copy.deepcopy(path),
+                    "source_edges": [path["id"]] if kind == "edges" else [],
+                    "source_cycles": [path["id"]] if kind == "cycles" else [],
+                    "source_routes": [],
+                }
+                for path in data[kind]
+            ]
+            for kind in ("edges", "cycles")
+        },
+        "junction_routes": [],
+        "removed_spurs": [],
+        "retained_ambiguous_edges": [],
+        "retained_unobserved_edges": [],
+        "retained_unconfirmed_edges": candidates,
+        "spur_assessments": [
+            {
+                "source_edge": identifier,
+                "evidence": {
+                    "decision": "possible_continuation",
+                    "terminal_darkness": 1,
+                    "light_barrier_distance_px": None,
+                    "min_barrier_lightness": None,
+                },
+            }
+            for identifier in candidates
+        ],
+        "loops": [],
+    }
 
 
 def unchanged_contours(data):
@@ -181,6 +266,7 @@ def unchanged_contours(data):
     for kind in ("edges", "cycles"):
         for path in data[kind]:
             path.setdefault("segment_clarity", [1] * (len(path["points"]) - (kind == "edges")))
+    data["cleanup"] = unchanged_cleanup(data)
     return {
         "method": "source-supported-smooth-contours",
         "nodes": [{**node, "source_node": node["id"]} for node in data["nodes"]],
@@ -331,14 +417,14 @@ class StructureTests(unittest.TestCase):
                 self.assertEqual(collection.get_alpha(), 0.4)
         text = self.labels(self.figures[1])
         for expected in (
-            "Paths: 2",
+            "Paths: 3",
             "isolated cycles: 1",
             "Graph cycle rank: 1",
             "Full mean ridge width: 1 R = 2 px",
-            "endings: 2",
+            "endings: 3",
             "junctions: 1",
             "isolated nodes: 1",
-            "curves without geometry: 1",
+            "curves without geometry: 2",
             "source px",
             "synthetic unresolved tangent",
             "Hollow + ×",
@@ -360,18 +446,16 @@ class StructureTests(unittest.TestCase):
         axis = self.figures[1].axes[0]
         lines = [artist for artist in axis.collections if isinstance(artist, LineCollection)]
         self.assertEqual(len(lines), 3)
-        for collection, points in zip(
-            lines,
-            (
-                data["edges"][0]["points"],
-                data["edges"][1]["points"],
-                data["cycles"][0]["points"] + [[20, 10]],
-            ),
-            strict=True,
-        ):
-            np.testing.assert_array_equal(
-                collection.get_segments(), list(zip(points[:-1], points[1:], strict=True))
-            )
+        expected = (
+            [data["edges"][0]["points"]],
+            [data["edges"][1]["points"], data["edges"][2]["points"]],
+            [data["cycles"][0]["points"] + [[20, 10]]],
+        )
+        for collection, paths in zip(lines, expected, strict=True):
+            segments = [
+                segment for points in paths for segment in zip(points[:-1], points[1:], strict=True)
+            ]
+            np.testing.assert_array_equal(collection.get_segments(), segments)
         scatter = [artist for artist in axis.collections if isinstance(artist, PathCollection)]
         boundary = [artist for artist in scatter if list(artist.get_offsets()[0]) == [31, 7]]
         self.assertEqual(len(boundary), 2)  # Hollow kind marker plus cross.
@@ -404,9 +488,9 @@ class StructureTests(unittest.TestCase):
                 },
                 {
                     "id": 11,
-                    "start": 20,
-                    "end": 20,
-                    "points": [[14, 5], [16, 6], [16, 8], [14, 5]],
+                    "start": 10,
+                    "end": 10,
+                    "points": [[3, 5], [5, 6], [5, 8], [3, 5]],
                     "geometry": None,
                     "geometry_error": "synthetic unavailable description",
                 },

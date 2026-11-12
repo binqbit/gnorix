@@ -135,6 +135,8 @@ class CommandTests(unittest.TestCase):
         readme = (self.output / "README.md").read_text()
         self.assertIn("[the overview](overview.png)", readme)
         self.assertIn("**2 source pixels**", readme)
+        self.assertIn("**±20%**, **1.6–2.4 px**", readme)
+        self.assertIn("upper tolerance bound **2.4 px** (1.2R)", readme)
         self.assertIn("[Refined contour overlay](contour-overlay.png)", readme)
 
     def test_successful_rerun_replaces_the_previous_bundle_without_accumulation(self):

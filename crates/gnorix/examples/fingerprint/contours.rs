@@ -6,6 +6,20 @@ use gnorix::biometrics::fingerprint::{
 use serde_json::{Value, json};
 
 pub(super) fn print_summary(contours: &ContourReconstruction) {
+    println!(
+        "Cleanup: {} terminal spurs removed at arc length < {:.3}px, {} narrow loops collapsed; {} ambiguous, {} unobserved and {} unconfirmed branches retained",
+        contours.cleanup.removed_spurs.len(),
+        contours.cleanup.source_policy.max_ridge_width_px,
+        contours
+            .cleanup
+            .loops
+            .iter()
+            .filter(|assessment| assessment.removed_edge.is_some())
+            .count(),
+        contours.cleanup.retained_ambiguous_edges.len(),
+        contours.cleanup.retained_unobserved_edges.len(),
+        contours.cleanup.retained_unconfirmed_edges.len(),
+    );
     let smoothed = contours
         .edge_smoothing
         .iter()

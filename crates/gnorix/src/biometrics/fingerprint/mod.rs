@@ -5,6 +5,7 @@
 //! are in source-image pixels; measured ridge spacing is not an inferred DPI.
 
 mod clarity;
+mod cleanup;
 mod curve;
 mod enhancement;
 mod full_scale;
@@ -22,6 +23,10 @@ use std::{error::Error, fmt};
 use super::{Capture, geometry::Point};
 
 pub use clarity::ClarityMap;
+pub use cleanup::{
+    CleanupOrigin, JunctionRoute, LoopAssessment, LoopEvidence, RidgeCleanup, SourceDecision,
+    SourcePolicy, SpurAssessment, SpurEvidence, SpurRemoval,
+};
 pub use enhancement::LocalPalette;
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use quality::WidthConsistency;
@@ -232,22 +237,23 @@ pub struct CurveGeometry {
 
 /// Geometric reconstruction with explicit links back to observed structure.
 ///
-/// Each observed path is retained exactly once. Only source-supported accepted
-/// joins change connectivity; other proposals remain separate diagnostics.
+/// Source-supported spur and narrow-loop cleanup precedes smoothing and joins.
+/// The unchanged observed graph and all removed-path provenance remain available.
 /// Geometry describes these resulting paths without a second smoothing pass.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContourReconstruction {
+    pub cleanup: RidgeCleanup,
     pub smoothing: SmoothingControls,
     pub gap_policy: GapPolicy,
     pub graph: RidgeGraph,
-    /// Original node index for each retained node in `graph`.
+    /// Cleanup-stage node index for each retained node in `graph`.
     pub node_sources: Vec<usize>,
     pub edge_origins: Vec<PathOrigin>,
     pub cycle_origins: Vec<PathOrigin>,
     pub joins: Vec<GapJoin>,
-    /// One adjustment per original graph edge, before joining.
+    /// One adjustment per cleanup-stage graph edge, before joining.
     pub edge_smoothing: Vec<SmoothingAdjustment>,
-    /// One adjustment per original isolated cycle.
+    /// One adjustment per cleanup-stage isolated cycle.
     pub cycle_smoothing: Vec<SmoothingAdjustment>,
     pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
     pub cycle_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
@@ -317,13 +323,14 @@ pub fn extract(
     let clarity = clarity::assess(capture, bootstrap.ridge_period_px)?;
     let prepared = enhancement::preprocess(capture, config, bootstrap.ridge_period_px)?;
     let skeleton = thinning::thin(&prepared.map)?;
-    let graph = graph::trace(&skeleton)?;
+    let traced = graph::trace_with_pixels(&skeleton)?;
+    let graph = &traced.graph;
     let curve_config = CurveConfig {
         sample_spacing: scale.unit_px / 4.0,
         smoothing_sigma: scale.unit_px / 2.0,
     };
-    let (edge_geometry, cycle_geometry) = describe_graph(&graph, curve_config);
-    let contours = reconstruct_contours(capture, &prepared, &skeleton, &graph, scale.unit_px)?;
+    let (edge_geometry, cycle_geometry) = describe_graph(graph, curve_config);
+    let contours = reconstruct_contours(capture, &prepared, &skeleton, &traced, scale.unit_px)?;
 
     Ok(Fingerprint {
         scale,
@@ -336,7 +343,7 @@ pub fn extract(
         clarity,
         binary: prepared.map,
         skeleton,
-        graph,
+        graph: traced.graph,
         contours,
         edge_geometry,
         cycle_geometry,
@@ -395,15 +402,16 @@ fn reconstruct_contours(
     capture: &Capture,
     prepared: &Preprocessed,
     skeleton: &RidgeMap,
-    graph: &RidgeGraph,
+    observed: &graph::TracedGraph,
     unit_px: f64,
 ) -> Result<ContourReconstruction, FingerprintError> {
-    let smoothed = smoothing::smooth(graph, &prepared.map, unit_px)?;
+    let cleaned = cleanup::clean(capture, &prepared.palette, skeleton, observed, unit_px)?;
+    let smoothed = smoothing::smooth(&cleaned.result.graph, &prepared.map, unit_px)?;
     let repaired = repair::reconstruct(
         capture,
         &prepared.palette,
         &smoothed.graph,
-        skeleton,
+        &cleaned.skeleton,
         unit_px,
     )?;
     let spacing = smoothing::SmoothingControls::for_unit(unit_px)?.sample_spacing_px;
@@ -412,6 +420,7 @@ fn reconstruct_contours(
     });
 
     Ok(ContourReconstruction {
+        cleanup: cleaned.result,
         smoothing: SmoothingControls::for_unit(unit_px)?,
         gap_policy: repaired.policy,
         graph: repaired.graph,
