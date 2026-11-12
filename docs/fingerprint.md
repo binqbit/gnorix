@@ -139,6 +139,8 @@ The report distinguishes isolated cycles from total graph cycle rank (`edges - n
 
 ## Verification and integration boundary
 
+The [SOCOFing testing guide](fingerprint-testing.md) documents the external research dataset, its usage restrictions, verified file properties, lossless input preparation and a deterministic comparison set for clarity and normalization work.
+
 Tests cover image and mask validation, blank captures, oriented stripes, local brightness changes, source-intensity integration, independence from masked pixel values, component and hole preservation, missing regions, diagonal topology, junction clusters, closed cycles, long iterative paths, geometric invariances, numerical limits and the checked-in fingerprint. Contour tests additionally cover endpoint preservation, small-loop retention, swept support, collision rejection, supported processing gaps, identical geometry with a white source gap, missing acquisition pixels, ambiguous partners and complete path provenance. The report tests cover summary reconstruction, malformed geometry, palette support, path containment, image dimensions, empty graphs, contour origins and PNG output. The synthetic fixture verifies execution and visualization, not real-scanner recognition performance.
 
 The extractor is a component for a future complete `MeasurementEngine`. Registration, cross-capture correspondence, feature selection, calibrated tolerances, quantization and candidate encoding are not selected here. It is deliberately not connected to signing as a placeholder measurement strategy. Those choices require repeat captures and evaluation before a biometric key can be reconstructed reliably.
