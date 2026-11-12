@@ -1,7 +1,8 @@
 //! Lossless native feature-evidence export; no scoring in the report adapter.
 
 use gnorix::biometrics::fingerprint::{
-    FeatureAssessment, FeatureKind, FeaturePolicy, FeatureReason, FeatureStrength,
+    ContextStop, FeatureAssessment, FeatureContext, FeatureKind, FeaturePolicy, FeatureReason,
+    FeatureStrength,
 };
 use serde_json::{Value, json};
 
@@ -9,8 +10,9 @@ pub(super) fn snapshot(assessment: &FeatureAssessment) -> Value {
     let policy = &assessment.policy;
     let stability = &policy.stability;
     json!({
-        "method": "source-geometry-stress-v1",
-        "score": "min(P,G) * (0.5 + 0.5*T)",
+        "method": "scale-context-priority-v2",
+        "score": "C * (0.75 + 0.25*min(P,G)) * (0.5 + 0.5*T)",
+        "priority_score": "Q * N",
         "policy": policy_snapshot(policy),
         "stability_policy": {
             "max_position_shift_px": stability.max_position_shift_px,
@@ -34,6 +36,8 @@ fn policy_snapshot(policy: &FeaturePolicy) -> Value {
     json!({
         "reference_width_px": policy.reference_width_px,
         "branch_horizon_px": policy.branch_horizon_px,
+        "context_horizon_px": policy.context_horizon_px,
+        "neighborhood_radius_px": policy.neighborhood_radius_px,
         "tangent_support_px": policy.tangent_support_px,
         "sample_spacing_px": policy.sample_spacing_px,
         "source_search_px": policy.source_search_px,
@@ -61,6 +65,14 @@ fn candidate_snapshot(candidate: &FeatureStrength) -> Value {
         "geometry_support":candidate.geometry_support,
         "stability":candidate.stability,
         "strength":candidate.strength,
+        "context":context_snapshot(&candidate.context),
+        "neighborhood":{
+            "neighbor_count":candidate.neighborhood.neighbor_count,
+            "weighted_count":candidate.neighborhood.weighted_count,
+            "observed_fraction":candidate.neighborhood.observed_fraction,
+            "factor":candidate.neighborhood.factor,
+        },
+        "priority":candidate.priority,
         "source_coverage":candidate.source_coverage,
         "geometry_coverage":candidate.geometry_coverage,
         "source_contrast":candidate.source_contrast,
@@ -80,6 +92,36 @@ fn candidate_snapshot(candidate: &FeatureStrength) -> Value {
     })
 }
 
+fn context_snapshot(context: &FeatureContext) -> Value {
+    json!({
+        "support":context.support,
+        "support_2r":context.support_2r,
+        "source_coverage":context.source_coverage,
+        "separation":context.separation,
+        "termination":context.termination,
+        "continuation":context.continuation,
+        "forward_continuation":context.forward_continuation,
+        "curved_continuation":context.curved_continuation,
+        "arms":context.arms.iter().map(|arm| json!({
+            "edge":arm.edge,
+            "edges":arm.edges,
+            "length_px":arm.length_px,
+            "ridge_separation":arm.ridge_separation,
+            "continuity":arm.continuity,
+            "supported_length_px":arm.supported_length_px,
+            "longest_unsupported_px":arm.longest_unsupported_px,
+            "stop":match arm.stop {
+                ContextStop::Horizon => "horizon",
+                ContextStop::GraphEnding => "graph_ending",
+                ContextStop::AmbiguousJunction => "ambiguous_junction",
+                ContextStop::UnsupportedContinuation => "unsupported_continuation",
+                ContextStop::MissingSource => "missing_source",
+                ContextStop::ClosedPath => "closed_path",
+            },
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn reason_label(reason: &FeatureReason) -> &'static str {
     match reason {
         FeatureReason::MissingSourceSupport => "missing_source_support",
@@ -92,6 +134,8 @@ fn reason_label(reason: &FeatureReason) -> &'static str {
         FeatureReason::LightRidge => "light_ridge",
         FeatureReason::StressSensitive => "stress_sensitive",
         FeatureReason::NoInteriorLight => "no_interior_light",
+        FeatureReason::MissingContextSupport => "missing_context_support",
+        FeatureReason::UnconfirmedContext => "unconfirmed_context",
     }
 }
 

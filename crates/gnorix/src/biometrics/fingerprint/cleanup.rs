@@ -114,29 +114,35 @@ pub(super) fn clean(
     rebuild(skeleton, observed, selected, source_policy, unit_px)
 }
 
-/// The feature assessor supplies the original component labels and an evidence
-/// backbone with this ending's inspected terminal arc excluded. This reuses the
-/// same source cap and curved-continuation guard without changing cleanup.
-pub(super) fn feature_ending<'a>(
+/// Diagnostic source-connected continuation shares the inspected source field
+/// with cleanup, while returning graded evidence instead of a removal decision.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn feature_continuation<'a>(
     capture: &Capture,
     palette: &LocalPalette,
     points: &[Point],
     backbone_paths: impl ExactSizeIterator<Item = (&'a [Point], usize)>,
     component: usize,
     unit: f64,
+    reference_support: f64,
+    explain: &mut impl FnMut(Point) -> Result<Option<f64>, FingerprintError>,
     work: &mut Work,
-) -> Result<SpurEvidence, FingerprintError> {
+) -> Result<Option<f64>, FingerprintError> {
     selection::charge_source(work, &[points], unit)?;
-    let mut evidence = source::verify_spur(capture, palette, points, unit)?;
-    if evidence.decision == SourceDecision::Confirmed {
-        work.charge(backbone_paths.len() as f64)?;
-        let backbone = continuation::Backbone::from_paths(
-            backbone_paths.filter(|(points, _)| points.len() >= 2),
-        );
-        evidence.decision =
-            continuation::check(capture, palette, points, unit, &backbone, component, work)?;
-    }
-    Ok(evidence)
+    work.charge(backbone_paths.len() as f64)?;
+    let backbone =
+        continuation::Backbone::from_paths(backbone_paths.filter(|(points, _)| points.len() >= 2));
+    continuation::score(
+        capture,
+        palette,
+        points,
+        unit,
+        &backbone,
+        component,
+        reference_support,
+        explain,
+        work,
+    )
 }
 
 fn rebuild(

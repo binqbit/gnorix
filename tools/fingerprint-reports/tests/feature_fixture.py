@@ -82,14 +82,41 @@ def feature_fixture(data):
                 "continuation": None,
                 "reasons": ["stress_sensitive"],
                 "stress_matches": [identifier] * 4 + [None] * 4,
+                "context": {
+                    "support": 2 / 3,
+                    "support_2r": 0.6,
+                    "source_coverage": 1,
+                    "separation": 0.7 if kind in ("junction", "bifurcation") else None,
+                    "termination": 0.8 if kind == "ending" else None,
+                    "continuation": 0.1 if kind == "ending" else None,
+                    "forward_continuation": 0.1 if kind == "ending" else None,
+                    "curved_continuation": 0.05 if kind == "ending" else None,
+                    "arms": [
+                        {
+                            "edge": arm["edge"],
+                            "edges": [arm["edge"]],
+                            "length_px": arm["length_px"],
+                            "ridge_separation": 0.7,
+                            "continuity": 1,
+                            "supported_length_px": arm["length_px"],
+                            "longest_unsupported_px": 0,
+                            "stop": "graph_ending",
+                        }
+                        for arm in arms
+                    ],
+                },
             }
         )
+    neighborhoods(candidates, unit)
     return {
-        "method": "source-geometry-stress-v1",
-        "score": "min(P,G) * (0.5 + 0.5*T)",
+        "method": "scale-context-priority-v2",
+        "score": "C * (0.75 + 0.25*min(P,G)) * (0.5 + 0.5*T)",
+        "priority_score": "Q * N",
         "policy": {
             "reference_width_px": unit,
             "branch_horizon_px": 2 * unit,
+            "context_horizon_px": 4 * unit,
+            "neighborhood_radius_px": 3 * unit,
             "tangent_support_px": unit / 2,
             "sample_spacing_px": 0.5,
             "source_search_px": 1.2 * unit,
@@ -109,3 +136,25 @@ def feature_fixture(data):
         "stress_cases": cases,
         "candidates": candidates,
     }
+
+
+def neighborhoods(candidates, unit):
+    """Populate explicit synthetic neighbor evidence, excluding only self."""
+    for candidate in candidates:
+        distances = [
+            math.dist(candidate["position"], other["position"])
+            for other in candidates
+            if other["id"] != candidate["id"]
+            and math.dist(candidate["position"], other["position"]) < 3 * unit
+        ]
+        weighted = math.fsum((1 - distance / (3 * unit)) ** 2 for distance in distances)
+        factor = 0.5 + 0.5 / (1 + weighted)
+        candidate["neighborhood"] = {
+            "neighbor_count": len(distances),
+            "weighted_count": weighted,
+            "observed_fraction": 1,
+            "factor": factor,
+        }
+        candidate["priority"] = (
+            None if candidate["strength"] is None else candidate["strength"] * factor
+        )

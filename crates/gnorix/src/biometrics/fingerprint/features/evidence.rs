@@ -1,6 +1,6 @@
 //! Feature-specific evidence from the unchanged original capture.
 
-use super::super::{LocalPalette, SourceDecision, cleanup, graph};
+use super::super::LocalPalette;
 use super::geometry::{self, ArmPath, EndingBackbone};
 use super::sampling::{Sampler, Work, interior_light, separation};
 use super::{
@@ -14,7 +14,6 @@ struct Context<'a> {
     graph: &'a RidgeGraph,
     policy: &'a FeaturePolicy,
     arms: &'a [Vec<ArmPath>],
-    components: &'a [usize],
 }
 
 pub(super) fn assess(
@@ -39,22 +38,33 @@ pub(super) fn assess(
     }
     let mut work = Work::default();
     let arms = geometry::arms(graph, policy, &mut work)?;
-    let components = graph::components(graph, &graph::incidence(graph));
     let context = Context {
         capture,
         palette,
         graph,
         policy,
         arms: &arms,
-        components: &components,
     };
-    let mut guard_work = cleanup::Work::default();
-    let mut result = Vec::with_capacity(graph.nodes.len() + graph.cycles.len());
-    for id in 0..graph.nodes.len() {
-        result.push(node(&context, id, &mut work, &mut guard_work)?);
+    let extended = super::context::assess(capture, palette, graph, policy)?;
+    if graph.nodes.len() + graph.cycles.len() != extended.len() {
+        return Err(FingerprintError::InvalidTopology(
+            "feature context population mismatch",
+        ));
     }
-    for id in 0..graph.cycles.len() {
-        result.push(cycle(&context, id, &mut work)?);
+    let mut result = Vec::with_capacity(extended.len());
+    for (id, evidence) in extended.into_iter().enumerate() {
+        let mut feature = if id < graph.nodes.len() {
+            node(&context, id, &mut work, &evidence)?
+        } else {
+            cycle(&context, id - graph.nodes.len(), &mut work)?
+        };
+        feature.context = evidence;
+        match feature.context.support {
+            None => reason(&mut feature, FeatureReason::MissingContextSupport),
+            Some(0.0) => reason(&mut feature, FeatureReason::UnconfirmedContext),
+            Some(_) => {}
+        }
+        result.push(feature);
     }
     Ok(result)
 }
@@ -63,7 +73,7 @@ fn node(
     context: &Context<'_>,
     id: usize,
     work: &mut Work,
-    guard_work: &mut cleanup::Work,
+    extended: &super::FeatureContext,
 ) -> Result<FeatureStrength, FingerprintError> {
     let (graph, policy) = (context.graph, context.policy);
     let paths = &context.arms[id];
@@ -85,7 +95,7 @@ fn node(
         FeatureKind::Ending => {
             source = minimum(
                 source,
-                ending(context, id, &mut feature, &mut sampler, guard_work)?,
+                ending(context, id, &mut feature, &mut sampler, extended)?,
             )
         }
         FeatureKind::Bifurcation | FeatureKind::Junction => {
@@ -155,7 +165,7 @@ fn ending(
     id: usize,
     feature: &mut FeatureStrength,
     sampler: &mut Sampler<'_>,
-    guard_work: &mut cleanup::Work,
+    extended: &super::FeatureContext,
 ) -> Result<Option<f64>, FingerprintError> {
     let (graph, policy) = (context.graph, context.policy);
     let paths = &context.arms[id];
@@ -196,34 +206,25 @@ fn ending(
         feature.geometry_support = None;
         reason(feature, FeatureReason::MissingSourceSupport);
     }
-    let points: Vec<_> = arm.points.iter().copied().rev().collect();
-    let cap = cleanup::feature_ending(
-        context.capture,
-        context.palette,
-        &points,
-        backbone
-            .edges()
-            .map(|(points, start)| (points, context.components[start])),
-        context.components[id],
-        policy.reference_width_px,
-        guard_work,
-    )?;
-    sampler.external_support(cap.decision != SourceDecision::MissingSupport)?;
-    let termination = match cap.decision {
-        SourceDecision::MissingSupport => None,
-        SourceDecision::AmbiguousGeometry => {
-            reason(feature, FeatureReason::UnresolvedDirection);
-            None
-        }
-        SourceDecision::Confirmed => cap
-            .min_barrier_lightness
-            .map(|light| (2.0 * light - 1.0).clamp(0.0, 1.0)),
-        _ => Some(0.0),
-    };
-    if cap.decision != SourceDecision::Confirmed {
+    // Both local and extended scores use the same graded source observation.
+    // Local geometry remains separate, including its wider availability check.
+    let termination = minimum(
+        extended.termination,
+        extended.curved_continuation.map(|value| 1.0 - value),
+    );
+    // An unresolved reference contrast is not a missing capture pixel. Keep
+    // that distinction when the context observed all required source support.
+    let missing_source = termination.is_none() && extended.source_coverage < 1.0;
+    sampler.external_support(!missing_source)?;
+    if missing_source {
+        reason(feature, FeatureReason::MissingSourceSupport);
+    } else if termination == Some(0.0) {
         reason(feature, FeatureReason::UnconfirmedTermination);
     }
-    if cap.decision == SourceDecision::PossibleContinuation {
+    if extended
+        .curved_continuation
+        .is_some_and(|value| value > 0.0)
+    {
         reason(feature, FeatureReason::PossibleContinuation);
     }
     feature.termination = termination;
@@ -302,6 +303,9 @@ fn empty(
         geometry_support: None,
         stability: 0.0,
         strength: None,
+        context: super::FeatureContext::default(),
+        neighborhood: super::FeatureNeighborhood::default(),
+        priority: None,
         source_coverage: 0.0,
         geometry_coverage: 0.0,
         source_contrast: None,

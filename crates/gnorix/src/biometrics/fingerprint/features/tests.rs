@@ -1,12 +1,22 @@
 use super::*;
 
 #[test]
-fn aggregation_retains_zero_and_unknown_without_renormalizing() {
-    assert_eq!(combine(Some(0.8), Some(0.6), 1.0), Some(0.6));
-    assert_eq!(combine(Some(0.8), Some(0.6), 0.0), Some(0.3));
-    assert_eq!(combine(Some(0.0), Some(1.0), 1.0), Some(0.0));
-    assert_eq!(combine(None, Some(1.0), 1.0), None);
-    assert_eq!(combine(Some(1.0), None, 0.0), None);
+fn aggregation_requires_context_and_retains_unknown_evidence() {
+    let stable = combine(Some(0.8), Some(0.6), Some(0.9), 1.0).unwrap();
+    let unstable = combine(Some(0.8), Some(0.6), Some(0.9), 0.0).unwrap();
+    assert!(stable > unstable);
+    assert!(
+        stable <= 0.9,
+        "local evidence cannot exceed physical context"
+    );
+    assert_eq!(
+        combine(Some(1.0), Some(1.0), Some(0.0), 1.0),
+        Some(0.0),
+        "perfect extraction stability cannot rescue absent physical support",
+    );
+    assert_eq!(combine(None, Some(1.0), Some(1.0), 1.0), None);
+    assert_eq!(combine(Some(1.0), None, Some(1.0), 0.0), None);
+    assert_eq!(combine(Some(1.0), Some(1.0), None, 1.0), None);
 }
 
 use super::super::{LocalPalette, RidgeCycle, RidgeEdge, RidgeNode};
@@ -28,6 +38,8 @@ fn policy(unit: f64) -> FeaturePolicy {
         continuation_search_px: 3.0 * unit,
         terminal_barrier_width_px: source.terminal_barrier_width_px,
         terminal_barrier_depth_px: source.terminal_barrier_depth_px,
+        context_horizon_px: 4.0 * unit,
+        neighborhood_radius_px: 3.0 * unit,
         contrast_reference: 0.01,
         stability: StabilityPolicy {
             max_position_shift_px: unit,

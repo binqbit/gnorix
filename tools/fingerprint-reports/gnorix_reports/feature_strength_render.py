@@ -21,10 +21,15 @@ _KINDS = {
     "cycle": ("P", "Isolated cycle"),
 }
 _COMPONENTS = (
-    ("source_support", "P · source", "#0072b2"),
-    ("geometry_support", "G · geometry", "#d55e00"),
+    ("source_support", "P · local source", "#0072b2"),
+    ("geometry_support", "G · local geometry", "#d55e00"),
     ("stability", "T · stability", "#009e73"),
-    ("strength", "Q · combined", "#7b3294"),
+    ("context", "C · 4R context", "#e69f00"),
+    ("strength", "Q · feature quality", "#7b3294"),
+    ("priority", "Priority · Q × N", "#005f73"),
+)
+MARKER_OPACITY_LABEL = (
+    "Feature markers: color and opacity = priority Q × N · 40% + 50% × sqrt(priority)."
 )
 
 
@@ -33,11 +38,11 @@ def candidate_colors(candidates):
     colors = []
     cmap = plt.get_cmap("viridis")
     for candidate in candidates:
-        if candidate.strength is None:
+        if candidate.priority is None:
             colors.append(to_rgba(UNKNOWN_COLOR, 0.4))
         else:
-            color = list(cmap(candidate.strength))
-            color[3] = 0.4 + 0.5 * math.sqrt(candidate.strength)
+            color = list(cmap(candidate.priority))
+            color[3] = 0.4 + 0.5 * math.sqrt(candidate.priority)
             colors.append(color)
     return np.asarray(colors).reshape(-1, 4)
 
@@ -51,34 +56,87 @@ def _source(axis, image, width, height):
     axis.set_aspect("equal")
 
 
-def _markers(axis, candidates, size):
+def draw_feature_markers(axis, candidates, size, *, hollow=False):
+    """Draw supplied priority, retaining uncertain-boundary notation."""
     for kind, (marker, _) in _KINDS.items():
         selected = [item for item in candidates if item.kind == kind]
         if not selected:
             continue
         colors = candidate_colors(selected)
+        x, y = np.asarray([item.position for item in selected]).T
         axis.scatter(
-            [item.position[0] for item in selected],
-            [item.position[1] for item in selected],
+            x,
+            y,
             s=size,
             marker=marker,
-            facecolors=colors,
-            edgecolors=[to_rgba("white", color[3]) for color in colors],
-            linewidths=0.3,
-            zorder=3,
+            facecolors="none" if hollow else colors,
+            edgecolors=colors,
+            linewidths=0.9 if hollow else 0.3,
+            zorder=4,
         )
+        if hollow:
+            axis.scatter(x, y, marker="x", s=size * 0.43, color=colors, linewidths=0.7, zorder=5)
+
+
+def feature_legend_handles():
+    handles = [
+        Line2D([], [], marker=marker, linestyle="none", color="#31688e", label=label)
+        for marker, label in _KINDS.values()
+    ]
+    handles.append(
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            color=UNKNOWN_COLOR,
+            label="Unknown priority · gray",
+        )
+    )
+    return handles
+
+
+def add_priority_colorbar(figure, axis):
+    figure.colorbar(
+        ScalarMappable(norm=Normalize(0, 1), cmap="viridis"),
+        ax=axis,
+        shrink=0.6,
+        pad=0.02,
+        label="Feature priority Q × N · 0 = dim, 1 = bright",
+    )
 
 
 def detail_examples(candidates):
     """Choose varied evidence extremes deterministically, without fixture IDs."""
-    known = [item for item in candidates if item.strength is not None]
-    unknown = [item for item in candidates if item.strength is None]
+    known = [item for item in candidates if item.priority is not None]
+    unknown = [item for item in candidates if item.priority is None]
     selections = []
     if known:
-        selections.append(("Lowest measured Q", min(known, key=lambda c: (c.strength, c.id))))
-        selections.append(("Highest measured Q", max(known, key=lambda c: (c.strength, -c.id))))
+        selections.append(
+            ("Highest measured priority", max(known, key=lambda c: (c.priority, -c.id)))
+        )
+    forks = [item for item in known if item.kind in ("bifurcation", "junction")]
+    if forks:
+        selections.append(
+            ("Strongest measured fork", max(forks, key=lambda c: (c.priority, -c.id)))
+        )
+    if known:
+        selections.append(
+            (
+                "Stability / context disagreement",
+                max(known, key=lambda c: (c.stability - c.context.support, -c.id)),
+            )
+        )
     if unknown:
         selections.append(("Unavailable evidence", min(unknown, key=lambda c: c.id)))
+    gains = [item for item in known if item.context.support_2r is not None]
+    if gains:
+        selections.append(
+            (
+                "Largest 2R / 4R context gain",
+                max(gains, key=lambda c: (c.context.support - c.context.support_2r, -c.id)),
+            )
+        )
     cycles = [item for item in candidates if item.kind == "cycle"]
     if cycles:
         selections.append(
@@ -87,8 +145,8 @@ def detail_examples(candidates):
                 min(
                     cycles,
                     key=lambda c: (
-                        c.strength is None,
-                        c.strength if c.strength is not None else 0,
+                        c.priority is None,
+                        c.priority if c.priority is not None else 0,
                         c.id,
                     ),
                 ),
@@ -96,7 +154,9 @@ def detail_examples(candidates):
         )
     disagreements = sorted(known, key=lambda c: (-abs(c.source_support - c.geometry_support), c.id))
     selections.extend(("Source / geometry disagreement", item) for item in disagreements)
-    selections.extend(("Candidate evidence", item) for item in candidates)
+    selections.extend(
+        ("Candidate evidence", item) for item in sorted(candidates, key=lambda c: c.id)
+    )
     result, seen = [], set()
     for title, candidate in selections:
         if candidate.id not in seen:
@@ -107,10 +167,16 @@ def detail_examples(candidates):
     return result
 
 
+def _component(candidate, field):
+    return candidate.context.support if field == "context" else getattr(candidate, field)
+
+
 def _histogram(axis, candidates, components):
     bins = np.linspace(0, 1, 11)
     for field, label, color in components:
-        values = [getattr(item, field) for item in candidates if getattr(item, field) is not None]
+        values = [
+            _component(item, field) for item in candidates if _component(item, field) is not None
+        ]
         counts, _ = np.histogram(values, bins)
         unknown = len(candidates) - len(values)
         axis.stairs(
@@ -124,70 +190,117 @@ def _histogram(axis, candidates, components):
 
 def _detail(axis, snapshot, image, candidate, title):
     _source(axis, image, snapshot.width, snapshot.height)
-    radius = max(2 * snapshot.unit_px, 4)
+    radius = 4 * snapshot.unit_px
     x, y = candidate.position
     axis.set(
         xlim=(max(-0.5, x - radius), min(snapshot.width - 0.5, x + radius)),
         ylim=(min(snapshot.height - 0.5, y + radius), max(-0.5, y - radius)),
     )
-    for arm in candidate.arms:
-        points = snapshot.edge_points[arm.edge]
+    context_edges = {edge for arm in candidate.context.arms for edge in arm.edges}
+    for edge in sorted(context_edges | {arm.edge for arm in candidate.arms}):
+        points = snapshot.edge_points[edge]
         axis.plot(*np.asarray(points).T, color="#40b9e6", linewidth=1, alpha=0.55, zorder=2)
     if candidate.source_cycle is not None:
         points = list(snapshot.cycle_points[candidate.source_cycle])
         axis.plot(*np.asarray(points + points[:1]).T, color="#40b9e6", linewidth=1, alpha=0.55)
-    _markers(axis, [candidate], 95)
+    draw_feature_markers(axis, [candidate], 95)
     axis.set_title(f"{title}\n#{candidate.id} · {_KINDS[candidate.kind][1]}", fontsize=10)
     values = "  ".join(
-        f"{label[0]}={getattr(candidate, name):.3f}"
-        if getattr(candidate, name) is not None
-        else f"{label[0]}=?"
-        for name, label, _ in _COMPONENTS
+        f"{label[0]}={_number(_component(candidate, name))}" for name, label, _ in _COMPONENTS[:-1]
     )
-    reasons = ", ".join(reason.replace("_", " ") for reason in candidate.reasons) or "none"
+    neighborhood = candidate.neighborhood
+    priority = f"N={neighborhood.factor:.3f} · priority={_number(candidate.priority)}"
+    scale = (
+        f"Context: 2R={_number(candidate.context.support_2r)}, "
+        f"4R={_number(candidate.context.support)}; "
+        f"source coverage {_coverage(candidate.context.source_coverage)}"
+    )
+    shape = (
+        f"Graded cap={_number(candidate.context.termination)}; "
+        f"combined continuation={_number(candidate.context.continuation)}\n"
+        f"Continuation: forward={_number(candidate.context.forward_continuation)}; "
+        f"curved={_number(candidate.context.curved_continuation)}"
+        if candidate.kind == "ending"
+        else f"Context separation={_number(candidate.context.separation)}"
+    )
+    crowding = (
+        f"3R neighbors: {neighborhood.neighbor_count}, weighted {neighborhood.weighted_count:.2f}; "
+        f"observed {_coverage(neighborhood.observed_fraction)}"
+    )
+    reasons = ", ".join(_reason_label(reason) for reason in candidate.reasons) or "none"
     axis.set_xlabel(
-        values + "\n" + f"Source probes {candidate.source_coverage:.0%}; "
-        f"arc extent {candidate.geometry_coverage:.0%}; "
-        f"stress matches {sum(item is not None for item in candidate.stress_matches)}/8"
+        values
         + "\n"
-        + textwrap.fill("Reasons: " + reasons, 52),
+        + priority
+        + "\n"
+        + scale
+        + "\n"
+        + shape
+        + "\n"
+        + crowding
+        + "\n"
+        + _arm_summary(candidate.context.arms, snapshot.unit_px)
+        + "\n"
+        + textwrap.fill("Reasons: " + reasons, 65),
         fontsize=8,
     )
 
 
+def _number(value):
+    return "?" if value is None else f"{value:.3f}"
+
+
+def _coverage(value):
+    percentage = f"{value:.0%}"
+    return "<100%" if value < 1 and percentage == "100%" else percentage
+
+
+def _reason_label(reason):
+    if reason == "possible_continuation":
+        return "local possible continuation"
+    return reason.replace("_", " ")
+
+
+def _in_units(value, unit):
+    return _number(None if value is None else value / unit) + "R"
+
+
+def _arm_summary(arms, unit):
+    return (
+        "\n".join(
+            f"Arm {arm.edge}: {arm.length_px / unit:.2f}R · "
+            f"separation {_number(arm.ridge_separation)} · continuity {_number(arm.continuity)} · "
+            f"{arm.stop.replace('_', ' ')}\n"
+            f"Supported length {_in_units(arm.supported_length_px, unit)}; "
+            f"longest unsupported {_in_units(arm.longest_unsupported_px, unit)}"
+            for arm in arms
+        )
+        or "No incident arms"
+    )
+
+
 def render_feature_strength(snapshot, source):
-    figure = plt.figure(figsize=(20, 15), layout="constrained")
+    figure = plt.figure(figsize=(22, 18), layout="constrained")
     try:
         grid = figure.add_gridspec(3, 4, width_ratios=(1, 1, 1.05, 1.05))
         overlay = figure.add_subplot(grid[:, :2])
         _source(overlay, source, snapshot.width, snapshot.height)
-        _markers(overlay, snapshot.candidates, 18)
-        known = sum(candidate.strength is not None for candidate in snapshot.candidates)
+        draw_feature_markers(overlay, snapshot.candidates, 18)
+        known = sum(candidate.priority is not None for candidate in snapshot.candidates)
         overlay.set_title(
             f"All {len(snapshot.candidates)} original feature candidates\n"
             f"{known} measured · {len(snapshot.candidates) - known} unavailable"
         )
-        handles = [
-            Line2D([], [], marker=marker, linestyle="none", color="#31688e", label=label)
-            for marker, label in _KINDS.values()
-        ]
-        handles.append(
-            Line2D(
-                [], [], marker="o", linestyle="none", color=UNKNOWN_COLOR, label="Unknown Q · gray"
-            )
-        )
         figure.legend(
-            handles=handles, loc="outside lower center", ncol=6, fontsize=9, frameon=False
+            handles=feature_legend_handles(),
+            loc="outside lower center",
+            ncol=6,
+            fontsize=9,
+            frameon=False,
         )
-        figure.colorbar(
-            ScalarMappable(norm=Normalize(0, 1), cmap="viridis"),
-            ax=overlay,
-            shrink=0.6,
-            pad=0.02,
-            label="Q · native combined strength (0–1)",
-        )
-        _histogram(figure.add_subplot(grid[0, 2]), snapshot.candidates, _COMPONENTS[:2])
-        _histogram(figure.add_subplot(grid[0, 3]), snapshot.candidates, _COMPONENTS[2:])
+        add_priority_colorbar(figure, overlay)
+        _histogram(figure.add_subplot(grid[0, 2]), snapshot.candidates, _COMPONENTS[:3])
+        _histogram(figure.add_subplot(grid[0, 3]), snapshot.candidates, _COMPONENTS[3:])
         examples = detail_examples(snapshot.candidates)
         for index in range(4):
             axis = figure.add_subplot(grid[1 + index // 2, 2 + index % 2])
@@ -200,10 +313,11 @@ def render_feature_strength(snapshot, source):
                     0.5, 0.5, "No additional candidate", transform=axis.transAxes, ha="center"
                 )
         figure.suptitle(
-            "Native feature evidence · source P, geometry G, stability T, combined Q\n"
-            "Q = min(P, G) × (0.5 + 0.5T) · all raw candidates retained, "
-            "including cleanup removals\n"
-            "Source stays visible; marker opacity 40–90%. "
+            f"Native feature evidence · R={snapshot.unit_px:.3f} px · "
+            "4R context C, local P/G, stability T and neighborhood N\n"
+            "Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5T); priority = Q × N\n"
+            "Higher priority = brighter markers, opacity 40–90%; all raw candidates retained.\n"
+            "Details show source within ±4R; graph ending means extraction stopped.\n"
             "Diagnostic evidence, not biometric probability.",
             fontsize=14,
         )

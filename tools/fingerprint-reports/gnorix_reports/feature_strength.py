@@ -6,6 +6,14 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
+from .feature_strength_context import (
+    FeatureContext,
+    Neighborhood,
+    unit_score,
+    validate_context,
+    validate_neighbor_positions,
+    validate_neighborhood,
+)
 from .validation import array_value, finite_number, identifier_value, object_value, require_close
 
 
@@ -40,6 +48,9 @@ class Candidate:
     continuation: float | None
     reasons: tuple[str, ...]
     stress_matches: tuple[int | None, ...]
+    context: FeatureContext
+    neighborhood: Neighborhood
+    priority: float | None
 
 
 @dataclass(frozen=True)
@@ -53,12 +64,7 @@ class FeatureStrength:
 
 
 def _score(value, name, optional=False):
-    if value is None and optional:
-        return None
-    result = finite_number(value, "feature_strength." + name)
-    if not 0 <= result <= 1:
-        raise ValueError(f"feature_strength.{name} must be in [0, 1]")
-    return result
+    return unit_score(value, "feature_strength." + name, optional=optional)
 
 
 def _position(value, width, height):
@@ -113,6 +119,7 @@ def validate_feature_strength(
     if set(value) != {
         "method",
         "score",
+        "priority_score",
         "policy",
         "stability_policy",
         "stress_cases",
@@ -120,8 +127,9 @@ def validate_feature_strength(
     }:
         raise ValueError("feature_strength must declare exactly its native assessment fields")
     for name, expected in (
-        ("method", "source-geometry-stress-v1"),
-        ("score", "min(P,G) * (0.5 + 0.5*T)"),
+        ("method", "scale-context-priority-v2"),
+        ("score", "C * (0.75 + 0.25*min(P,G)) * (0.5 + 0.5*T)"),
+        ("priority_score", "Q * N"),
     ):
         if value.get(name) != expected:
             raise ValueError(f"feature_strength.{name} must be {expected!r}")
@@ -132,6 +140,7 @@ def validate_feature_strength(
     if len(raw) != len(nodes) + len(cycles):
         raise ValueError("feature candidates must cover every raw node and isolated cycle")
     incidence = {node["id"]: [] for node in nodes}
+    edge_endpoints = {edge["id"]: (edge["start"], edge["end"]) for edge in edges}
     for edge in edges:
         incidence[edge["start"]].append(edge["id"])
         incidence[edge["end"]].append(edge["id"])
@@ -181,6 +190,7 @@ def validate_feature_strength(
                 "termination",
                 "continuation",
                 "source_contrast",
+                "priority",
             )
         }
         stability = _score(item.get("stability"), "stability")
@@ -193,20 +203,39 @@ def validate_feature_strength(
             stability, sum(match is not None for match in matches) / 8, "feature stability"
         )
         p, g, q = (parts[name] for name in ("source_support", "geometry_support", "strength"))
+        context = validate_context(
+            item.get("context"), expected_arms, edge_endpoints, expected_node, 4 * unit, kind=kind
+        )
+        neighborhood = validate_neighborhood(item.get("neighborhood"), len(raw))
         if coverage < 1 and p is not None:
             raise ValueError("partial source coverage requires unavailable source support")
-        if p is None or g is None:
+        if p is None or g is None or context.support is None:
             if q is not None:
-                raise ValueError("unknown source or geometry evidence requires unknown Q")
+                raise ValueError("unknown source, geometry or context evidence requires unknown Q")
         elif q is None:
-            raise ValueError("measured source and geometry evidence require measured Q")
+            raise ValueError("measured source, geometry and context evidence require measured Q")
         else:
-            require_close(q, min(p, g) * (0.5 + 0.5 * stability), "feature combined strength")
+            require_close(
+                q,
+                context.support * (0.75 + 0.25 * min(p, g)) * (0.5 + 0.5 * stability),
+                "feature combined strength",
+            )
+        if q is None:
+            if parts["priority"] is not None:
+                raise ValueError("unknown Q requires unknown feature priority")
+        elif parts["priority"] is None:
+            raise ValueError("measured Q requires measured feature priority")
+        else:
+            require_close(parts["priority"], q * neighborhood.factor, "feature priority")
         reasons = _validate_reasons(item.get("reasons"))
         if ("stress_sensitive" in reasons) != (stability < 1):
             raise ValueError("feature stress-sensitive reason must match its stability")
         if coverage < 1 and "missing_source_support" not in reasons:
             raise ValueError("partial source coverage requires its missing-support reason")
+        if ("missing_context_support" in reasons) != (context.support is None):
+            raise ValueError("feature missing-context reason must match its context support")
+        if ("unconfirmed_context" in reasons) != (context.support == 0):
+            raise ValueError("feature unconfirmed-context reason must match measured zero context")
         arms = _validate_arms(item.get("arms"), expected_arms, horizon)
         candidates.append(
             Candidate(
@@ -229,8 +258,12 @@ def validate_feature_strength(
                 parts["continuation"],
                 reasons,
                 matches,
+                context,
+                neighborhood,
+                parts["priority"],
             )
         )
+    validate_neighbor_positions(candidates, 3 * unit)
     return FeatureStrength(
         width,
         height,
@@ -285,6 +318,8 @@ def _validate_reasons(value):
         "light_ridge",
         "stress_sensitive",
         "no_interior_light",
+        "missing_context_support",
+        "unconfirmed_context",
     }
     reasons = array_value(value, "feature reasons", len(allowed))
     if any(not isinstance(reason, str) or reason not in allowed for reason in reasons):
@@ -299,6 +334,8 @@ def _validate_policy_and_stress(value, unit, min_contrast, min_coherence, pixels
     expected_policy = {
         "reference_width_px": unit,
         "branch_horizon_px": 2 * unit,
+        "context_horizon_px": 4 * unit,
+        "neighborhood_radius_px": 3 * unit,
         "tangent_support_px": unit / 2,
         "sample_spacing_px": 0.5,
         "source_search_px": 1.2 * unit,

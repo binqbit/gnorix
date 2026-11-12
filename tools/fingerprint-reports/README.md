@@ -45,7 +45,7 @@ reports/fingerprint/
 | `contour-comparison.png` | Observed and reconstructed paths on identical source coordinates, marked terminal-spur and duplicate-loop-arm removals, and a matched detail. |
 | `contour-overlay.png` | Cleaned, smooth contours and explicit accepted or unaccepted gap continuations. |
 | `clarity-analysis.png` | Source-aligned local clarity, native contrast/separation/repetition components and explicit measurement support, on fixed 0–1 scales. |
-| `feature-strength.png` | Every original node and isolated-cycle candidate colored by native combined strength Q, component distributions and automatically selected detail examples. |
+| `feature-strength.png` | Every original candidate colored by final priority, with intrinsic Q, context at 2R/4R, neighborhood evidence and selected detail examples. |
 
 The full-source width mean is the common unit R. Bootstrap measurements initialize the pipeline and remain separate diagnostics. Width consistency at ±10%, ±20% and ±30% describes measured variation; it is not a recognition probability. The scale overlay displays a spatial subset for readability, while every measurement contributes to its statistics.
 
@@ -63,17 +63,29 @@ Contour opacity is `0.4 + 0.5 × sqrt(clarity)`: a fixed **40–90%** range, ind
 
 `data/features.json` retains all measured widths, source-coordinate paths, local-reference metadata, reconstruction provenance and processing controls. The adjacent images are the extractor's original 8-bit grayscale PNG stages. The renderer checks dimensions, image containment, finite values, scale summaries, path origins, endpoint preservation and join evidence before publishing. Image processing is local; fingerprints and measurements are not uploaded.
 
-## Feature strength
+## Feature strength and priority
 
-Feature strength is a separate native diagnostic for every original ending, bifurcation, higher-degree junction, isolated node and isolated cycle. Candidates remain in the report even when their score is zero, their evidence is unavailable, or cleanup removes the associated geometry. The source overlay uses distinct candidate shapes and a fixed 0–1 color scale for combined strength Q. Gray means unavailable Q; a measured zero uses the lowest score color. Marker opacity follows the fixed 40–90% convention, and the original image stays fully visible beneath it.
+The native assessment keeps every original ending, bifurcation, higher-degree junction, isolated node and isolated cycle. `feature-strength.png` includes zero scores, unknown evidence and candidates later removed by cleanup.
 
-The native components are source support P, geometry support G and stability T across eight specified perturbation cases. The combined score is `Q = min(P, G) × (0.5 + 0.5T)`; missing P or G yields an unavailable Q. The figure shows P/G/T/Q distributions and detail examples selected from the actual candidates, with source coverage, matched stress cases and native reasons. These measurements are not probabilities of anatomical correctness, fingerprint identity or recognition success. They do not change extraction, cleanup, smoothing or connectivity.
+Extended source-confirmed context C is the main evidence. It follows required arms over up to 4R, with 2R context shown for comparison, and checks actual ridge/flank separation, continuity and feature-specific valleys or termination. A weak local contrast does not veto a consistently supported structure. Source-confirmed continuation can cross an incidental graph node; ambiguous or missing continuation stays explicit. These observations do not edit the extracted or reconstructed paths.
 
-Python validates candidate coverage, original graph references, component bounds, the combined-score formula and one-to-one stress-match metadata before rendering. It does not extract features, rerun perturbations or recompute biometric evidence. The full candidate evidence remains in `data/features.json`.
+Ending details show the graded light-cap score, source-backed forward continuation within 3R, curved continuation, and their combined maximum. The cap uses complete R-wide, R/4-deep windows within the existing 1.2R lookahead. A weak or uneven cap reduces its contrast/noise score continuously; a single pixel does not veto it. Ending context cannot exceed either its cap score or one minus the combined continuation. Missing required evidence remains unknown. These ranking measurements do not relax the strict source checks used to remove or join geometry.
+
+Local source P, local geometry G and eight-case extraction stability T remain separate:
+
+```text
+Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5 × T)
+N = 0.5 + 0.5 × observed_fraction / (1 + weighted_count)
+priority = Q × N
+```
+
+The neighborhood is a disk of radius 3R. Other original candidates contribute squared taper weights `(1 - distance/(3R))²` inside that radius. Source-mask and frame coverage limit isolation credit; N remains between 0.5 and 1. Crowding affects priority, not intrinsic strength Q, and cannot turn a lone artifact into strong evidence. Missing required local/context evidence yields unknown Q and priority. These are inspectable engineering scores, not calibrated recognition probabilities.
+
+The diagnostic figure shows C/P/G/T/Q/priority distributions, C2R/C4R, per-arm extent and source separation, continuity, stop reasons, graded ending components, neighborhood evidence and the final priority. Exact native measurements remain in `data/features.json`. Python validates the versioned contract, graph references, formulas and neighborhood counts against exported positions. It does not resample source pixels or compute feature strength.
 
 ## Display controls
 
-- `--overlay-alpha 0.5`: opacity of maps, measurement overlays, structural node markers and removed-artifact annotations in `[0, 1]`. Clarity-colored lines and strength-colored feature markers use their fixed 40–90% range. Default: 0.5.
+- `--overlay-alpha 0.5`: opacity of maps, measurement overlays, structural node markers and removed-artifact annotations in `[0, 1]`. Clarity-colored lines and priority-colored feature markers use their fixed 40–90% range. Default: 0.5.
 - `--dpi 160`: PNG export resolution from 50 to 600. Default: 160.
 
 These options change presentation only. They do not change ridge extraction, matching tolerances or the source-coordinate system. The command generates PNG figures only.

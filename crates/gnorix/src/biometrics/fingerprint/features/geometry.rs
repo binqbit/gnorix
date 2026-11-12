@@ -133,6 +133,45 @@ pub(super) fn extent(arms: &[ArmPath], horizon: f64) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Identify the departing paths most liable to be mistaken for one ridge.
+/// Opposite trunk directions normally lie farther apart and must not supply a
+/// substitute valley. All geometrically tied pairs are required, independent of
+/// incidence order. A short pair remains constraining instead of disappearing.
+pub(super) fn confusable_pairs(
+    paths: &[(&[Point], f64)],
+    unit: f64,
+    work: &mut Work,
+) -> Result<Vec<(usize, usize)>, FingerprintError> {
+    let mut measured = Vec::new();
+    let mut smallest = f64::INFINITY;
+    for (i, &(a, a_length)) in paths.iter().enumerate() {
+        for (j, &(b, b_length)) in paths.iter().enumerate().skip(i + 1) {
+            work.charge(1)?;
+            let upper = a_length.min(b_length);
+            let separation = if upper <= unit {
+                0.0
+            } else {
+                let span = upper - unit;
+                let count = super::sampling::intervals(span, 0.5)?;
+                work.charge(count.saturating_mul(a.len() + b.len()))?;
+                let mut sum = 0.0;
+                for index in 0..count {
+                    let station = unit + span * (index as f64 + 0.5) / count as f64;
+                    sum += distance(at(a, station), at(b, station)) / unit;
+                }
+                sum / count as f64
+            };
+            smallest = smallest.min(separation);
+            measured.push(((i, j), separation));
+        }
+    }
+    let tolerance = 1e-6 * smallest.abs().max(1.0);
+    Ok(measured
+        .into_iter()
+        .filter_map(|(pair, value)| ((value - smallest).abs() <= tolerance).then_some(pair))
+        .collect())
+}
+
 /// Distinct source paths must stay spatially separated over their outer arc.
 /// This uses source-pixel distance rather than preferring an ideal Y angle.
 pub(super) fn separation(
@@ -185,44 +224,95 @@ pub(super) fn continuation<'a>(
     let origin = arm.points[0];
     let mut maximum = 0.0_f64;
     for (points, closed) in paths {
-        work.charge(points.len().saturating_mul(12))?;
-        let mut distances = vec![0.0];
-        for (a, b) in segments(points, closed) {
-            distances.push(distances.last().unwrap() + distance(a, b));
-        }
-        for (index, (a, b)) in segments(points, closed).enumerate() {
-            let Some(segment_direction) = direction(a, b) else {
-                continue;
-            };
-            let length = distance(a, b);
-            let projection = ((origin.x() - a.x()) * segment_direction[0]
-                + (origin.y() - a.y()) * segment_direction[1])
-                .clamp(0.0, length);
-            let target = lerp(a, b, projection / length);
-            let gap = distance(origin, target);
-            if gap <= 0.0 || gap >= policy.continuation_search_px {
-                continue;
-            }
-            let station = distances[index] + projection;
-            let Some(other_tangent) = tangent_at(
-                points,
-                &distances,
-                closed,
-                station,
-                policy.tangent_support_px,
-            ) else {
-                continue;
-            };
-            let Some(chord) = direction(origin, target) else {
-                continue;
-            };
-            let facing = (-tangent[0] * chord[0] - tangent[1] * chord[1]).clamp(0.0, 1.0);
-            let aligned = (other_tangent[0] * tangent[0] + other_tangent[1] * tangent[1]).abs();
-            let reach = 1.0 - gap / policy.continuation_search_px;
-            maximum = maximum.max(facing * aligned * reach);
+        for target in continuation_targets(points, closed, origin, tangent, policy, work)? {
+            maximum = maximum.max(target.support);
         }
     }
     Ok(Some(maximum))
+}
+
+pub(super) struct ContinuationTarget {
+    pub station: f64,
+    pub position: Point,
+    pub support: f64,
+}
+
+/// Geometry only: callers decide whether an observed image confirms a target.
+pub(super) fn continuation_targets(
+    points: &[Point],
+    closed: bool,
+    origin: Point,
+    tangent: [f64; 2],
+    policy: &FeaturePolicy,
+    work: &mut Work,
+) -> Result<Vec<ContinuationTarget>, FingerprintError> {
+    work.charge(points.len())?;
+    if !path_in_reach(points, origin, policy.continuation_search_px) {
+        return Ok(Vec::new());
+    }
+    work.charge(points.len().saturating_mul(11))?;
+    let mut distances = vec![0.0];
+    for (a, b) in segments(points, closed) {
+        distances.push(distances.last().unwrap() + distance(a, b));
+    }
+    let mut targets = Vec::new();
+    for (index, (a, b)) in segments(points, closed).enumerate() {
+        let Some(segment_direction) = direction(a, b) else {
+            continue;
+        };
+        let length = distance(a, b);
+        let projection = ((origin.x() - a.x()) * segment_direction[0]
+            + (origin.y() - a.y()) * segment_direction[1])
+            .clamp(0.0, length);
+        let target = lerp(a, b, projection / length);
+        let gap = distance(origin, target);
+        if gap <= 0.0 || gap >= policy.continuation_search_px {
+            continue;
+        }
+        let station = distances[index] + projection;
+        let Some(other_tangent) = tangent_at(
+            points,
+            &distances,
+            closed,
+            station,
+            policy.tangent_support_px,
+        ) else {
+            continue;
+        };
+        let Some(chord) = direction(origin, target) else {
+            continue;
+        };
+        let facing = (-tangent[0] * chord[0] - tangent[1] * chord[1]).clamp(0.0, 1.0);
+        let aligned = (other_tangent[0] * tangent[0] + other_tangent[1] * tangent[1]).abs();
+        let reach = 1.0 - gap / policy.continuation_search_px;
+        let support = facing * aligned * reach;
+        if support > 0.0 {
+            targets.push(ContinuationTarget {
+                station,
+                position: target,
+                support,
+            });
+        }
+    }
+    Ok(targets)
+}
+
+/// Every segment lies inside its endpoint bounding box. Rejecting a disjoint
+/// box is exact and avoids constructing arc/tangent data for distant ridges.
+fn path_in_reach(points: &[Point], origin: Point, radius: f64) -> bool {
+    let Some(&first) = points.first() else {
+        return false;
+    };
+    let (mut left, mut right, mut top, mut bottom) = (first.x(), first.x(), first.y(), first.y());
+    for point in &points[1..] {
+        left = left.min(point.x());
+        right = right.max(point.x());
+        top = top.min(point.y());
+        bottom = bottom.max(point.y());
+    }
+    let dx = (left - origin.x()).max(origin.x() - right).max(0.0);
+    let dy = (top - origin.y()).max(origin.y() - bottom).max(0.0);
+    dx.hypot(dy) < radius
 }
 
 fn tangent_at(

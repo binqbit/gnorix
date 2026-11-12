@@ -32,7 +32,7 @@ def parser() -> argparse.ArgumentParser:
         "--overlay-alpha",
         type=float,
         default=0.5,
-        help="Map and annotation opacity (0 to 1); clarity lines use a fixed 40–90% range",
+        help="Map/annotation opacity (0 to 1); clarity lines and priority markers use fixed 40–90%",
     )
     return command
 
@@ -199,10 +199,21 @@ Faint dotted originals in the comparison detail use 55% of line opacity as a ref
 Native grid-anchor scores are contrast × separation × repetition, then interpolated
 on a fixed 0–1 scale. Components interpolate separately; support can include flat background.
 
-Feature strength retains every original node and isolated-cycle candidate, including
-weak candidates and candidates later removed by cleanup. The dedicated figure shows
-native source evidence P, geometric evidence G, perturbation stability T and combined Q.
-Unknown Q is gray; measured zero uses the bottom of the fixed 0–1 color scale.
+The dedicated feature-strength figure retains every original node and isolated-cycle
+candidate, including weak candidates and candidates later removed by cleanup. It shows
+native 4R context C, local source evidence P, local geometry G and perturbation stability T.
+Quality is Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5T).
+Neighborhood factor N uses other raw candidates within 3R, distance-weighted crowding
+and observed source coverage. Priority = Q × N; crowding changes priority, not Q.
+Details retain 2R/4R context, inspected arms, source separation, stop reasons,
+Q and priority. Missing required evidence stays unavailable.
+Ending details separate the graded light cap, forward continuation within 3R,
+curved source continuation, and their combined maximum. A partial cap weakens the
+score continuously; a source-backed continuation limits ending support. Missing
+required source evidence remains unknown. These scores do not relax strict cleanup.
+An arm's graph-ending stop is an extraction endpoint, not a confirmed source termination.
+Unknown priority is gray; measured zero uses the bottom of the fixed 0–1 color scale.
+Line opacity shows local image clarity, independently of feature strength.
 These are diagnostic measurements, not probabilities of anatomical correctness or identity.
 
 [Native measurements and geometry](data/features.json) and the grayscale processing

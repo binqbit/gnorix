@@ -140,6 +140,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert_reported_artifacts_removed(&result);
     assert_clarity_map(&result);
     assert_feature_strength(&result);
+    assert_visible_ending_context(&result);
     assert_eq!(result.normalized.len(), capture.pixels().len());
     assert_eq!(result.palette.ridge_gray.len(), capture.pixels().len());
     assert_eq!(result.palette.valley_gray.len(), capture.pixels().len());
@@ -203,6 +204,38 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
         }
     }
     assert!(!format!("{result:?}").contains("Point"));
+}
+
+fn assert_visible_ending_context(result: &fingerprint::Fingerprint) {
+    // Independently inspected source caps, not scoring coordinates. These
+    // endings lost all context to footprint gaps or one contaminated cap edge
+    // despite separated, continuous incoming ridges in the original capture.
+    for (x, y) in [
+        (466.0, 535.0),
+        (316.0, 628.0),
+        (567.0, 292.0),
+        (855.0, 694.0),
+        (957.0, 925.0),
+        (101.0, 384.0),
+        (223.0, 307.0),
+    ] {
+        let candidate = result
+            .feature_strength
+            .candidates
+            .iter()
+            .find(|candidate| candidate.position.x() == x && candidate.position.y() == y)
+            .expect("reported ridge ending must remain observed");
+        assert_eq!(candidate.kind, fingerprint::FeatureKind::Ending);
+        assert!(
+            candidate
+                .context
+                .termination
+                .is_some_and(|value| value > 0.0),
+            "visible source cap at ({x}, {y}) was rejected: {:?}",
+            candidate.context
+        );
+        assert!(candidate.priority.is_some_and(|value| value > 0.0));
+    }
 }
 
 fn assert_reported_artifacts_removed(result: &fingerprint::Fingerprint) {
@@ -293,23 +326,42 @@ fn assert_feature_strength(result: &fingerprint::Fingerprint) {
         let matches = candidate.stress_matches.iter().flatten().count();
         assert_eq!(candidate.stability, matches as f64 / 8.0);
         assert!((0.0..=1.0).contains(&candidate.source_coverage));
+        assert!((0.0..=1.0).contains(&candidate.context.source_coverage));
+        assert!((0.5..=1.0).contains(&candidate.neighborhood.factor));
         for score in [
             candidate.source_support,
             candidate.geometry_support,
             candidate.strength,
+            candidate.context.support,
+            candidate.context.support_2r,
+            candidate.priority,
         ]
         .into_iter()
         .flatten()
         {
             assert!(score.is_finite() && (0.0..=1.0).contains(&score));
         }
-        match (candidate.source_support, candidate.geometry_support) {
-            (Some(source), Some(geometry)) => {
-                let expected = source.min(geometry) * (0.5 + 0.5 * candidate.stability);
+        match (
+            candidate.source_support,
+            candidate.geometry_support,
+            candidate.context.support,
+        ) {
+            (Some(source), Some(geometry), Some(context)) => {
+                let expected = context
+                    * (0.75 + 0.25 * source.min(geometry))
+                    * (0.5 + 0.5 * candidate.stability);
                 assert!((candidate.strength.unwrap() - expected).abs() < 1e-12);
-                assert!(candidate.strength.unwrap() <= source.min(geometry));
+                assert!(candidate.strength.unwrap() <= context);
+                assert!(
+                    (candidate.priority.unwrap() - expected * candidate.neighborhood.factor).abs()
+                        < 1e-12
+                );
+                assert!(candidate.priority.unwrap() <= candidate.strength.unwrap());
             }
-            _ => assert_eq!(candidate.strength, None),
+            _ => {
+                assert_eq!(candidate.strength, None);
+                assert_eq!(candidate.priority, None);
+            }
         }
     }
     for case in 0..8 {

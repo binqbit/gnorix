@@ -24,6 +24,10 @@ impl Work {
 
 pub(super) struct Sample {
     pub dark: f64,
+    /// Unclipped local intensity preserves class differences in context probes.
+    pub raw_dark: f64,
+    /// One gray-level quantization step in the same normalized coordinates.
+    pub quantization_variance: f64,
     pub contrast: f64,
 }
 
@@ -92,6 +96,8 @@ impl<'a> Sampler<'a> {
         self.observed += 1;
         Ok(Some(Sample {
             dark: darkness.clamp(0.0, 1.0),
+            raw_dark: darkness,
+            quantization_variance: 1.0 / (12.0 * (255.0 * contrast).powi(2)),
             contrast,
         }))
     }
@@ -265,61 +271,69 @@ pub(super) fn forward_observed(
 
 /// Mean light margin across each pair's transverse connector, integrated over
 /// the outer R of both branches. A single bright pixel contributes only its
-/// represented width and length. The strongest separated pair is useful for a
-/// fork; the weakest arm still limits both overall source and geometry support.
+/// represented width and length. The geometrically closest pairs must each
+/// have their own valley; an unrelated exterior gap cannot substitute for one.
 pub(super) fn separation(
     sampler: &mut Sampler<'_>,
     arms: &[ArmPath],
     policy: &FeaturePolicy,
 ) -> Result<Option<f64>, FingerprintError> {
-    let mut strongest = 0.0_f64;
+    let paths: Vec<_> = arms
+        .iter()
+        .map(|arm| (&arm.points[..], arm.length))
+        .collect();
+    let pairs = geometry::confusable_pairs(&paths, policy.reference_width_px, sampler.work)?;
+    if pairs.is_empty() {
+        return Ok(Some(0.0));
+    }
+    let mut weakest = 1.0_f64;
     let mut complete = true;
-    for (i, a) in arms.iter().enumerate() {
-        for b in &arms[i + 1..] {
-            let upper = a.length.min(b.length).min(policy.branch_horizon_px);
-            if upper <= policy.reference_width_px {
+    for (i, j) in pairs {
+        let (a, b) = (&arms[i], &arms[j]);
+        let upper = a.length.min(b.length).min(policy.branch_horizon_px);
+        if upper <= policy.reference_width_px {
+            weakest = 0.0;
+            continue;
+        }
+        let span = upper - policy.reference_width_px;
+        let count = intervals(span, policy.sample_spacing_px)?;
+        sampler
+            .work
+            .charge(count.saturating_mul(a.points.len() + b.points.len()))?;
+        let mut sum = 0.0;
+        for index in 0..count {
+            let along = policy.reference_width_px + span * (index as f64 + 0.5) / count as f64;
+            let first = geometry::at(&a.points, along);
+            let second = geometry::at(&b.points, along);
+            complete &= sampler.observed_segment(first, second)?;
+            let endpoints = (sampler.sample(first)?, sampler.sample(second)?);
+            let width = geometry::distance(first, second);
+            if width == 0.0 {
                 continue;
             }
-            let span = upper - policy.reference_width_px;
-            let count = intervals(span, policy.sample_spacing_px)?;
-            sampler
-                .work
-                .charge(count.saturating_mul(a.points.len() + b.points.len()))?;
-            let mut sum = 0.0;
-            for index in 0..count {
-                let along = policy.reference_width_px + span * (index as f64 + 0.5) / count as f64;
-                let first = geometry::at(&a.points, along);
-                let second = geometry::at(&b.points, along);
-                complete &= sampler.observed_segment(first, second)?;
-                let endpoints = (sampler.sample(first)?, sampler.sample(second)?);
-                let width = geometry::distance(first, second);
-                if width == 0.0 {
-                    continue;
-                }
-                let transverse = intervals(width, policy.sample_spacing_px)?;
-                let mut light = 0.0;
-                for column in 0..transverse {
-                    let point =
-                        geometry::lerp(first, second, (column as f64 + 0.5) / transverse as f64);
-                    if let Some(sample) = sampler.sample(point)? {
-                        light += (1.0 - 2.0 * sample.dark).max(0.0);
-                    } else {
-                        complete = false;
-                    }
-                }
-                if let (Some(a), Some(b)) = endpoints {
-                    let dark_ends = (2.0 * a.dark - 1.0)
-                        .max(0.0)
-                        .min((2.0 * b.dark - 1.0).max(0.0));
-                    sum += dark_ends * light / transverse as f64;
+            let transverse = intervals(width, policy.sample_spacing_px)?;
+            let mut light = 0.0;
+            for column in 0..transverse {
+                let point =
+                    geometry::lerp(first, second, (column as f64 + 0.5) / transverse as f64);
+                if let Some(sample) = sampler.sample(point)? {
+                    light += (1.0 - 2.0 * sample.dark).max(0.0);
                 } else {
                     complete = false;
                 }
             }
-            strongest = strongest.max(sum / count as f64 * span / policy.reference_width_px);
+            if let (Some(a), Some(b)) = endpoints {
+                let dark_ends = (2.0 * a.dark - 1.0)
+                    .max(0.0)
+                    .min((2.0 * b.dark - 1.0).max(0.0));
+                sum += dark_ends * light / transverse as f64;
+            } else {
+                complete = false;
+            }
         }
+        weakest = weakest.min(sum / count as f64 * span / policy.reference_width_px);
     }
-    Ok(complete.then_some(strongest.clamp(0.0, 1.0)))
+    Ok(complete.then_some(weakest.clamp(0.0, 1.0)))
 }
 
 pub(super) fn interior_light(

@@ -3,11 +3,15 @@
 //! Scores describe observed support, not biometric probabilities. Assessment
 //! never removes a candidate or changes the graph used by reconstruction.
 
+mod context;
 mod evidence;
 mod geometry;
+mod neighborhood;
 mod sampling;
 mod stability;
 
+pub use context::{ContextArm, ContextStop, FeatureContext};
+pub use neighborhood::FeatureNeighborhood;
 pub use stability::{StabilityPolicy, StressCase};
 
 use super::enhancement::Preprocessed;
@@ -35,6 +39,8 @@ pub enum FeatureReason {
     LightRidge,
     NoInteriorLight,
     StressSensitive,
+    MissingContextSupport,
+    UnconfirmedContext,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +71,11 @@ pub struct FeatureStrength {
     pub geometry_support: Option<f64>,
     pub stability: f64,
     pub strength: Option<f64>,
+    /// Source-backed structure over an extended, scale-normalized neighborhood.
+    pub context: FeatureContext,
+    /// Observed crowding, separate from intrinsic structural strength.
+    pub neighborhood: FeatureNeighborhood,
+    pub priority: Option<f64>,
     /// Fraction of required source point/cell checks with observed support.
     pub source_coverage: f64,
     /// Fraction of the requested horizon available on the weakest arm, or on
@@ -87,6 +98,8 @@ pub struct FeatureStrength {
 pub struct FeaturePolicy {
     pub reference_width_px: f64,
     pub branch_horizon_px: f64,
+    pub context_horizon_px: f64,
+    pub neighborhood_radius_px: f64,
     pub tangent_support_px: f64,
     pub sample_spacing_px: f64,
     pub source_search_px: f64,
@@ -115,6 +128,7 @@ pub(super) fn assess(
     let policy = assessment_policy(unit_px, config.min_contrast, &stress);
     let mut candidates = evidence::assess(capture, &prepared.palette, graph, &policy)?;
     apply_stability(&mut candidates, stress.matches)?;
+    neighborhood::rank(capture, &mut candidates, policy.neighborhood_radius_px)?;
 
     Ok(FeatureAssessment { policy, candidates })
 }
@@ -128,6 +142,8 @@ fn assessment_policy(
     FeaturePolicy {
         reference_width_px: unit_px,
         branch_horizon_px: 2.0 * unit_px,
+        context_horizon_px: 4.0 * unit_px,
+        neighborhood_radius_px: 3.0 * unit_px,
         tangent_support_px: source.tangent_radius_px,
         sample_spacing_px: source.sample_spacing_px,
         source_search_px: source.terminal_lookahead_px,
@@ -158,14 +174,24 @@ fn apply_stability(
         candidate.strength = combine(
             candidate.source_support,
             candidate.geometry_support,
+            candidate.context.support,
             candidate.stability,
         );
     }
     Ok(())
 }
 
-fn combine(source: Option<f64>, geometry: Option<f64>, stability: f64) -> Option<f64> {
-    Some(source?.min(geometry?) * (0.5 + 0.5 * stability))
+fn combine(
+    source: Option<f64>,
+    geometry: Option<f64>,
+    context: Option<f64>,
+    stability: f64,
+) -> Option<f64> {
+    // Extended source-confirmed structure is the prerequisite. Weak local
+    // details can reduce its score by at most one quarter; threshold stability
+    // corroborates that structure and cannot manufacture it.
+    let local = source?.min(geometry?);
+    Some(context? * (0.75 + 0.25 * local) * (0.5 + 0.5 * stability))
 }
 
 fn kind(node: NodeKind, degree: usize) -> FeatureKind {

@@ -32,8 +32,9 @@ pub use cleanup::{
 };
 pub use enhancement::LocalPalette;
 pub use features::{
-    FeatureArm, FeatureAssessment, FeatureKind, FeaturePolicy, FeatureReason, FeatureStrength,
-    StabilityPolicy, StressCase,
+    ContextArm, ContextStop, FeatureArm, FeatureAssessment, FeatureContext, FeatureKind,
+    FeatureNeighborhood, FeaturePolicy, FeatureReason, FeatureStrength, StabilityPolicy,
+    StressCase,
 };
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use graph::{NodeKind, RidgeCycle, RidgeEdge, RidgeGraph, RidgeNode};
