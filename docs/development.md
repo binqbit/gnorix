@@ -105,9 +105,9 @@ uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image crates/gnorix/tests/assets/test-fingerprint.png
 ```
 
-The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization and reconstructed contours. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.
+The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization, source-based clarity and reconstructed contours. Geometry visibility follows the native segment clarity while unsupported measurements remain explicit. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.
 
-Geometry overlays default to 50% opacity and retain source coordinates. `--overlay-alpha` and `--dpi` affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
+Geometry overlays default to a maximum opacity of 50% and retain source coordinates. `--overlay-alpha` and `--dpi` affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
 
 ## Change discipline
 

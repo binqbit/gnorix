@@ -1,5 +1,7 @@
 //! Extract one PNG capture to inspectable local stages and graph geometry.
 
+#[path = "fingerprint/clarity.rs"]
+mod clarity;
 #[path = "fingerprint/contours.rs"]
 mod contours;
 
@@ -105,6 +107,7 @@ fn save_bundle(
 ) -> Result<(), Box<dyn Error>> {
     source.save(root.join("source.png"))?;
     save_palette(root, result)?;
+    clarity::save(root, result)?;
     save_values(
         root,
         "normalized.png",
@@ -231,6 +234,7 @@ fn snapshot(
             let (geometry, error) = geometry_json(geometry, result.scale.unit_px);
             json!({"id":id,"start":edge.start,"end":edge.end,
             "points":edge.points.iter().map(|p| [p.x(),p.y()]).collect::<Vec<_>>(),
+            "segment_clarity":clarity::path_scores(&result.clarity, &edge.points, false),
             "geometry":geometry,"geometry_error":error})
         })
         .collect();
@@ -243,6 +247,7 @@ fn snapshot(
         .map(|(id, (cycle, geometry))| {
             let (geometry, error) = geometry_json(geometry, result.scale.unit_px);
             json!({"id":id,"points":cycle.points.iter().map(|p| [p.x(),p.y()]).collect::<Vec<_>>(),
+            "segment_clarity":clarity::path_scores(&result.clarity, &cycle.points, true),
             "geometry":geometry,"geometry_error":error})
         })
         .collect();
@@ -253,11 +258,12 @@ fn snapshot(
         "bootstrap":bootstrap_snapshot(result)?,
         "scale":full_scale_snapshot(result),
         "normalization":{"radius_px":result.palette.radius_px,"method":"local-two-class-midpoint","reference_encoding":"rounded-u8"},
+        "clarity":clarity::snapshot(&result.clarity),
         "coordinate_system":"source image pixels, x right and y down; no rescaling",
         "qualifications":["Extraction controls are not biometric acceptance tolerances.","Topology is measured from the processed image, not confirmed anatomy.","No matching, key reconstruction or real-capture qualification is provided."],
-        "images":{"source":"source.png","normalized":"normalized.png","denoised":"denoised.png","coherence":"coherence.png","usable":"usable.png","binary":"binary.png","skeleton":"skeleton.png","ridge_level":"ridge-level.png","valley_level":"valley-level.png","normalization_support":"normalization-support.png","measurement_skeleton":"measurement-skeleton.png","pattern_support":"pattern-support.png"},
+        "images":{"source":"source.png","normalized":"normalized.png","denoised":"denoised.png","coherence":"coherence.png","usable":"usable.png","binary":"binary.png","skeleton":"skeleton.png","ridge_level":"ridge-level.png","valley_level":"valley-level.png","normalization_support":"normalization-support.png","measurement_skeleton":"measurement-skeleton.png","pattern_support":"pattern-support.png","clarity":"clarity.png","clarity_contrast":"clarity-contrast.png","clarity_separation":"clarity-separation.png","clarity_repetition":"clarity-repetition.png","clarity_support":"clarity-support.png"},
         "nodes":nodes,"edges":edges,"cycles":cycles,
-        "contours":contours::snapshot(&result.contours, result.scale.unit_px),
+        "contours":contours::snapshot(&result.contours, result.scale.unit_px, &result.clarity),
     }))
 }
 

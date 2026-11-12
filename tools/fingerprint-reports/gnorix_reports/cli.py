@@ -22,6 +22,7 @@ _REPORTS = (
     "normalization-analysis.png",
     "contour-comparison.png",
     "contour-overlay.png",
+    "clarity-analysis.png",
 )
 _DATA_FILES = {
     "features.json",
@@ -37,6 +38,11 @@ _DATA_FILES = {
     "normalization-support.png",
     "measurement-skeleton.png",
     "pattern-support.png",
+    "clarity.png",
+    "clarity-contrast.png",
+    "clarity-separation.png",
+    "clarity-repetition.png",
+    "clarity-support.png",
 }
 
 
@@ -81,7 +87,11 @@ def _validate_existing(output: Path) -> None:
         return
     expected = {*_REPORTS, "README.md", "data"}
     children = {path.name: path for path in output.iterdir()}
-    if set(children) != expected or any(path.is_symlink() for path in children.values()):
+    # Recognize owned output by its core files and known filenames. A new
+    # diagnostic may be absent in a previous run; it needs no legacy renderer.
+    if not {"overview.png", "README.md", "data"} <= children.keys() <= expected or any(
+        path.is_symlink() for path in children.values()
+    ):
         raise ValueError(
             "reports/fingerprint contains unrelated or incomplete files; refusing replacement"
         )
@@ -90,7 +100,7 @@ def _validate_existing(output: Path) -> None:
     ):
         raise ValueError("reports/fingerprint contains unexpected file types")
     data = {path.name: path for path in children["data"].iterdir()}
-    if set(data) != _DATA_FILES or any(
+    if not {"features.json", "source.png"} <= data.keys() <= _DATA_FILES or any(
         path.is_symlink() or not path.is_file() for path in data.values()
     ):
         raise ValueError("reports/fingerprint/data contains unrelated or incomplete files")
@@ -159,6 +169,9 @@ def _write_readme(staging: Path) -> None:
     adjustments = contours["smoothing"]["edges"] + contours["smoothing"]["cycles"]
     accepted = sum(join["status"] == "accepted" for join in contours["joins"])
     applied = sum(item["smoothing_applied"] for item in adjustments)
+    clarity = data["clarity"]["summary"]
+    mean = clarity["mean_score"]
+    mean_text = "unavailable" if mean is None else f"{mean:.4f}"
     text = f"""# Fingerprint report
 
 Start with [the overview](overview.png). This folder contains the latest successful analysis.
@@ -169,15 +182,25 @@ Start with [the overview](overview.png). This folder contains the latest success
 - [Local normalization](normalization-analysis.png)
 - [Contour comparison](contour-comparison.png)
 - [Refined contour overlay](contour-overlay.png)
+- [Local clarity and components](clarity-analysis.png)
 
 Common width unit R: **{data["scale"]["unit_px"]:.6g} source pixels**.
 Smoothing applied to **{applied} / {len(adjustments)} paths**.
 Accepted source-supported joins: **{accepted}**.
 Candidates kept separate: **{len(contours["joins"]) - accepted}**.
+Native mean clarity over supported pixels: **{mean_text}**.
+Clarity support: **{clarity["supported_pixels"]} / {clarity["total_pixels"]} pixels**.
 
 Overlays retain source coordinates. Green joins were accepted using image evidence;
 amber dashed candidates remain disconnected. Smoothed geometry is an estimate,
 not verified anatomy or a biometric matching score.
+
+Contour opacity follows native segment clarity: selected maximum × (0.2 + 0.8 × sqrt(score)).
+The fixed square-root transfer changes display only; native scores and heatmap stay linear.
+Gray paths mean unavailable clarity; a measured zero retains its path color.
+Joins retain status colors, with minimum opacity for missing clarity.
+Native grid-anchor scores are contrast × separation × repetition, then interpolated
+on a fixed 0–1 scale. Components interpolate separately; support can include flat background.
 
 [Native measurements and geometry](data/features.json) and the grayscale processing
 stages are retained in `data/`. The report is generated locally from the selected

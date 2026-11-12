@@ -53,6 +53,7 @@ fn native_pipeline_is_deterministic_and_never_uses_masked_pixels() {
     assert_eq!(a.scale, b.scale);
     assert_eq!(a.edge_geometry, b.edge_geometry);
     assert_eq!(a.contours, b.contours);
+    assert_eq!(a.clarity, b.clarity);
     for edge in &a.graph.edges {
         let left = edge.points.iter().any(|p| p.x() < 44.0);
         let right = edge.points.iter().any(|p| p.x() >= 52.0);
@@ -135,6 +136,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert_eq!(result.edge_geometry.len(), result.graph.edges.len());
     assert_eq!(result.cycle_geometry.len(), result.graph.cycles.len());
     assert_contour_provenance(&result);
+    assert_clarity_map(&result);
     assert_eq!(result.normalized.len(), capture.pixels().len());
     assert_eq!(result.palette.ridge_gray.len(), capture.pixels().len());
     assert_eq!(result.palette.valley_gray.len(), capture.pixels().len());
@@ -243,4 +245,32 @@ fn assert_contour_provenance(result: &fingerprint::Fingerprint) {
             assert!((length - geometry.arc_length).abs() < 1e-8);
         }
     }
+}
+
+fn assert_clarity_map(result: &fingerprint::Fingerprint) {
+    let map = &result.clarity;
+    assert_eq!(map.width(), result.binary.width());
+    assert_eq!(map.height(), result.binary.height());
+    assert_eq!(map.period_px, result.bootstrap.ridge_period_px);
+    let size = map.width() * map.height();
+    assert_eq!(map.supported.len(), size);
+    for values in [&map.values, &map.contrast, &map.separation, &map.repetition] {
+        assert_eq!(values.len(), size);
+        for (&value, &supported) in values.iter().zip(&map.supported) {
+            assert!(value.is_finite() && (0.0..=1.0).contains(&value));
+            if !supported {
+                assert_eq!(value, 0.0);
+            }
+        }
+    }
+    assert!(map.supported.iter().any(|&valid| valid));
+    assert!(map.values.iter().any(|&value| value > 0.0));
+    for y in (0..map.height()).step_by(map.grid_spacing_px) {
+        for x in (0..map.width()).step_by(map.grid_spacing_px) {
+            let index = y * map.width() + x;
+            let expected = map.contrast[index] * map.separation[index] * map.repetition[index];
+            assert!((map.values[index] - expected).abs() < 1e-6);
+        }
+    }
+    assert!(!format!("{map:?}").contains("values: ["));
 }

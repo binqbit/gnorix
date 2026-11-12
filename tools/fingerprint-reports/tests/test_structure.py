@@ -100,6 +100,15 @@ def fixture():
             "method": "local-two-class-midpoint",
             "reference_encoding": "rounded-u8",
         },
+        "clarity": {
+            "method": "local-ridge-separability-v1",
+            "period_px": 5,
+            "grid_spacing_px": 1,
+            "score": "interpolated(contrast * separation * repetition)",
+            "segment_sampling": "bilinear-map-line-mean",
+            "encoding": "rounded-u8",
+            "summary": {"supported_pixels": 768, "total_pixels": 768, "mean_score": 1},
+        },
         "nodes": [
             {"id": 10, "x": 3, "y": 5, "kind": "ending", "touches_unobserved": False},
             {"id": 20, "x": 14, "y": 5, "kind": "junction", "touches_unobserved": False},
@@ -154,6 +163,11 @@ def fixture():
                 "normalization_support",
                 "measurement_skeleton",
                 "pattern_support",
+                "clarity",
+                "clarity_contrast",
+                "clarity_separation",
+                "clarity_repetition",
+                "clarity_support",
             )
         },
     }
@@ -164,6 +178,9 @@ def fixture():
 
 def unchanged_contours(data):
     unit = data["scale"]["unit_px"]
+    for kind in ("edges", "cycles"):
+        for path in data[kind]:
+            path.setdefault("segment_clarity", [1] * (len(path["points"]) - (kind == "edges")))
     return {
         "method": "source-supported-smooth-contours",
         "nodes": [{**node, "source_node": node["id"]} for node in data["nodes"]],
@@ -173,6 +190,7 @@ def unchanged_contours(data):
                 "start": edge["start"],
                 "end": edge["end"],
                 "points": copy.deepcopy(edge["points"]),
+                "segment_clarity": edge["segment_clarity"].copy(),
                 "source_edges": [edge["id"]],
                 "source_cycles": [],
                 "source_joins": [],
@@ -183,6 +201,7 @@ def unchanged_contours(data):
             {
                 "id": cycle["id"],
                 "points": copy.deepcopy(cycle["points"]),
+                "segment_clarity": cycle["segment_clarity"].copy(),
                 "source_edges": [],
                 "source_cycles": [cycle["id"]],
                 "source_joins": [],
@@ -233,6 +252,11 @@ class StructureTests(unittest.TestCase):
             ("valley_level", 180),
             ("normalization_support", 255),
             ("pattern_support", 255),
+            ("clarity", 255),
+            ("clarity_contrast", 255),
+            ("clarity_separation", 255),
+            ("clarity_repetition", 255),
+            ("clarity_support", 255),
         ):
             with Image.new("L", (32, 24), value) as image:
                 image.save(self.base / f"{name}.png")
@@ -278,6 +302,7 @@ class StructureTests(unittest.TestCase):
                 "normalization-analysis.png",
                 "contour-comparison.png",
                 "contour-overlay.png",
+                "clarity-analysis.png",
             ],
         )
         self.assertEqual((self.base / "source.png").read_bytes(), original)
@@ -300,7 +325,10 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(tuple(overlay.get_xlim()), (-0.5, 31.5))
         self.assertEqual(tuple(overlay.get_ylim()), (23.5, -0.5))
         for collection in overlay.collections:
-            self.assertEqual(collection.get_alpha(), 0.4)
+            if isinstance(collection, LineCollection):
+                np.testing.assert_allclose(collection.get_colors()[:, 3], 0.4)
+            else:
+                self.assertEqual(collection.get_alpha(), 0.4)
         text = self.labels(self.figures[1])
         for expected in (
             "Paths: 2",
@@ -332,11 +360,18 @@ class StructureTests(unittest.TestCase):
         axis = self.figures[1].axes[0]
         lines = [artist for artist in axis.collections if isinstance(artist, LineCollection)]
         self.assertEqual(len(lines), 3)
-        np.testing.assert_array_equal(lines[0].get_segments()[0], data["edges"][0]["points"])
-        np.testing.assert_array_equal(lines[1].get_segments()[0], data["edges"][1]["points"])
-        np.testing.assert_array_equal(
-            lines[2].get_segments()[0], data["cycles"][0]["points"] + [[20, 10]]
-        )
+        for collection, points in zip(
+            lines,
+            (
+                data["edges"][0]["points"],
+                data["edges"][1]["points"],
+                data["cycles"][0]["points"] + [[20, 10]],
+            ),
+            strict=True,
+        ):
+            np.testing.assert_array_equal(
+                collection.get_segments(), list(zip(points[:-1], points[1:], strict=True))
+            )
         scatter = [artist for artist in axis.collections if isinstance(artist, PathCollection)]
         boundary = [artist for artist in scatter if list(artist.get_offsets()[0]) == [31, 7]]
         self.assertEqual(len(boundary), 2)  # Hollow kind marker plus cross.
@@ -346,7 +381,7 @@ class StructureTests(unittest.TestCase):
         data = fixture()
         data.update(nodes=[], edges=[], cycles=[])
         data["contours"] = unchanged_contours(data)
-        self.assertEqual(len(self.render(data)), 7)
+        self.assertEqual(len(self.render(data)), 8)
         self.assertIn("No extracted graph structure", self.labels(self.figures[1]))
         self.assertIn("Graph cycle rank: 0", self.labels(self.figures[1]))
         self.assertEqual(len(self.figures[1].axes[0].collections), 0)

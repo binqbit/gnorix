@@ -15,10 +15,20 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
+from .clarity import IMAGE_KEYS as CLARITY_IMAGES
+from .clarity import (
+    OPACITY_LABEL,
+    UNKNOWN_COLOR,
+    Clarity,
+    clarity_lines,
+    render_clarity_analysis,
+    validate_clarity,
+    validate_clarity_maps,
+    validate_segment_clarity,
+)
 from .contours import (
     Contours,
     render_contour_comparison,
@@ -87,6 +97,7 @@ class _Curve:
     points: tuple[tuple[float, float], ...]
     geometry_error: str | None
     arc_length_units: float | None
+    segment_clarity: tuple[float | None, ...]
 
 
 @dataclass(frozen=True)
@@ -104,12 +115,13 @@ class _Structure:
     images: dict[str, Path]
     graph_cycle_rank: int
     contours: Contours
+    clarity: Clarity
 
 
 def render_structure(
     snapshot_path: Path, output: Path, dpi: int = 160, alpha: float = 0.5
 ) -> list[Path]:
-    """Validate a native extraction bundle and export seven PNG diagnostics.
+    """Validate a native extraction bundle and export eight PNG diagnostics.
 
     All rasters must have the declared source dimensions. Coordinates are pixel
     centers: (0, 0) is the center of the top-left pixel. Curves are displayed as
@@ -133,6 +145,7 @@ def render_structure(
             images[key] = image
         palette = validate_palette(images)
         validate_measurement_maps(snapshot.scale, images)
+        clarity_maps = validate_clarity_maps(snapshot.clarity, images)
 
         # Finish validation/decoding before creating output; finish all figures
         # in a sibling directory before replacing any existing report files.
@@ -169,6 +182,13 @@ def render_structure(
                     staging / "contour-overlay.png",
                     dpi,
                 )
+                _save_figure(
+                    render_clarity_analysis(
+                        snapshot.clarity, clarity_maps, images["source"], alpha
+                    ),
+                    staging / "clarity-analysis.png",
+                    dpi,
+                )
             output.mkdir(parents=True, exist_ok=True)
             paths = []
             for name in (
@@ -179,6 +199,7 @@ def render_structure(
                 "normalization-analysis.png",
                 "contour-comparison.png",
                 "contour-overlay.png",
+                "clarity-analysis.png",
             ):
                 target = output / name
                 (staging / name).replace(target)
@@ -217,6 +238,7 @@ def _load_structure(path: Path) -> _Structure:
     )
     scale = validate_full_scale(data.get("scale"), width, height)
     normalization = validate_normalization(data.get("normalization"), bootstrap.ridge_period_px)
+    clarity = validate_clarity(data.get("clarity"), bootstrap.ridge_period_px, width, height)
 
     raw_nodes = _array(data.get("nodes"), "nodes")
     node_ids = _identifiers(raw_nodes, "nodes")
@@ -228,7 +250,7 @@ def _load_structure(path: Path) -> _Structure:
 
     raw_images = _object(data.get("images"), "images")
     base = path.resolve().parent
-    keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES)
+    keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES, *CLARITY_IMAGES)
     images = {key: _image_path(base, raw_images.get(key), key) for key in keys}
     rank = _graph_cycle_rank(node_ids, data["edges"], len(cycles))
     contours = validate_contours(
@@ -248,6 +270,7 @@ def _load_structure(path: Path) -> _Structure:
         images,
         rank,
         contours,
+        clarity,
     )
 
 
@@ -376,7 +399,10 @@ def _curves(value, name, width, height, node_ids, unit):
         points = tuple(_position(point, name, width, height) for point in raw_points)
         error = _geometry(item, width, height, unit)
         arc_units = item["geometry"]["arc_length_units"] if error is None else None
-        curves.append(_Curve(points, error, arc_units))
+        scores = validate_segment_clarity(
+            item.get("segment_clarity"), len(points), name == "cycles"
+        )
+        curves.append(_Curve(points, error, arc_units, scores))
     return tuple(curves)
 
 
@@ -451,9 +477,11 @@ def _overview(snapshot, images):
             axis.set_title(label)
         summary = axes.flat[-1]
         summary.set_axis_off()
+        mean = snapshot.clarity.mean_score
+        mean_text = "unavailable" if mean is None else f"{mean:.4f}"
         summary.text(
             0.1,
-            0.75,
+            0.95,
             "Extracted graph topology\n\n"
             f"Nodes: {len(snapshot.nodes)}\n"
             f"Paths: {len(snapshot.edges)}\n"
@@ -462,12 +490,17 @@ def _overview(snapshot, images):
             f"Described path length: {_described_length(snapshot):.6g} R\n\n"
             "Cycle rank counts independent graph cycles.\n"
             "Image coordinates use source pixels.\n"
-            "Described path length is expressed in R.",
+            "Described path length is expressed in R.\n\n"
+            f"Clarity mean: {mean_text}\n"
+            f"Clarity support: {snapshot.clarity.supported_pixels} / "
+            f"{snapshot.clarity.total_pixels} pixels\n"
+            "Includes supported background.\n"
+            "Diagnostic, not matching probability.",
             transform=summary.transAxes,
             ha="left",
             va="top",
             fontsize=10,
-            linespacing=1.6,
+            linespacing=1.25,
         )
         figure.suptitle(
             "Native ridge extraction · supplied processing stages\n"
@@ -531,6 +564,7 @@ def _overlay(snapshot, images, alpha):
         if errors:
             message = "; ".join(sorted(set(errors)))
             axis.set_title(textwrap.fill("Geometry unavailable: " + message[:350], 100), fontsize=9)
+        axis.set_xlabel("x (source px)\n" + OPACITY_LABEL, fontsize=9)
         return figure
     except Exception:
         plt.close(figure)
@@ -539,21 +573,15 @@ def _overlay(snapshot, images, alpha):
 
 def _draw_curves(axis, curves, closed, alpha):
     for failed in (False, True):
-        paths = []
-        for curve in curves:
-            if (curve.geometry_error is not None) == failed:
-                points = curve.points
-                if closed and points[-1] != points[0]:
-                    points = (*points, points[0])
-                paths.append(points)
+        paths = [curve for curve in curves if (curve.geometry_error is not None) == failed]
         if paths:
             color = "#e69f00" if failed else ("#a44cad" if closed else "#00a6b2")
             axis.add_collection(
-                LineCollection(
-                    paths,
-                    colors=color,
+                clarity_lines(
+                    ((curve.points, closed, curve.segment_clarity) for curve in paths),
+                    color,
+                    alpha,
                     linewidths=0.9,
-                    alpha=alpha,
                     linestyles="dashed" if closed else "solid",
                     zorder=3,
                 )
@@ -591,6 +619,7 @@ def _graph_legend(figure):
         Line2D([], [], color="#00a6b2", label="Observed path"),
         Line2D([], [], color="#a44cad", linestyle="--", label="Isolated closed cycle"),
         Line2D([], [], color="#e69f00", label="Geometry unavailable"),
+        Line2D([], [], color=UNKNOWN_COLOR, alpha=0.4, label="Clarity unavailable"),
     ]
     handles.extend(
         Line2D([], [], marker=marker, color=color, linestyle="none", label=label)

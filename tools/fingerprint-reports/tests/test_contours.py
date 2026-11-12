@@ -6,6 +6,7 @@ import unittest
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
 from matplotlib.text import Text
 from PIL import Image
 from test_structure import unchanged_contours
@@ -37,6 +38,7 @@ def fixture(accepted=True):
             "start_node": 20,
             "end_node": 30,
             "points": [[15, 15], [16, 15], [17, 15], [18, 15]],
+            "segment_clarity": [1, 1, 1],
             "gap_px": 3,
             "max_tangent_error_radians": 0.1,
             "evidence": {
@@ -56,6 +58,7 @@ def fixture(accepted=True):
                 "start": 10,
                 "end": 40,
                 "points": [[3, 15], [9, 14.8], [15, 15], [18, 15], [24, 15.2], [31, 15]],
+                "segment_clarity": [1] * 5,
                 "source_edges": [5, 8],
                 "source_cycles": [],
                 "source_joins": [7],
@@ -209,6 +212,7 @@ class ContourTests(unittest.TestCase):
                 {
                     "id": 3,
                     "points": [*raw["edges"][0]["points"], [12, 10], [11, 10]],
+                    "segment_clarity": [1] * 6,
                     "source_edges": [5],
                     "source_cycles": [],
                     "source_joins": [7],
@@ -219,8 +223,8 @@ class ContourTests(unittest.TestCase):
         self.assertTrue(contours.paths[0].closed)
         with Image.new("L", (40, 32), 160) as source:
             figure = render_contour_overlay(contours, source, 0.5)
-        line = figure.axes[0].collections[0].get_segments()[0]
-        np.testing.assert_array_equal(line[0], line[-1])
+        lines = figure.axes[0].collections[0].get_segments()
+        np.testing.assert_array_equal(lines[0][0], lines[-1][-1])
 
     def test_rejects_nonfinite_or_outside_refined_geometry(self):
         raw, baseline = fixture()
@@ -258,10 +262,16 @@ class ContourTests(unittest.TestCase):
         self.assertEqual(comparison.axes[2].get_xlim(), comparison.axes[3].get_xlim())
         self.assertEqual(comparison.axes[2].get_ylim(), comparison.axes[3].get_ylim())
         lines = [item for item in overlay.axes[0].collections if isinstance(item, LineCollection)]
-        np.testing.assert_array_equal(lines[0].get_segments()[0], data["edges"][0]["points"])
-        np.testing.assert_array_equal(lines[1].get_segments()[0], data["joins"][0]["points"])
-        self.assertEqual(lines[0].get_alpha(), 0.4)
-        self.assertEqual(lines[1].get_alpha(), 0.4)
+        np.testing.assert_array_equal(
+            lines[0].get_segments(),
+            list(zip(data["edges"][0]["points"][:-1], data["edges"][0]["points"][1:], strict=True)),
+        )
+        np.testing.assert_array_equal(
+            lines[1].get_segments(),
+            list(zip(data["joins"][0]["points"][:-1], data["joins"][0]["points"][1:], strict=True)),
+        )
+        np.testing.assert_allclose(lines[0].get_colors()[:, 3], 0.4)
+        np.testing.assert_allclose(lines[1].get_colors()[:, 3], 0.4)
 
     def test_unaccepted_candidates_render_dashed_without_changing_path_count(self):
         raw, data = fixture(accepted=False)
@@ -269,9 +279,35 @@ class ContourTests(unittest.TestCase):
         with Image.new("L", (40, 32), 160) as source:
             figure = render_contour_overlay(contours, source, 0.5)
         lines = [item for item in figure.axes[0].collections if isinstance(item, LineCollection)]
-        self.assertEqual(len(lines[0].get_segments()), 2)
+        self.assertEqual(len(lines[0].get_segments()), 4)
         self.assertIsNone(lines[0].get_linestyles()[0][1])
         self.assertIsNotNone(lines[1].get_linestyles()[0][1])
+
+    def test_segment_clarity_is_required_for_raw_refined_paths_and_joins(self):
+        raw, data = fixture()
+        targets = (raw["edges"][0], data["edges"][0], data["joins"][0])
+        for target in targets:
+            saved = target.pop("segment_clarity")
+            with self.assertRaisesRegex(ValueError, "segment_clarity"):
+                validate(raw, data)
+            target["segment_clarity"] = saved
+
+    def test_join_quality_opacity_preserves_acceptance_style_and_endpoint_status(self):
+        for accepted in (True, False):
+            raw, data = fixture(accepted)
+            data["joins"][0]["segment_clarity"] = [0, 1, None]
+            contours = validate(raw, data)
+            with Image.new("L", (40, 32), 160) as source:
+                figure = render_contour_overlay(contours, source, 0.5)
+            axis = figure.axes[0]
+            lines = [item for item in axis.collections if isinstance(item, LineCollection)]
+            join = lines[-1]
+            expected = to_rgba("#009e73" if accepted else "#e69f00")[:3]
+            np.testing.assert_allclose(join.get_colors()[:, 3], [0.1, 0.5, 0.1])
+            np.testing.assert_allclose(join.get_colors()[:2, :3], [expected] * 2)
+            np.testing.assert_allclose(join.get_colors()[2, :3], expected)
+            self.assertEqual(join.get_linestyles()[0][1] is None, accepted)
+            np.testing.assert_allclose(axis.collections[-1].get_edgecolors()[0, :3], expected)
 
 
 if __name__ == "__main__":

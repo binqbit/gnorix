@@ -1,7 +1,7 @@
 //! Serialization of reconstructed geometry and its observed-source provenance.
 
 use gnorix::biometrics::fingerprint::{
-    ContourReconstruction, GapStatus, NodeKind, SmoothingAdjustment, SmoothingRejection,
+    ClarityMap, ContourReconstruction, GapStatus, NodeKind, SmoothingAdjustment, SmoothingRejection,
 };
 use serde_json::{Value, json};
 
@@ -25,7 +25,11 @@ pub(super) fn print_summary(contours: &ContourReconstruction) {
     );
 }
 
-pub(super) fn snapshot(contours: &ContourReconstruction, unit_px: f64) -> Value {
+pub(super) fn snapshot(
+    contours: &ContourReconstruction,
+    unit_px: f64,
+    clarity: &ClarityMap,
+) -> Value {
     let nodes: Vec<_> = contours.graph.nodes.iter().zip(&contours.node_sources).enumerate()
         .map(|(id, (node, source_node))| json!({
             "id":id,"x":node.position.x(),"y":node.position.y(),
@@ -43,6 +47,7 @@ pub(super) fn snapshot(contours: &ContourReconstruction, unit_px: f64) -> Value 
             let (geometry, error) = super::geometry_json(geometry, unit_px);
             json!({"id":id,"start":edge.start,"end":edge.end,
                 "points":edge.points.iter().map(|p|[p.x(),p.y()]).collect::<Vec<_>>(),
+                "segment_clarity":super::clarity::path_scores(clarity, &edge.points, false),
                 "source_edges":origin.source_edges,"source_cycles":origin.source_cycles,
                 "source_joins":origin.source_joins,"geometry":geometry,"geometry_error":error})
         })
@@ -57,6 +62,7 @@ pub(super) fn snapshot(contours: &ContourReconstruction, unit_px: f64) -> Value 
         .map(|(id, ((cycle, origin), geometry))| {
             let (geometry, error) = super::geometry_json(geometry, unit_px);
             json!({"id":id,"points":cycle.points.iter().map(|p|[p.x(),p.y()]).collect::<Vec<_>>(),
+                "segment_clarity":super::clarity::path_scores(clarity, &cycle.points, true),
                 "source_edges":origin.source_edges,"source_cycles":origin.source_cycles,
                 "source_joins":origin.source_joins,"geometry":geometry,"geometry_error":error})
         })
@@ -64,6 +70,7 @@ pub(super) fn snapshot(contours: &ContourReconstruction, unit_px: f64) -> Value 
     let joins: Vec<_> = contours.joins.iter().enumerate().map(|(id, join)|json!({
         "id":id,"start_node":join.start_node,"end_node":join.end_node,
         "points":join.points.iter().map(|p|[p.x(),p.y()]).collect::<Vec<_>>(),
+        "segment_clarity":super::clarity::path_scores(clarity, &join.points, false),
         "gap_px":join.gap_px,"max_tangent_error_radians":join.max_tangent_error_radians,
         "evidence":join.evidence.map(|evidence|json!({
             "mean_darkness":evidence.mean_darkness,"dark_fraction":evidence.dark_fraction,

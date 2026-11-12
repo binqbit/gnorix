@@ -4,6 +4,7 @@
 //! candidates. Endings can result from missing signal. All positions and lengths
 //! are in source-image pixels; measured ridge spacing is not an inferred DPI.
 
+mod clarity;
 mod curve;
 mod enhancement;
 mod full_scale;
@@ -20,6 +21,7 @@ use std::{error::Error, fmt};
 
 use super::{Capture, geometry::Point};
 
+pub use clarity::ClarityMap;
 pub use enhancement::LocalPalette;
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use quality::WidthConsistency;
@@ -267,6 +269,8 @@ pub struct Fingerprint {
     pub denoised: Vec<f32>,
     /// Orientation coherence in [0, 1], not a confidence probability.
     pub coherence: Vec<f32>,
+    /// Diagnostic clarity of the original source; does not gate extraction.
+    pub clarity: ClarityMap,
     pub binary: RidgeMap,
     pub skeleton: RidgeMap,
     pub graph: RidgeGraph,
@@ -310,6 +314,7 @@ pub fn extract(
     let bootstrap = scale::estimate(capture, config)?;
     let scale = full_scale::measure(capture, config, &bootstrap)?;
     let width_consistency = scale.width_consistency()?;
+    let clarity = clarity::assess(capture, bootstrap.ridge_period_px)?;
     let prepared = enhancement::preprocess(capture, config, bootstrap.ridge_period_px)?;
     let skeleton = thinning::thin(&prepared.map)?;
     let graph = graph::trace(&skeleton)?;
@@ -328,6 +333,7 @@ pub fn extract(
         normalized: prepared.normalized,
         denoised: prepared.denoised,
         coherence: prepared.coherence,
+        clarity,
         binary: prepared.map,
         skeleton,
         graph,

@@ -54,6 +54,11 @@ class CommandTests(unittest.TestCase):
             ("valley_level", 180),
             ("normalization_support", 255),
             ("pattern_support", 255),
+            ("clarity", 255),
+            ("clarity_contrast", 255),
+            ("clarity_separation", 255),
+            ("clarity_repetition", 255),
+            ("clarity_support", 255),
         ):
             with Image.new("L", (32, 24), value) as image:
                 image.save(destination / data["images"][key])
@@ -75,6 +80,7 @@ class CommandTests(unittest.TestCase):
             "normalization-analysis.png",
             "contour-comparison.png",
             "contour-overlay.png",
+            "clarity-analysis.png",
         ):
             with Image.new("L", (8, 8), 42) as image:
                 image.save(self.output / name)
@@ -102,8 +108,8 @@ class CommandTests(unittest.TestCase):
             os.chdir(previous_cwd)
         self.assertEqual(stdout.getvalue().strip(), str(self.output / "overview.png"))
         self.assert_only_canonical_folder()
-        self.assertEqual(len(list(self.output.glob("*.png"))), 7)
-        self.assertEqual(len(list((self.output / "data").iterdir())), 13)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 8)
+        self.assertEqual(len(list((self.output / "data").iterdir())), 18)
         for path in self.output.glob("*.png"):
             with Image.open(path) as image:
                 image.verify()
@@ -139,6 +145,34 @@ class CommandTests(unittest.TestCase):
         self.assertNotEqual(self.contents(), previous)
         self.assert_only_canonical_folder()
         self.assertNotIn("previous complete report", (self.output / "README.md").read_text())
+
+    def test_previous_native_bundle_without_clarity_refreshes_without_legacy_rendering(self):
+        self.complete_previous()
+        (self.output / "clarity-analysis.png").unlink()
+        path = self.output / "data" / "features.json"
+        data = json.loads(path.read_text())
+        del data["clarity"]
+        for key in list(data["images"]):
+            if key.startswith("clarity"):
+                (path.parent / data["images"].pop(key)).unlink()
+        for graph in (data, data["contours"]):
+            for kind in ("edges", "cycles"):
+                for curve in graph[kind]:
+                    del curve["segment_clarity"]
+        path.write_text(json.dumps(data))
+        self.assertEqual(len(list(self.output.glob("*.png"))), 7)
+        self.assertEqual(len(list(path.parent.iterdir())), 13)
+        old = self.contents()
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=OSError("failed native run")):
+            with self.assertRaises(OSError):
+                generate_report(self.image, 50, 0.5)
+        self.assertEqual(self.contents(), old)
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
+            generate_report(self.image, 50, 0.5)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 8)
+        self.assertEqual(len(list(path.parent.iterdir())), 18)
+        self.assertIn("clarity", json.loads(path.read_text()))
+        self.assert_only_canonical_folder()
 
     def test_extraction_and_render_failures_preserve_the_previous_complete_report(self):
         self.complete_previous()

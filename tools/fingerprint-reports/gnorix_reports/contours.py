@@ -12,10 +12,11 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
+
+from .clarity import OPACITY_LABEL, UNKNOWN_COLOR, clarity_lines, validate_segment_clarity
 
 _MAX_ITEMS = 100_000
 _MAX_POINTS = 1_000_000
@@ -30,6 +31,7 @@ _CANDIDATE_COLOR = "#e69f00"
 class ContourPath:
     points: tuple[tuple[float, float], ...]
     closed: bool
+    segment_clarity: tuple[float | None, ...]
     source_edges: tuple[int, ...]
     source_cycles: tuple[int, ...]
     source_joins: tuple[int, ...]
@@ -43,6 +45,7 @@ class GapJoin:
     points: tuple[tuple[float, float], ...]
     status: str
     gap_px: float
+    segment_clarity: tuple[float | None, ...]
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,7 @@ def validate_contours(value, raw_nodes, raw_edges, raw_cycles, width, height, un
         ContourPath(
             tuple(tuple(point) for point in item["points"]),
             closed,
+            validate_segment_clarity(item.get("segment_clarity"), len(item["points"]), closed),
             () if closed else (item["id"],),
             (item["id"],) if closed else (),
             (),
@@ -254,7 +258,8 @@ def _joins(value, nodes, width, height, unit):
             if not evidence:
                 raise ValueError("accepted join requires sufficient source evidence")
             consumed.update(pair)
-        result.append(GapJoin(raw["id"], start, end, points, status, gap))
+        scores = validate_segment_clarity(raw.get("segment_clarity"), len(points), False)
+        result.append(GapJoin(raw["id"], start, end, points, status, gap, scores))
     if sum(len(join.points) for join in result) > _MAX_POINTS:
         raise ValueError("joins exceed the total path point limit")
     return tuple(result)
@@ -310,7 +315,8 @@ def _paths(value, closed, node_ids, width, height):
             raise ValueError("contour path requires an observed edge or cycle origin")
         if origins[1] and (not closed or origins[0] or origins[2] or len(origins[1]) != 1):
             raise ValueError("an observed isolated cycle must remain a separate closed contour")
-        paths.append(ContourPath(points, closed, *origins))
+        scores = validate_segment_clarity(raw.get("segment_clarity"), len(points), closed)
+        paths.append(ContourPath(points, closed, scores, *origins))
     return tuple(paths)
 
 
@@ -409,7 +415,7 @@ def _smoothing(value, edge_ids, cycle_ids, unit):
 def render_contour_comparison(contours: Contours, source, alpha):
     """Show all raw/refined contours and a deterministic same-coordinate detail."""
     figure = plt.figure(figsize=(15, 16), layout="constrained")
-    grid = figure.add_gridspec(3, 2, height_ratios=(1, 1, 0.17))
+    grid = figure.add_gridspec(3, 2, height_ratios=(1, 1, 0.25))
     axes = [[figure.add_subplot(grid[row, column]) for column in range(2)] for row in range(2)]
     try:
         crop, detail = _detail(contours)
@@ -451,7 +457,7 @@ def render_contour_comparison(contours: Contours, source, alpha):
 def render_contour_overlay(contours: Contours, source, alpha):
     height = min(17, max(7, 9 * contours.height / contours.width))
     figure = plt.figure(figsize=(11, height + 1), layout="constrained")
-    grid = figure.add_gridspec(2, 1, height_ratios=(height, 0.8))
+    grid = figure.add_gridspec(2, 1, height_ratios=(height, 1.2))
     axis = figure.add_subplot(grid[0, 0])
     try:
         _image(axis, source, contours)
@@ -506,37 +512,37 @@ def _image(axis, source, contours):
 
 
 def _draw_paths(axis, paths, color, alpha, style="solid"):
-    lines = [
-        (*path.points, path.points[0])
-        if path.closed and path.points[-1] != path.points[0]
-        else path.points
-        for path in paths
-    ]
-    if lines:
+    if paths:
         axis.add_collection(
-            LineCollection(
-                lines, colors=color, linewidths=0.9, alpha=alpha, linestyles=style, zorder=3
+            clarity_lines(
+                ((path.points, path.closed, path.segment_clarity) for path in paths),
+                color,
+                alpha,
+                linewidths=0.9,
+                linestyles=style,
+                zorder=3,
             )
         )
 
 
 def _draw_joins(axis, joins, alpha):
     for accepted in (False, True):
-        selected = [join.points for join in joins if (join.status == "accepted") == accepted]
+        selected = [join for join in joins if (join.status == "accepted") == accepted]
         if not selected:
             continue
         color = _JOIN_COLOR if accepted else _CANDIDATE_COLOR
         axis.add_collection(
-            LineCollection(
-                selected,
-                colors=color,
+            clarity_lines(
+                ((join.points, False, join.segment_clarity) for join in selected),
+                color,
+                alpha,
+                unknown_color=color,
                 linewidths=2.2 if accepted else 1.5,
-                alpha=alpha,
                 linestyles="solid" if accepted else "dashed",
                 zorder=5,
             )
         )
-        endpoints = [point for points in selected for point in (points[0], points[-1])]
+        endpoints = [point for join in selected for point in (join.points[0], join.points[-1])]
         axis.scatter(
             [point[0] for point in endpoints],
             [point[1] for point in endpoints],
@@ -593,10 +599,14 @@ def _footer(axis, text, width, raw=True):
             Line2D([], [], color=_SMOOTH_COLOR, label="Refined contour"),
             Line2D([], [], color=_JOIN_COLOR, linewidth=2, label="Accepted source-supported join"),
             Line2D([], [], color=_CANDIDATE_COLOR, linestyle="--", label="Unaccepted candidate"),
+            Line2D([], [], color=UNKNOWN_COLOR, alpha=0.4, label="Clarity unavailable"),
         ]
     )
     axis.legend(
         handles=handles, loc="upper center", ncol=2, frameon=False, fontsize=9, borderaxespad=0
+    )
+    text += (
+        "\n" + OPACITY_LABEL + "\nJoins retain status colors; missing clarity uses minimum opacity."
     )
     wrapped = "\n".join(textwrap.fill(line, width) for line in text.splitlines())
     axis.text(0.5, 0, wrapped, transform=axis.transAxes, ha="center", va="bottom", fontsize=9)
