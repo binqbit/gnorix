@@ -6,11 +6,13 @@
 //! our own simple filter, not their Gabor filter or a SourceAFIS reproduction.
 
 mod normalization;
+mod response;
 mod window;
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
 pub use normalization::LocalPalette;
+pub(super) use response::DirectionalResponse;
 use window::{Integral, Window};
 
 use super::{Capture, ExtractionConfig, FingerprintError, Preprocessed, RidgeMap};
@@ -97,7 +99,8 @@ pub(super) fn preprocess(
     drop(orientation_input);
     let local = normalization::apply_palette(capture, &palette);
     let filtered = denoise_intensity(&local, width, height, ridge_period_px / 20.0);
-    let map = directional_ridges(&filtered, &tensor, width, height, ridge_period_px)?;
+    let response = response::collect(&filtered, &tensor, width, height, ridge_period_px)?;
+    let map = response.binarize(0.0, config.min_coherence)?;
 
     Ok(Preprocessed {
         palette,
@@ -105,6 +108,7 @@ pub(super) fn preprocess(
         denoised: filtered.values,
         coherence: tensor.coherence,
         map,
+        response,
     })
 }
 
@@ -198,6 +202,8 @@ fn gradient(local: &Normalized, width: usize, height: usize, index: usize) -> Op
 struct Orientation {
     angles: Vec<f32>,
     coherence: Vec<f32>,
+    exact_coherence: Vec<f64>,
+    observed: Vec<bool>,
     usable: Vec<bool>,
 }
 
@@ -223,6 +229,8 @@ fn orientation(
     let mut field = Orientation {
         angles: vec![0.0; local.values.len()],
         coherence: vec![0.0; local.values.len()],
+        exact_coherence: vec![0.0; local.values.len()],
+        observed: vec![false; local.values.len()],
         usable: vec![false; local.values.len()],
     };
     for y in 0..height {
@@ -239,10 +247,13 @@ fn orientation(
             }
             let coherence = ((xx - yy).hypot(2.0 * xy) / energy).clamp(0.0, 1.0);
             field.coherence[index] = coherence as f32;
+            field.exact_coherence[index] = coherence;
+            field.observed[index] = true;
+            // Retain the observed orientation before applying confidence so
+            // threshold stress cases reuse the same source tensor and filter.
+            field.angles[index] =
+                ((2.0 * xy).atan2(xx - yy) / 2.0 + FRAC_PI_2).rem_euclid(PI) as f32;
             if coherence >= min_coherence {
-                // The principal gradient is normal to the ridge tangent.
-                field.angles[index] =
-                    ((2.0 * xy).atan2(xx - yy) / 2.0 + FRAC_PI_2).rem_euclid(PI) as f32;
                 field.usable[index] = true;
             }
         }
@@ -275,6 +286,7 @@ fn interpolate(local: &Normalized, width: usize, height: usize, x: f64, y: f64) 
     Some(upper * (1.0 - dy) + lower * dy)
 }
 
+#[cfg(test)]
 fn directional_ridges(
     local: &Normalized,
     field: &Orientation,

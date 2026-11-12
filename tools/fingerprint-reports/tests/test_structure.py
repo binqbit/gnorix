@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
+from feature_fixture import feature_fixture
 from matplotlib.collections import LineCollection, PathCollection
 from matplotlib.text import Text
 from PIL import Image
@@ -263,6 +264,8 @@ def unchanged_cleanup(data):
 
 def unchanged_contours(data):
     unit = data["scale"]["unit_px"]
+    if "config" in data:
+        data["feature_strength"] = feature_fixture(data)
     for kind in ("edges", "cycles"):
         for path in data[kind]:
             path.setdefault("segment_clarity", [1] * (len(path["points"]) - (kind == "edges")))
@@ -389,6 +392,7 @@ class StructureTests(unittest.TestCase):
                 "contour-comparison.png",
                 "contour-overlay.png",
                 "clarity-analysis.png",
+                "feature-strength.png",
             ],
         )
         self.assertEqual((self.base / "source.png").read_bytes(), original)
@@ -465,7 +469,7 @@ class StructureTests(unittest.TestCase):
         data = fixture()
         data.update(nodes=[], edges=[], cycles=[])
         data["contours"] = unchanged_contours(data)
-        self.assertEqual(len(self.render(data)), 8)
+        self.assertEqual(len(self.render(data)), 9)
         self.assertIn("No extracted graph structure", self.labels(self.figures[1]))
         self.assertIn("Graph cycle rank: 0", self.labels(self.figures[1]))
         self.assertEqual(len(self.figures[1].axes[0].collections), 0)
@@ -513,6 +517,18 @@ class StructureTests(unittest.TestCase):
         (self.base / "denoised.png").write_bytes(b"invalid denoised image")
         with self.assertRaises(ValueError):
             self.render(fixture())
+        self.assertFalse((self.base / "report").exists())
+
+    def test_feature_evidence_is_required_before_any_report_is_published(self):
+        data = fixture()
+        del data["feature_strength"]
+        with self.assertRaisesRegex(ValueError, "feature_strength"):
+            self.render(data)
+        self.assertFalse((self.base / "report").exists())
+        data = fixture()
+        data["feature_strength"]["candidates"][0]["strength"] = 0.9
+        with self.assertRaisesRegex(ValueError, "combined strength"):
+            self.render(data)
         self.assertFalse((self.base / "report").exists())
 
     def test_normalization_metadata_and_reference_images_are_required_before_output(self):

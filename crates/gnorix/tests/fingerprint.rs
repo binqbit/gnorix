@@ -54,6 +54,7 @@ fn native_pipeline_is_deterministic_and_never_uses_masked_pixels() {
     assert_eq!(a.edge_geometry, b.edge_geometry);
     assert_eq!(a.contours, b.contours);
     assert_eq!(a.clarity, b.clarity);
+    assert_eq!(a.feature_strength, b.feature_strength);
     for edge in &a.graph.edges {
         let left = edge.points.iter().any(|p| p.x() < 44.0);
         let right = edge.points.iter().any(|p| p.x() >= 52.0);
@@ -138,6 +139,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
     assert_contour_provenance(&result);
     assert_reported_artifacts_removed(&result);
     assert_clarity_map(&result);
+    assert_feature_strength(&result);
     assert_eq!(result.normalized.len(), capture.pixels().len());
     assert_eq!(result.palette.ridge_gray.len(), capture.pixels().len());
     assert_eq!(result.palette.valley_gray.len(), capture.pixels().len());
@@ -270,6 +272,69 @@ fn assert_reported_artifacts_removed(result: &fingerprint::Fingerprint) {
         }),
         "reported duplicate ridge was not collapsed"
     );
+}
+
+fn assert_feature_strength(result: &fingerprint::Fingerprint) {
+    let assessment = &result.feature_strength;
+    assert_eq!(
+        assessment.candidates.len(),
+        result.graph.nodes.len() + result.graph.cycles.len()
+    );
+    for (id, candidate) in assessment.candidates.iter().enumerate() {
+        assert_eq!(candidate.id, id);
+        if id < result.graph.nodes.len() {
+            assert_eq!(candidate.source_node, Some(id));
+            assert_eq!(candidate.source_cycle, None);
+            assert_eq!(candidate.position, result.graph.nodes[id].position);
+        } else {
+            assert_eq!(candidate.source_node, None);
+            assert_eq!(candidate.source_cycle, Some(id - result.graph.nodes.len()));
+        }
+        let matches = candidate.stress_matches.iter().flatten().count();
+        assert_eq!(candidate.stability, matches as f64 / 8.0);
+        assert!((0.0..=1.0).contains(&candidate.source_coverage));
+        for score in [
+            candidate.source_support,
+            candidate.geometry_support,
+            candidate.strength,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(score.is_finite() && (0.0..=1.0).contains(&score));
+        }
+        match (candidate.source_support, candidate.geometry_support) {
+            (Some(source), Some(geometry)) => {
+                let expected = source.min(geometry) * (0.5 + 0.5 * candidate.stability);
+                assert!((candidate.strength.unwrap() - expected).abs() < 1e-12);
+                assert!(candidate.strength.unwrap() <= source.min(geometry));
+            }
+            _ => assert_eq!(candidate.strength, None),
+        }
+    }
+    for case in 0..8 {
+        let mut matches: Vec<_> = assessment
+            .candidates
+            .iter()
+            .filter_map(|candidate| candidate.stress_matches[case])
+            .collect();
+        let matched = matches.len();
+        matches.sort_unstable();
+        matches.dedup();
+        assert_eq!(
+            matches.len(),
+            matched,
+            "stress features must match one-to-one"
+        );
+    }
+
+    // Ranking must preserve candidates removed from the separate contour view.
+    for removed in &result.contours.cleanup.removed_spurs {
+        assert_eq!(
+            assessment.candidates[removed.terminal_node].source_node,
+            Some(removed.terminal_node)
+        );
+    }
 }
 
 fn assert_contour_provenance(result: &fingerprint::Fingerprint) {

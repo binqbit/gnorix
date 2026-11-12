@@ -44,7 +44,7 @@ pub struct SourcePolicy {
 }
 
 impl SourcePolicy {
-    pub(super) fn for_unit(unit: f64) -> Self {
+    pub(in crate::biometrics::fingerprint) fn for_unit(unit: f64) -> Self {
         let relative_width_tolerance = 0.2;
         let max_ridge_width_px = (1.0 + relative_width_tolerance) * unit;
         Self {

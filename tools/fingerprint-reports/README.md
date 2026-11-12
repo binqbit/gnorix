@@ -28,6 +28,7 @@ reports/fingerprint/
   contour-comparison.png
   contour-overlay.png
   clarity-analysis.png
+  feature-strength.png
   data/
     features.json
     source.png
@@ -44,6 +45,7 @@ reports/fingerprint/
 | `contour-comparison.png` | Observed and reconstructed paths on identical source coordinates, marked terminal-spur and duplicate-loop-arm removals, and a matched detail. |
 | `contour-overlay.png` | Cleaned, smooth contours and explicit accepted or unaccepted gap continuations. |
 | `clarity-analysis.png` | Source-aligned local clarity, native contrast/separation/repetition components and explicit measurement support, on fixed 0–1 scales. |
+| `feature-strength.png` | Every original node and isolated-cycle candidate colored by native combined strength Q, component distributions and automatically selected detail examples. |
 
 The full-source width mean is the common unit R. Bootstrap measurements initialize the pipeline and remain separate diagnostics. Width consistency at ±10%, ±20% and ±30% describes measured variation; it is not a recognition probability. The scale overlay displays a spatial subset for readability, while every measurement contributes to its statistics.
 
@@ -61,9 +63,17 @@ Contour opacity is `0.4 + 0.5 × sqrt(clarity)`: a fixed **40–90%** range, ind
 
 `data/features.json` retains all measured widths, source-coordinate paths, local-reference metadata, reconstruction provenance and processing controls. The adjacent images are the extractor's original 8-bit grayscale PNG stages. The renderer checks dimensions, image containment, finite values, scale summaries, path origins, endpoint preservation and join evidence before publishing. Image processing is local; fingerprints and measurements are not uploaded.
 
+## Feature strength
+
+Feature strength is a separate native diagnostic for every original ending, bifurcation, higher-degree junction, isolated node and isolated cycle. Candidates remain in the report even when their score is zero, their evidence is unavailable, or cleanup removes the associated geometry. The source overlay uses distinct candidate shapes and a fixed 0–1 color scale for combined strength Q. Gray means unavailable Q; a measured zero uses the lowest score color. Marker opacity follows the fixed 40–90% convention, and the original image stays fully visible beneath it.
+
+The native components are source support P, geometry support G and stability T across eight specified perturbation cases. The combined score is `Q = min(P, G) × (0.5 + 0.5T)`; missing P or G yields an unavailable Q. The figure shows P/G/T/Q distributions and detail examples selected from the actual candidates, with source coverage, matched stress cases and native reasons. These measurements are not probabilities of anatomical correctness, fingerprint identity or recognition success. They do not change extraction, cleanup, smoothing or connectivity.
+
+Python validates candidate coverage, original graph references, component bounds, the combined-score formula and one-to-one stress-match metadata before rendering. It does not extract features, rerun perturbations or recompute biometric evidence. The full candidate evidence remains in `data/features.json`.
+
 ## Display controls
 
-- `--overlay-alpha 0.5`: opacity of maps, measurement overlays, structural node markers and removed-artifact annotations in `[0, 1]`. Clarity-colored lines use their fixed 40–90% range. Default: 0.5.
+- `--overlay-alpha 0.5`: opacity of maps, measurement overlays, structural node markers and removed-artifact annotations in `[0, 1]`. Clarity-colored lines and strength-colored feature markers use their fixed 40–90% range. Default: 0.5.
 - `--dpi 160`: PNG export resolution from 50 to 600. Default: 160.
 
 These options change presentation only. They do not change ridge extraction, matching tolerances or the source-coordinate system. The command generates PNG figures only.

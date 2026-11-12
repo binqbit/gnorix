@@ -44,6 +44,7 @@ class CommandTests(unittest.TestCase):
         destination.mkdir(parents=True)
         data = fixture()
         data["config"]["min_contrast"] = 0.035 + len(self.calls) / 1000
+        data["feature_strength"]["policy"]["contrast_reference"] = data["config"]["min_contrast"]
         data["images"] = {key: key.replace("_", "-") + ".png" for key in data["images"]}
         source = np.arange(32 * 24, dtype=np.uint8).reshape(24, 32)
         for name in data["images"].values():
@@ -81,6 +82,7 @@ class CommandTests(unittest.TestCase):
             "contour-comparison.png",
             "contour-overlay.png",
             "clarity-analysis.png",
+            "feature-strength.png",
         ):
             with Image.new("L", (8, 8), 42) as image:
                 image.save(self.output / name)
@@ -108,7 +110,7 @@ class CommandTests(unittest.TestCase):
             os.chdir(previous_cwd)
         self.assertEqual(stdout.getvalue().strip(), str(self.output / "overview.png"))
         self.assert_only_canonical_folder()
-        self.assertEqual(len(list(self.output.glob("*.png"))), 8)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 9)
         self.assertEqual(len(list((self.output / "data").iterdir())), 18)
         for path in self.output.glob("*.png"):
             with Image.open(path) as image:
@@ -138,6 +140,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("**±20%**, **1.6–2.4 px**", readme)
         self.assertIn("upper tolerance bound **2.4 px** (1.2R)", readme)
         self.assertIn("[Refined contour overlay](contour-overlay.png)", readme)
+        self.assertIn("[Original feature strength and evidence](feature-strength.png)", readme)
 
     def test_successful_rerun_replaces_the_previous_bundle_without_accumulation(self):
         self.complete_previous()
@@ -162,7 +165,7 @@ class CommandTests(unittest.TestCase):
                 for curve in graph[kind]:
                     del curve["segment_clarity"]
         path.write_text(json.dumps(data))
-        self.assertEqual(len(list(self.output.glob("*.png"))), 7)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 8)
         self.assertEqual(len(list(path.parent.iterdir())), 13)
         old = self.contents()
         with patch("gnorix_reports.cli.subprocess.run", side_effect=OSError("failed native run")):
@@ -171,7 +174,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(self.contents(), old)
         with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
             generate_report(self.image, 50, 0.5)
-        self.assertEqual(len(list(self.output.glob("*.png"))), 8)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 9)
         self.assertEqual(len(list(path.parent.iterdir())), 18)
         self.assertIn("clarity", json.loads(path.read_text()))
         self.assert_only_canonical_folder()
@@ -196,6 +199,37 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("synthetic", stderr.getvalue())
                 self.assertEqual(self.contents(), previous)
                 self.assert_only_canonical_folder()
+
+    def test_malformed_native_strength_preserves_the_previous_complete_report(self):
+        self.complete_previous()
+        previous = self.contents()
+
+        def malformed(arguments, **options):
+            result = self.native_success(arguments, **options)
+            path = Path(arguments[-1]) / "features.json"
+            data = json.loads(path.read_text())
+            data["feature_strength"]["candidates"].pop()
+            path.write_text(json.dumps(data))
+            return result
+
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=malformed):
+            with self.assertRaisesRegex(ValueError, "every raw node"):
+                generate_report(self.image, 50, 0.5)
+        self.assertEqual(self.contents(), previous)
+        self.assert_only_canonical_folder()
+
+    def test_previous_bundle_without_strength_refreshes_in_the_same_directory(self):
+        self.complete_previous()
+        (self.output / "feature-strength.png").unlink()
+        path = self.output / "data" / "features.json"
+        data = json.loads(path.read_text())
+        del data["feature_strength"]
+        path.write_text(json.dumps(data))
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
+            generate_report(self.image, 50, 0.5)
+        self.assertEqual(len(list(self.output.glob("*.png"))), 9)
+        self.assertIn("feature_strength", json.loads(path.read_text()))
+        self.assert_only_canonical_folder()
 
     def test_failed_first_run_leaves_no_report_lock_or_staging_directories(self):
         with patch("gnorix_reports.cli.subprocess.run", side_effect=FileNotFoundError("cargo")):

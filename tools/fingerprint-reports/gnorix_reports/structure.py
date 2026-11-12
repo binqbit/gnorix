@@ -36,6 +36,8 @@ from .contours import (
     render_contour_overlay,
     validate_contours,
 )
+from .feature_strength import FeatureStrength, validate_feature_strength
+from .feature_strength_render import render_feature_strength
 from .full_scale import (
     IMAGE_KEYS as MEASUREMENT_IMAGES,
 )
@@ -117,12 +119,13 @@ class _Structure:
     graph_cycle_rank: int
     contours: Contours
     clarity: Clarity
+    feature_strength: FeatureStrength
 
 
 def render_structure(
     snapshot_path: Path, output: Path, dpi: int = 160, alpha: float = 0.5
 ) -> list[Path]:
-    """Validate a native extraction bundle and export eight PNG diagnostics.
+    """Validate a native extraction bundle and export nine PNG diagnostics.
 
     All rasters must have the declared source dimensions. Coordinates are pixel
     centers: (0, 0) is the center of the top-left pixel. Curves are displayed as
@@ -190,6 +193,11 @@ def render_structure(
                     staging / "clarity-analysis.png",
                     dpi,
                 )
+                _save_figure(
+                    render_feature_strength(snapshot.feature_strength, images["source"]),
+                    staging / "feature-strength.png",
+                    dpi,
+                )
             output.mkdir(parents=True, exist_ok=True)
             paths = []
             for name in (
@@ -201,6 +209,7 @@ def render_structure(
                 "contour-comparison.png",
                 "contour-overlay.png",
                 "clarity-analysis.png",
+                "feature-strength.png",
             ):
                 target = output / name
                 (staging / name).replace(target)
@@ -248,6 +257,18 @@ def _load_structure(path: Path) -> _Structure:
     cycles = _curves(data.get("cycles"), "cycles", width, height, node_ids, scale.unit_px)
     if sum(len(curve.points) for curve in (*edges, *cycles)) > _MAX_PATH_POINTS:
         raise ValueError("graph exceeds the total path point limit")
+    feature_strength = validate_feature_strength(
+        data.get("feature_strength"),
+        raw_nodes,
+        data["edges"],
+        data["cycles"],
+        width,
+        height,
+        scale.unit_px,
+        contrast,
+        coherence,
+    )
+
     raw_images = _object(data.get("images"), "images")
     base = path.resolve().parent
     keys = (*[key for key, _ in _STAGES], *IMAGE_KEYS, *MEASUREMENT_IMAGES, *CLARITY_IMAGES)
@@ -288,6 +309,7 @@ def _load_structure(path: Path) -> _Structure:
         rank,
         contours,
         clarity,
+        feature_strength,
     )
 
 
@@ -496,6 +518,8 @@ def _overview(snapshot, images):
         summary.set_axis_off()
         mean = snapshot.clarity.mean_score
         mean_text = "unavailable" if mean is None else f"{mean:.4f}"
+        feature_count = len(snapshot.feature_strength.candidates)
+        measured = sum(c.strength is not None for c in snapshot.feature_strength.candidates)
         summary.text(
             0.1,
             0.95,
@@ -512,7 +536,11 @@ def _overview(snapshot, images):
             f"Clarity support: {snapshot.clarity.supported_pixels} / "
             f"{snapshot.clarity.total_pixels} pixels\n"
             "Includes supported background.\n"
-            "Diagnostic, not matching probability.",
+            "Diagnostic, not matching probability.\n\n"
+            f"Feature candidates: {feature_count}\n"
+            f"Measured Q: {measured} / {feature_count}\n"
+            "Feature strength: feature-strength.png\n"
+            "All original candidates remain visible.",
             transform=summary.transAxes,
             ha="left",
             va="top",

@@ -23,6 +23,7 @@ _REPORTS = (
     "contour-comparison.png",
     "contour-overlay.png",
     "clarity-analysis.png",
+    "feature-strength.png",
 )
 _DATA_FILES = {
     "features.json",
@@ -192,6 +193,7 @@ Start with [the overview](overview.png). This folder contains the latest success
 - [Contour comparison](contour-comparison.png)
 - [Refined contour overlay](contour-overlay.png)
 - [Local clarity and components](clarity-analysis.png)
+- [Original feature strength and evidence](feature-strength.png)
 
 Common width unit R: **{data["scale"]["unit_px"]:.6g} source pixels**.
 Global width tolerance: **±{relative:.0%}**, **{lower:.6g}–{upper:.6g} px** (0.8R–1.2R).
@@ -208,6 +210,7 @@ Accepted source-supported joins: **{accepted}**.
 Candidates kept separate: **{len(contours["joins"]) - accepted}**.
 Native mean clarity over supported pixels: **{mean_text}**.
 Clarity support: **{clarity["supported_pixels"]} / {clarity["total_pixels"]} pixels**.
+Original feature candidates: **{len(data["feature_strength"]["candidates"])}**.
 
 Vermillion dashed paths show removed terminal spurs and duplicate loop arms.
 Overlays retain source coordinates. Green joins were accepted using image evidence;
@@ -222,6 +225,12 @@ Joins retain status colors, with minimum opacity for missing clarity.
 Faint dotted originals in the comparison detail use 55% of line opacity as a reference layer.
 Native grid-anchor scores are contrast × separation × repetition, then interpolated
 on a fixed 0–1 scale. Components interpolate separately; support can include flat background.
+
+Feature strength retains every original node and isolated-cycle candidate, including
+weak candidates and candidates later removed by cleanup. The dedicated figure shows
+native source evidence P, geometric evidence G, perturbation stability T and combined Q.
+Unknown Q is gray; measured zero uses the bottom of the fixed 0–1 color scale.
+These are diagnostic measurements, not probabilities of anatomical correctness or identity.
 
 [Native measurements and geometry](data/features.json) and the grayscale processing
 stages are retained in `data/`. The report is generated locally from the selected

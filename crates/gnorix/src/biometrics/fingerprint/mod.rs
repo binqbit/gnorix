@@ -8,6 +8,7 @@ mod clarity;
 mod cleanup;
 mod curve;
 mod enhancement;
+mod features;
 mod full_scale;
 mod graph;
 mod photometry;
@@ -28,6 +29,10 @@ pub use cleanup::{
     SourcePolicy, SpurAssessment, SpurEvidence, SpurRemoval,
 };
 pub use enhancement::LocalPalette;
+pub use features::{
+    FeatureArm, FeatureAssessment, FeatureKind, FeaturePolicy, FeatureReason, FeatureStrength,
+    StabilityPolicy, StressCase,
+};
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use quality::WidthConsistency;
 pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
@@ -281,6 +286,9 @@ pub struct Fingerprint {
     pub skeleton: RidgeMap,
     pub graph: RidgeGraph,
     pub contours: ContourReconstruction,
+    /// Evidence ranks for every original node and isolated cycle. These
+    /// diagnostics neither remove candidates nor affect contour reconstruction.
+    pub feature_strength: FeatureAssessment,
     /// One entry per graph edge, in the same order. An unresolved descriptor
     /// retains the graph path and its error rather than silently dropping it.
     pub edge_geometry: Vec<Result<CurveGeometry, FingerprintError>>,
@@ -304,6 +312,7 @@ struct Preprocessed {
     denoised: Vec<f32>,
     coherence: Vec<f32>,
     map: RidgeMap,
+    response: enhancement::DirectionalResponse,
 }
 
 /// Extracts ridge structure, smooth contours and source-supported short joins.
@@ -331,6 +340,7 @@ pub fn extract(
     };
     let (edge_geometry, cycle_geometry) = describe_graph(graph, curve_config);
     let contours = reconstruct_contours(capture, &prepared, &skeleton, &traced, scale.unit_px)?;
+    let feature_strength = features::assess(capture, &prepared, graph, scale.unit_px, config)?;
 
     Ok(Fingerprint {
         scale,
@@ -345,6 +355,7 @@ pub fn extract(
         skeleton,
         graph: traced.graph,
         contours,
+        feature_strength,
         edge_geometry,
         cycle_geometry,
     })

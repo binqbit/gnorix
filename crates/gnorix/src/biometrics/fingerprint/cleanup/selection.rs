@@ -272,7 +272,11 @@ pub(super) fn removable_arm(
     Some(discarded)
 }
 
-fn charge_source(work: &mut Work, paths: &[&[Point]], unit: f64) -> Result<(), FingerprintError> {
+pub(super) fn charge_source(
+    work: &mut Work,
+    paths: &[&[Point]],
+    unit: f64,
+) -> Result<(), FingerprintError> {
     let mut min = [f64::INFINITY; 2];
     let mut max = [f64::NEG_INFINITY; 2];
     let mut stations = 0.0;

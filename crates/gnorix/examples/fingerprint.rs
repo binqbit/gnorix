@@ -6,6 +6,8 @@ mod clarity;
 mod cleanup;
 #[path = "fingerprint/contours.rs"]
 mod contours;
+#[path = "fingerprint/features.rs"]
+mod features;
 
 use std::{
     env,
@@ -64,6 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         output.display()
     );
     contours::print_summary(&result.contours);
+    features::print_summary(&result.feature_strength);
     Ok(())
 }
 
@@ -267,6 +270,7 @@ fn snapshot(
         "nodes":nodes,"edges":edges,"cycles":cycles,
         "cleanup":cleanup::snapshot(&result.contours.cleanup, &result.clarity),
         "contours":contours::snapshot(&result.contours, result.scale.unit_px, &result.clarity),
+        "feature_strength":features::snapshot(&result.feature_strength),
     }))
 }
 
