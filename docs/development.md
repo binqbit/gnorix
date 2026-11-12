@@ -67,6 +67,8 @@ Feature assessment separates local evidence (`features/evidence.rs`), extended s
 
 The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` exports image stages, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
 
+`examples/feature_combinations.rs` runs extraction and [regional subset generation](feature-combinations.md), with explicit example environment controls and JSON output. Both examples use `examples/support/image_input.rs` for bounded opaque-image decoding. Subsets contain capture-local feature IDs; registration, stable candidate encoding and key derivation remain separate.
+
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
 ## Connecting algorithms

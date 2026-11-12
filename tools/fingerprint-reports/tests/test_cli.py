@@ -96,6 +96,15 @@ class CommandTests(unittest.TestCase):
             if path.is_file()
         }
 
+    def write_combinations(self, *, include_json=True, include_png=True):
+        self.output.mkdir(parents=True, exist_ok=True)
+        if include_json:
+            (self.output / "feature-combinations.json").write_text(
+                json.dumps({"schema": "gnorix.feature-combinations.v1"}), encoding="utf-8"
+            )
+        if include_png:
+            shutil.copyfile(self.image, self.output / "feature-combinations.png")
+
     def assert_only_canonical_folder(self):
         self.assertEqual({path.name for path in self.output.parent.iterdir()}, {"fingerprint"})
 
@@ -178,6 +187,104 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(len(list(path.parent.iterdir())), 18)
         self.assertIn("clarity", json.loads(path.read_text()))
         self.assert_only_canonical_folder()
+
+    def test_optional_combinations_survive_failures_and_expire_on_successful_refresh(self):
+        for native, include_json, include_png in (
+            (False, True, False),
+            (False, True, True),
+            (True, True, True),
+            (True, False, True),
+        ):
+            with self.subTest(native=native, json=include_json, png=include_png):
+                if native:
+                    self.complete_previous()
+                self.write_combinations(include_json=include_json, include_png=include_png)
+                previous = self.contents()
+
+                with patch("gnorix_reports.cli.subprocess.run", side_effect=OSError("extraction")):
+                    with self.assertRaisesRegex(OSError, "extraction"):
+                        generate_report(self.image, 50, 0.5)
+                self.assertEqual(self.contents(), previous)
+                self.assert_only_canonical_folder()
+
+                with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
+                    with patch(
+                        "gnorix_reports.cli.render_structure", side_effect=ValueError("render")
+                    ):
+                        with self.assertRaisesRegex(ValueError, "render"):
+                            generate_report(self.image, 50, 0.5)
+                self.assertEqual(self.contents(), previous)
+                self.assert_only_canonical_folder()
+
+                # Rendering itself is exercised above; this case checks publication ownership.
+                def render_overview(snapshot, destination, dpi, alpha):
+                    shutil.copyfile(self.image, destination / "overview.png")
+
+                with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
+                    with patch("gnorix_reports.cli.render_structure", side_effect=render_overview):
+                        generate_report(self.image, 50, 0.5)
+                self.assertTrue((self.output / "overview.png").is_file())
+                self.assertTrue((self.output / "data" / "features.json").is_file())
+                self.assertFalse((self.output / "feature-combinations.json").exists())
+                self.assertFalse((self.output / "feature-combinations.png").exists())
+                self.assert_only_canonical_folder()
+                shutil.rmtree(self.output.parent)
+
+    def test_unidentified_combination_files_and_symlinks_remain_protected(self):
+        outside = self.root / "outside.json"
+        outside.write_text('{"schema":"gnorix.feature-combinations.v1"}')
+        for native in (False, True):
+            for case in (
+                "wrong-schema",
+                "malformed-json",
+                "non-object",
+                "extra",
+                "json-link",
+                "png-link",
+                "json-directory",
+                "png-directory",
+            ):
+                with self.subTest(native=native, case=case):
+                    if native:
+                        self.complete_previous()
+                    self.write_combinations()
+                    data = self.output / "feature-combinations.json"
+                    if case == "wrong-schema":
+                        data.write_text('{"schema":"other"}')
+                    elif case == "malformed-json":
+                        data.write_text("{")
+                    elif case == "non-object":
+                        data.write_text("[]")
+                    elif case == "extra":
+                        (self.output / "keep.txt").write_text("keep")
+                    else:
+                        path = (
+                            data
+                            if case.startswith("json")
+                            else self.output / "feature-combinations.png"
+                        )
+                        path.unlink()
+                        if case.endswith("link"):
+                            path.symlink_to(outside)
+                        else:
+                            path.mkdir()
+                    before = self.contents()
+                    with patch("gnorix_reports.cli.subprocess.run") as run:
+                        with self.assertRaises(ValueError):
+                            generate_report(self.image, 50, 0.5)
+                    run.assert_not_called()
+                    self.assertEqual(self.contents(), before)
+                    self.assertEqual(
+                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v1"}'
+                    )
+                    shutil.rmtree(self.output.parent)
+
+        self.write_combinations(include_json=False)
+        with patch("gnorix_reports.cli.subprocess.run") as run:
+            with self.assertRaises(ValueError):
+                generate_report(self.image, 50, 0.5)
+        run.assert_not_called()
+        self.assertTrue((self.output / "feature-combinations.png").is_file())
 
     def test_extraction_and_render_failures_preserve_the_previous_complete_report(self):
         self.complete_previous()

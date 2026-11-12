@@ -16,6 +16,8 @@ from .snapshot import MAX_SNAPSHOT_BYTES, SCHEMA, SOURCE_IMAGE_FILES
 from .structure import REPORT_FILES, render_structure
 
 _DATA_FILES = {"features.json", *SOURCE_IMAGE_FILES}
+_COMBINATION_FILES = {"feature-combinations.json", "feature-combinations.png"}
+_COMBINATION_SCHEMA = "gnorix.feature-combinations.v1"
 
 
 class _RecoveryRequired(RuntimeError):
@@ -60,37 +62,50 @@ def _validate_existing(output: Path) -> None:
         raise ValueError("reports/fingerprint must be a real directory")
     if not output.exists() or not any(output.iterdir()):
         return
-    expected = {*REPORT_FILES, "README.md", "data"}
+    expected = {*REPORT_FILES, "README.md", "data", *_COMBINATION_FILES}
     children = {path.name: path for path in output.iterdir()}
     # Recognize owned output by its core files and known filenames. A new
     # diagnostic may be absent in a previous run; it needs no legacy renderer.
-    if not {"overview.png", "README.md", "data"} <= children.keys() <= expected or any(
+    native = {"overview.png", "README.md", "data"} <= children.keys()
+    combinations_only = (
+        "feature-combinations.json" in children and children.keys() <= _COMBINATION_FILES
+    )
+    if not ((native or combinations_only) and children.keys() <= expected) or any(
         path.is_symlink() for path in children.values()
     ):
         raise ValueError(
             "reports/fingerprint contains unrelated or incomplete files; refusing replacement"
         )
-    if not children["data"].is_dir() or any(
+    if (native and not children["data"].is_dir()) or any(
         not path.is_file() for name, path in children.items() if name != "data"
     ):
         raise ValueError("reports/fingerprint contains unexpected file types")
+    if "feature-combinations.json" in children:
+        _validate_existing_json(children["feature-combinations.json"], _COMBINATION_SCHEMA)
+    if combinations_only:
+        return
+
     data = {path.name: path for path in children["data"].iterdir()}
     if not {"features.json", "source.png"} <= data.keys() <= _DATA_FILES or any(
         path.is_symlink() or not path.is_file() for path in data.values()
     ):
         raise ValueError("reports/fingerprint/data contains unrelated or incomplete files")
-    with data["features.json"].open("rb") as stream:
+    _validate_existing_json(data["features.json"], SCHEMA)
+
+
+def _validate_existing_json(path: Path, schema: str) -> None:
+    with path.open("rb") as stream:
         # Identification only: the full new bundle is validated by the renderer.
         # An existing broken report is still replaceable if its schema is intact.
         encoded = stream.read(MAX_SNAPSHOT_BYTES + 1)
     if len(encoded) > MAX_SNAPSHOT_BYTES:
-        raise ValueError("existing report JSON exceeds the supported size")
+        raise ValueError(f"existing {path.name} exceeds the supported JSON size")
     try:
         snapshot = json.loads(encoded)
     except (ValueError, UnicodeError, RecursionError) as error:
-        raise ValueError("existing report does not contain identifiable native output") from error
-    if not isinstance(snapshot, dict) or snapshot.get("schema") != SCHEMA:
-        raise ValueError("existing report is not a native Gnorix extraction")
+        raise ValueError(f"existing {path.name} does not contain identifiable output") from error
+    if not isinstance(snapshot, dict) or snapshot.get("schema") != schema:
+        raise ValueError(f"existing {path.name} is not recognized Gnorix output")
 
 
 @contextmanager
