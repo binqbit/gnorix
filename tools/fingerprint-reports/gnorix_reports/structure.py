@@ -530,8 +530,8 @@ def _overlay(snapshot, images, alpha):
     figure, axis = plt.subplots(figsize=(11, height), layout="constrained")
     try:
         _image_axes(axis, images["source"], snapshot)
-        _draw_curves(axis, snapshot.edges, False, alpha)
-        _draw_curves(axis, snapshot.cycles, True, alpha)
+        _draw_curves(axis, snapshot.edges, False)
+        _draw_curves(axis, snapshot.cycles, True)
         _draw_nodes(axis, snapshot.nodes, alpha)
         _graph_legend(figure)
         counts = {kind: sum(node.kind == kind for node in snapshot.nodes) for kind in _KINDS}
@@ -548,7 +548,7 @@ def _overlay(snapshot, images, alpha):
             f"endings: {counts['ending']} · junctions: {counts['junction']} · "
             f"isolated nodes: {counts['isolated']}\n"
             f"Nodes touching unobserved regions: {boundary} · "
-            f"curves without geometry: {len(errors)} · overlay opacity: {alpha:g}",
+            f"curves without geometry: {len(errors)} · marker opacity: {alpha:g}",
             fontsize=12,
         )
         if not snapshot.nodes and not snapshot.edges and not snapshot.cycles:
@@ -571,7 +571,7 @@ def _overlay(snapshot, images, alpha):
         raise
 
 
-def _draw_curves(axis, curves, closed, alpha):
+def _draw_curves(axis, curves, closed):
     for failed in (False, True):
         paths = [curve for curve in curves if (curve.geometry_error is not None) == failed]
         if paths:
@@ -580,7 +580,6 @@ def _draw_curves(axis, curves, closed, alpha):
                 clarity_lines(
                     ((curve.points, closed, curve.segment_clarity) for curve in paths),
                     color,
-                    alpha,
                     linewidths=0.9,
                     linestyles="dashed" if closed else "solid",
                     zorder=3,

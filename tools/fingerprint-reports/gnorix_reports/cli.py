@@ -57,7 +57,10 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--image", type=Path, required=True, help="Opaque fingerprint PNG")
     command.add_argument("--dpi", type=int, default=160, help="PNG resolution (50 to 600)")
     command.add_argument(
-        "--overlay-alpha", type=float, default=0.5, help="Overlay opacity from 0 to 1"
+        "--overlay-alpha",
+        type=float,
+        default=0.5,
+        help="Map and annotation opacity (0 to 1); clarity lines use a fixed 40–90% range",
     )
     return command
 
@@ -195,10 +198,12 @@ Overlays retain source coordinates. Green joins were accepted using image eviden
 amber dashed candidates remain disconnected. Smoothed geometry is an estimate,
 not verified anatomy or a biometric matching score.
 
-Contour opacity follows native segment clarity: selected maximum × (0.2 + 0.8 × sqrt(score)).
+Contour opacity follows native segment clarity: 40% + 50% × sqrt(score), a fixed 40–90% range.
+Map and annotation opacity does not multiply this line range.
 The fixed square-root transfer changes display only; native scores and heatmap stay linear.
-Gray paths mean unavailable clarity; a measured zero retains its path color.
+Gray paths mean unavailable clarity at 40%; a measured zero retains its path color.
 Joins retain status colors, with minimum opacity for missing clarity.
+Faint dotted originals in the comparison detail use 55% of line opacity as a reference layer.
 Native grid-anchor scores are contrast × separation × repetition, then interpolated
 on a fixed 0–1 scale. Components interpolate separately; support can include flat background.
 

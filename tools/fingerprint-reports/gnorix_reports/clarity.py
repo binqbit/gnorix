@@ -24,9 +24,7 @@ IMAGE_KEYS = (
 )
 UNKNOWN_COLOR = "#858585"
 _HALF_BYTE = 0.5 / 255
-OPACITY_LABEL = (
-    "Opacity = selected maximum × (0.2 + 0.8 × sqrt(clarity)); gray paths = unavailable clarity."
-)
+OPACITY_LABEL = "Line opacity = 40% + 50% × sqrt(clarity); gray paths = unavailable clarity at 40%."
 
 
 @dataclass(frozen=True)
@@ -213,9 +211,10 @@ class _ClarityLines(LineCollection):
         super().draw(renderer)
 
 
-def clarity_lines(paths, color, alpha, *, unknown_color=UNKNOWN_COLOR, **style) -> LineCollection:
+def clarity_lines(paths, color, *, unknown_color=UNKNOWN_COLOR, **style) -> LineCollection:
     """Build exact source-coordinate segments with display-only RGBA mapping.
 
+    Native scores map to fixed 40–90% opacity, independent of other overlays.
     Each path supplies (points, closed, native scores). Cycles always include
     their final-to-first segment, including a possible zero-length closing pair.
     """
@@ -226,7 +225,7 @@ def clarity_lines(paths, color, alpha, *, unknown_color=UNKNOWN_COLOR, **style) 
         sizes.append(len(scores))
         for start, end, score in zip(starts, ends, scores, strict=True):
             segments.append((start, end))
-            opacity = alpha * (0.2 if score is None else 0.2 + 0.8 * math.sqrt(score))
+            opacity = 0.4 if score is None else 0.4 + 0.5 * math.sqrt(score)
             colors.append(to_rgba(unknown_color if score is None else color, opacity))
     return _ClarityLines(segments, sizes, colors=colors, **style)
 

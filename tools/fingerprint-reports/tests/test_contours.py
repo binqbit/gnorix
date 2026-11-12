@@ -270,8 +270,8 @@ class ContourTests(unittest.TestCase):
             lines[1].get_segments(),
             list(zip(data["joins"][0]["points"][:-1], data["joins"][0]["points"][1:], strict=True)),
         )
-        np.testing.assert_allclose(lines[0].get_colors()[:, 3], 0.4)
-        np.testing.assert_allclose(lines[1].get_colors()[:, 3], 0.4)
+        np.testing.assert_allclose(lines[0].get_colors()[:, 3], 0.9)
+        np.testing.assert_allclose(lines[1].get_colors()[:, 3], 0.9)
 
     def test_unaccepted_candidates_render_dashed_without_changing_path_count(self):
         raw, data = fixture(accepted=False)
@@ -303,7 +303,7 @@ class ContourTests(unittest.TestCase):
             lines = [item for item in axis.collections if isinstance(item, LineCollection)]
             join = lines[-1]
             expected = to_rgba("#009e73" if accepted else "#e69f00")[:3]
-            np.testing.assert_allclose(join.get_colors()[:, 3], [0.1, 0.5, 0.1])
+            np.testing.assert_allclose(join.get_colors()[:, 3], [0.4, 0.9, 0.4])
             np.testing.assert_allclose(join.get_colors()[:2, :3], [expected] * 2)
             np.testing.assert_allclose(join.get_colors()[2, :3], expected)
             self.assertEqual(join.get_linestyles()[0][1] is None, accepted)

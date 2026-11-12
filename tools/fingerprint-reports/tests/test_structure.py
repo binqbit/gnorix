@@ -326,7 +326,7 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(tuple(overlay.get_ylim()), (23.5, -0.5))
         for collection in overlay.collections:
             if isinstance(collection, LineCollection):
-                np.testing.assert_allclose(collection.get_colors()[:, 3], 0.4)
+                np.testing.assert_allclose(collection.get_colors()[:, 3], 0.9)
             else:
                 self.assertEqual(collection.get_alpha(), 0.4)
         text = self.labels(self.figures[1])

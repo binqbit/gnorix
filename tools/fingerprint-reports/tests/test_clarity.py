@@ -170,16 +170,14 @@ class ClarityTests(unittest.TestCase):
 
     def test_rgba_maps_quality_without_changing_geometry_or_losing_cycle_closure(self):
         points = ((1, 1), (3, 1), (3, 2), (1, 1))
-        collection = clarity_lines([(points, True, (0, 0.5, 1, None))], "#009e73", 0.5)
+        collection = clarity_lines([(points, True, (0, 0.5, 1, None))], "#009e73")
         np.testing.assert_array_equal(
             collection.get_segments(), list(zip(points, (*points[1:], points[0]), strict=True))
         )
         colors = collection.get_colors()
-        np.testing.assert_allclose(colors[:, 3], [0.1, 0.1 + 0.4 * np.sqrt(0.5), 0.5, 0.1])
+        np.testing.assert_allclose(colors[:, 3], [0.4, 0.4 + 0.5 * np.sqrt(0.5), 0.9, 0.4])
         np.testing.assert_allclose(colors[:3, :3], [to_rgba("#009e73")[:3]] * 3)
         np.testing.assert_allclose(colors[-1, :3], to_rgba(UNKNOWN_COLOR)[:3])
-        hidden = clarity_lines([(points, False, (0, 1, None))], "red", 0)
-        self.assertTrue((hidden.get_colors()[:, 3] == 0).all())
 
     def test_map_figure_retains_source_and_fixed_scales_for_components(self):
         images = self.maps(clarity=128, clarity_contrast=128)
@@ -204,13 +202,12 @@ class ClarityTests(unittest.TestCase):
         segmented = clarity_lines(
             [(points, False, [1] * 1000)],
             "black",
-            1,
             linewidths=2,
             linestyles="dashed",
         )
         reference = LineCollection(
             [((0, 2), (100, 2))],
-            colors="black",
+            colors=to_rgba("black", 0.9),
             linewidths=2,
             linestyles="dashed",
         )

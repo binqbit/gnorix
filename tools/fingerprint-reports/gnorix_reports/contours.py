@@ -424,11 +424,11 @@ def render_contour_comparison(contours: Contours, source, alpha):
                 axis = axes[row][column]
                 _image(axis, source, contours)
                 if column == 0:
-                    _draw_paths(axis, contours.raw_paths, _RAW_COLOR, alpha)
+                    _draw_paths(axis, contours.raw_paths, _RAW_COLOR)
                 else:
                     if row == 1:
-                        _draw_paths(axis, contours.raw_paths, _RAW_COLOR, alpha * 0.55, "dotted")
-                    _draw_paths(axis, contours.paths, _SMOOTH_COLOR, alpha)
+                        _draw_paths(axis, contours.raw_paths, _RAW_COLOR, reference=True)
+                    _draw_paths(axis, contours.paths, _SMOOTH_COLOR)
                     _draw_joins(axis, contours.joins, alpha)
                 if row == 0:
                     x, y, width, height = crop
@@ -461,14 +461,14 @@ def render_contour_overlay(contours: Contours, source, alpha):
     axis = figure.add_subplot(grid[0, 0])
     try:
         _image(axis, source, contours)
-        _draw_paths(axis, contours.paths, _SMOOTH_COLOR, alpha)
+        _draw_paths(axis, contours.paths, _SMOOTH_COLOR)
         _draw_joins(axis, contours.joins, alpha)
         if not contours.paths:
             axis.text(0.5, 0.5, "No extracted contours", transform=axis.transAxes, ha="center")
         figure.suptitle(_title(contours, "Refined contours over the source image"), fontsize=12)
         _footer(
             figure.add_subplot(grid[1, 0]),
-            f"Overlay opacity: {alpha:g}. Amber candidates remain disconnected. "
+            f"Marker opacity: {alpha:g}. Amber candidates remain disconnected. "
             "Source pixels are unchanged.",
             width=110,
             raw=False,
@@ -511,18 +511,19 @@ def _image(axis, source, contours):
     axis.yaxis.set_major_locator(MaxNLocator(4))
 
 
-def _draw_paths(axis, paths, color, alpha, style="solid"):
+def _draw_paths(axis, paths, color, *, reference=False):
     if paths:
-        axis.add_collection(
-            clarity_lines(
-                ((path.points, path.closed, path.segment_clarity) for path in paths),
-                color,
-                alpha,
-                linewidths=0.9,
-                linestyles=style,
-                zorder=3,
-            )
+        lines = clarity_lines(
+            ((path.points, path.closed, path.segment_clarity) for path in paths),
+            color,
+            linewidths=0.9,
+            linestyles="dotted" if reference else "solid",
+            zorder=3,
         )
+        if reference:
+            # The faint original is only a comparison guide behind final paths.
+            lines.set_alpha(lines.get_colors()[:, 3] * 0.55)
+        axis.add_collection(lines)
 
 
 def _draw_joins(axis, joins, alpha):
@@ -535,7 +536,6 @@ def _draw_joins(axis, joins, alpha):
             clarity_lines(
                 ((join.points, False, join.segment_clarity) for join in selected),
                 color,
-                alpha,
                 unknown_color=color,
                 linewidths=2.2 if accepted else 1.5,
                 linestyles="solid" if accepted else "dashed",
