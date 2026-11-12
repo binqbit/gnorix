@@ -50,6 +50,38 @@ fn source_light_barrier_confirms_a_short_observed_end() {
 }
 
 #[test]
+fn cleanup_retains_its_first_source_confirmation() {
+    let (capture, palette) = fixture(|x, y| {
+        if (30..=34).contains(&y) {
+            (40 + 32 * x.saturating_sub(32)).min(200) as u8
+        } else {
+            200
+        }
+    });
+    let points = [point(28.0, 32.0), point(32.0, 32.0)];
+    let cleanup = verify_spur(&capture, &palette, &points, 8.0).unwrap();
+    assert_eq!(cleanup.decision, SourceDecision::Confirmed);
+    // The unchanged 0.48 px source grid first crosses the midpoint at 2.88 px.
+    assert!((cleanup.light_barrier_distance_px.unwrap() - 2.88).abs() < 1e-12);
+    assert!((cleanup.min_barrier_lightness.unwrap() - 0.576).abs() < 1e-12);
+}
+
+#[test]
+fn narrow_bright_spikes_cannot_confirm_a_cleanup_barrier() {
+    let (capture, palette) = fixture(|x, y| {
+        if (30..=34).contains(&y) && x != 36 {
+            40
+        } else {
+            200
+        }
+    });
+    let points = [point(28.0, 32.0), point(32.0, 32.0)];
+    let evidence = verify_spur(&capture, &palette, &points, 8.0).unwrap();
+    assert_eq!(evidence.decision, SourceDecision::PossibleContinuation);
+    assert_eq!(evidence.min_barrier_lightness, None);
+}
+
+#[test]
 fn dark_continuation_and_inadequate_lookahead_remain_unconfirmed() {
     for endpoint in [40, 64] {
         let (capture, palette) = fixture(|x, y| {
@@ -295,6 +327,45 @@ fn two_dark_source_masses_with_internal_light_are_separate_ridges() {
 }
 
 #[test]
+fn a_short_light_speck_does_not_preserve_a_duplicate_ridge_but_a_valley_does() {
+    let first = [
+        point(16.0, 32.0),
+        point(24.0, 31.0),
+        point(40.0, 31.0),
+        point(48.0, 32.0),
+    ];
+    let second = [
+        point(16.0, 32.0),
+        point(24.0, 34.0),
+        point(40.0, 34.0),
+        point(48.0, 32.0),
+    ];
+    for (bright_x, expected) in [
+        (31..=32, SourceDecision::Confirmed),
+        (24..=40, SourceDecision::SeparateRidges),
+    ] {
+        let (capture, palette) = fixture(|x, y| {
+            if bright_x.contains(&x) && y == 32 {
+                200
+            } else {
+                (40 + 30 * y.abs_diff(32)).min(200) as u8
+            }
+        });
+        let evidence = verify_loop(&capture, &palette, &first, &second, 8.0).unwrap();
+        assert_eq!(evidence.decision, expected, "{evidence:?}");
+        assert!(evidence.max_valley_lightness.unwrap() > 0.5);
+        if expected == SourceDecision::Confirmed {
+            assert!(evidence.longest_valley_length_px.unwrap() >= 1.0);
+            assert!(evidence.longest_valley_length_px.unwrap() < 8.0 / 3.0);
+            assert_eq!(evidence.preferred_arm, Some(0));
+        } else {
+            assert!(evidence.longest_valley_length_px.unwrap() >= 8.0 / 3.0);
+            assert_eq!(evidence.preferred_arm, None);
+        }
+    }
+}
+
+#[test]
 fn symmetric_observed_arms_are_not_selected_by_roundoff() {
     let (capture, palette) = ridge();
     let first = [point(16.0, 32.0), point(32.0, 31.0), point(48.0, 32.0)];
@@ -404,17 +475,21 @@ fn valley_extent_uses_actual_longitudinal_distances_and_strict_threshold() {
         arm_darkness: [0.9, 0.8],
         center_distance: [0.1, 0.2],
     };
-    let policy = SourcePolicy::for_unit(8.0);
-    for (middle, expected) in [
-        (0.999, SourceDecision::Confirmed),
-        (1.0, SourceDecision::SeparateRidges),
-    ] {
-        let sections = [section(0.5), section(1.0), section(0.5)];
-        let positions = [0.0, middle / 2.0, middle];
-        let evidence = summarize_loop(&sections, &positions, 2.0, policy);
-        assert_eq!(evidence.decision, expected);
-        assert!((evidence.longest_valley_length_px.unwrap() - middle).abs() < 1e-12);
+    for unit in [0.75, 3.0, 8.0, 16.820792511697714, 48.0] {
+        let policy = SourcePolicy::for_unit(unit);
+        for (middle, expected) in [
+            (unit / 3.0 * 0.999, SourceDecision::Confirmed),
+            (unit / 3.0, SourceDecision::SeparateRidges),
+            (unit / 3.0 * 1.001, SourceDecision::SeparateRidges),
+        ] {
+            let sections = [section(0.5), section(1.0), section(0.5)];
+            let positions = [0.0, middle / 2.0, middle];
+            let evidence = summarize_loop(&sections, &positions, unit / 4.0, policy);
+            assert_eq!(evidence.decision, expected, "unit={unit}, extent={middle}");
+            assert!((evidence.longest_valley_length_px.unwrap() - middle).abs() < 1e-12);
+        }
     }
+    let policy = SourcePolicy::for_unit(8.0);
     let a = summarize_loop(
         &[section(0.0), section(1.0), section(0.0)],
         &[0.0, 0.8, 2.0],

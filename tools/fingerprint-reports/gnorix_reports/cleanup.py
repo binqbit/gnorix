@@ -69,7 +69,7 @@ def validate_cleanup(value, raw_nodes, raw_edges, raw_cycles, width, height, uni
     clusters = _source_clusters(data.get("source_node_pixels"), originals, width, height)
     assessments = _spur_assessments(data.get("spur_assessments"), originals, edges, maximum)
     removed = _removals(data.get("removed_spurs"), originals, edges, maximum, assessments)
-    loops = _loops(data.get("loops"), originals, edges, maximum)
+    loops = _loops(data.get("loops"), originals, edges, maximum, unit / 3)
     removed_ids = {spur.source_edge for spur in removed}
     ambiguous = _retained_candidates(
         data.get("retained_ambiguous_edges"), "ambiguous", originals, edges, maximum
@@ -196,7 +196,7 @@ def _spur_partition(assessments, removed, ambiguous, unobserved, unconfirmed):
             raise ValueError("terminal classification contradicts native source evidence")
 
 
-def _loops(value, nodes, edges, maximum):
+def _loops(value, nodes, edges, maximum, minimum_valley_length):
     incident = defaultdict(list)
     parallel = defaultdict(set)
     for identifier, edge in edges.items():
@@ -228,7 +228,7 @@ def _loops(value, nodes, edges, maximum):
             raise ValueError("loop assessments cannot reuse original junctions")
         consumed.update(source_nodes)
         seen_pairs.add(frozenset(source_nodes))
-        evidence = validate_loop_evidence(item.get("evidence"), maximum)
+        evidence = validate_loop_evidence(item.get("evidence"), maximum, minimum_valley_length)
         removed = item.get("removed_edge")
         if removed is not None:
             removed = identifier_value(removed, "loop removed_edge")

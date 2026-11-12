@@ -998,5 +998,5 @@ fn tolerance_changes_only_the_agreed_global_width_controls() {
     assert_eq!(policy.max_backbone_extension_px, 20.0);
     assert_eq!(policy.dark_midpoint, 0.5);
     assert_eq!(policy.sample_spacing_px, 0.5);
-    assert_eq!(policy.loop_min_valley_length_px, 1.0);
+    assert_eq!(policy.loop_min_valley_length_px, 10.0 / 3.0);
 }

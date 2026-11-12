@@ -202,7 +202,7 @@ def cleanup_source_policy(unit):
         "terminal_barrier_width_px": unit,
         "terminal_barrier_depth_px": unit / 4,
         "loop_flank_search_px": 1.2 * unit,
-        "loop_min_valley_length_px": 1.0,
+        "loop_min_valley_length_px": unit / 3,
     }
 
 

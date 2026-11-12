@@ -58,7 +58,7 @@ impl SourcePolicy {
             terminal_barrier_width_px: unit,
             terminal_barrier_depth_px: unit / 4.0,
             loop_flank_search_px: max_ridge_width_px,
-            loop_min_valley_length_px: 1.0,
+            loop_min_valley_length_px: unit / 3.0,
         }
     }
 }
@@ -126,13 +126,77 @@ pub(super) fn verify_spur(
     points: &[Point],
     unit: f64,
 ) -> Result<SpurEvidence, FingerprintError> {
+    let policy = SourcePolicy::for_unit(unit);
+    Ok(match sample_terminal(capture, palette, points, unit)? {
+        TerminalObservation::Observed(profile) => profile.first_barrier(policy),
+        TerminalObservation::Unavailable(decision) => SpurEvidence::empty(decision),
+    })
+}
+
+enum TerminalObservation {
+    Observed(TerminalProfile),
+    Unavailable(SourceDecision),
+}
+
+struct TerminalProfile {
+    lightness: Vec<f64>,
+    step: f64,
+    terminal_darkness: Option<f64>,
+}
+
+impl TerminalProfile {
+    fn first_barrier(&self, policy: SourcePolicy) -> SpurEvidence {
+        let mut run_start = None;
+        let mut minimum = f64::INFINITY;
+        for (row, &light) in self.lightness.iter().enumerate() {
+            if light <= policy.dark_midpoint {
+                run_start = None;
+                minimum = f64::INFINITY;
+                continue;
+            }
+            let start = *run_start.get_or_insert(row);
+            minimum = minimum.min(light);
+            if (row - start) as f64 * self.step >= policy.terminal_barrier_depth_px {
+                return self.confirmed(start, minimum);
+            }
+        }
+        self.unconfirmed()
+    }
+
+    fn confirmed(&self, start: usize, minimum: f64) -> SpurEvidence {
+        SpurEvidence {
+            decision: SourceDecision::Confirmed,
+            terminal_darkness: self.terminal_darkness,
+            light_barrier_distance_px: Some(start as f64 * self.step),
+            min_barrier_lightness: Some(minimum),
+        }
+    }
+
+    fn unconfirmed(&self) -> SpurEvidence {
+        SpurEvidence {
+            terminal_darkness: self.terminal_darkness,
+            ..SpurEvidence::empty(SourceDecision::PossibleContinuation)
+        }
+    }
+}
+
+fn sample_terminal(
+    capture: &Capture,
+    palette: &LocalPalette,
+    points: &[Point],
+    unit: f64,
+) -> Result<TerminalObservation, FingerprintError> {
     validate(capture, palette, unit, points.len())?;
     let Some(path) = Path::new(points) else {
-        return Ok(SpurEvidence::empty(SourceDecision::AmbiguousGeometry));
+        return Ok(TerminalObservation::Unavailable(
+            SourceDecision::AmbiguousGeometry,
+        ));
     };
     let policy = SourcePolicy::for_unit(unit);
     let Some((tip, direction)) = terminal_frame_from_path(&path, unit) else {
-        return Ok(SpurEvidence::empty(SourceDecision::AmbiguousGeometry));
+        return Ok(TerminalObservation::Unavailable(
+            SourceDecision::AmbiguousGeometry,
+        ));
     };
     let normal = [-direction[1], direction[0]];
     let half_width = policy.terminal_barrier_width_px / 2.0;
@@ -143,7 +207,9 @@ pub(super) fn verify_spur(
         }
     }
     if !observed_area(capture, palette, bounds)? {
-        return Ok(SpurEvidence::missing_support());
+        return Ok(TerminalObservation::Unavailable(
+            SourceDecision::MissingSupport,
+        ));
     }
 
     let rows = steps(policy.terminal_lookahead_px, policy.sample_spacing_px)?;
@@ -158,38 +224,20 @@ pub(super) fn verify_spur(
                 policy.terminal_barrier_width_px * column as f64 / columns as f64 - half_width;
             let point = offset(tip, direction, forward, normal, side);
             let Some(darkness) = sample_darkness(capture, palette, point) else {
-                return Ok(SpurEvidence::missing_support());
+                return Ok(TerminalObservation::Unavailable(
+                    SourceDecision::MissingSupport,
+                ));
             };
             darkest = darkest.max(darkness);
         }
         lightness.push(1.0 - darkest);
     }
 
-    let terminal_darkness = sample_darkness(capture, palette, tip);
-    let step = policy.terminal_lookahead_px / rows as f64;
-    let mut run_start = None;
-    let mut minimum = f64::INFINITY;
-    for (row, &light) in lightness.iter().enumerate() {
-        if light <= policy.dark_midpoint {
-            run_start = None;
-            minimum = f64::INFINITY;
-            continue;
-        }
-        let start = *run_start.get_or_insert(row);
-        minimum = minimum.min(light);
-        if (row - start) as f64 * step >= policy.terminal_barrier_depth_px {
-            return Ok(SpurEvidence {
-                decision: SourceDecision::Confirmed,
-                terminal_darkness,
-                light_barrier_distance_px: Some(start as f64 * step),
-                min_barrier_lightness: Some(minimum),
-            });
-        }
-    }
-    Ok(SpurEvidence {
-        terminal_darkness,
-        ..SpurEvidence::empty(SourceDecision::PossibleContinuation)
-    })
+    Ok(TerminalObservation::Observed(TerminalProfile {
+        lightness,
+        step: policy.terminal_lookahead_px / rows as f64,
+        terminal_darkness: sample_darkness(capture, palette, tip),
+    }))
 }
 
 /// Both observed arms must run between the same junctions in the same direction.

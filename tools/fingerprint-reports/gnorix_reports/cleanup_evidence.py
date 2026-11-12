@@ -35,7 +35,7 @@ def validate_source_policy(value, unit):
         ("terminal_barrier_width_px", unit),
         ("terminal_barrier_depth_px", unit / 4),
         ("loop_flank_search_px", maximum),
-        ("loop_min_valley_length_px", 1.0),
+        ("loop_min_valley_length_px", unit / 3),
     ):
         require_close(
             finite_number(policy.get(name), name), expected, "cleanup source policy " + name
@@ -64,7 +64,7 @@ def validate_spur_evidence(value, maximum):
     return evidence
 
 
-def validate_loop_evidence(value, maximum):
+def validate_loop_evidence(value, maximum, minimum_valley_length):
     evidence = _evidence(value, "loop")
     scalar_names = (
         "max_width_px",
@@ -102,7 +102,7 @@ def validate_loop_evidence(value, maximum):
             )
         if evidence["mean_interior_darkness"] < 0.5 or evidence["min_flank_lightness"] <= 0.5:
             raise ValueError("confirmed loop needs a dark interior and light source flanks")
-        if evidence["longest_valley_length_px"] >= 1:
+        if evidence["longest_valley_length_px"] >= minimum_valley_length:
             raise ValueError("confirmed loop cannot cross a resolved bright source valley")
     elif preferred is not None:
         raise ValueError("unconfirmed loop cannot prefer an arm")

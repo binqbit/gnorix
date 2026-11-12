@@ -1,6 +1,7 @@
 """Source decisions authorize topology changes without altering observed paths."""
 
 import copy
+import math
 import unittest
 
 import matplotlib.pyplot as plt
@@ -12,6 +13,7 @@ from test_cleanup import fixture, validate
 from test_structure import unchanged_contours
 
 from gnorix_reports.cleanup import validate_cleanup
+from gnorix_reports.cleanup_evidence import validate_loop_evidence, validate_source_policy
 from gnorix_reports.contour_render import _detail, render_contour_comparison
 from gnorix_reports.contours import validate_contours
 
@@ -200,7 +202,7 @@ class CleanupSourceTests(unittest.TestCase):
             validate_loop(raw, data)
         for field, value in (
             ("max_width_px", 1.2 * 4),
-            ("longest_valley_length_px", 1),
+            ("longest_valley_length_px", 4 / 3),
             ("mean_interior_darkness", 0.4999),
             ("min_flank_lightness", 0.5),
             ("arm_center_distance_px", [0.1, -0.1]),
@@ -214,6 +216,34 @@ class CleanupSourceTests(unittest.TestCase):
             invalid["loops"][0]["evidence"][field] = value
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 validate_loop(raw, invalid)
+
+    def test_loop_valley_threshold_scales_with_r_without_a_pixel_floor(self):
+        raw, data = loop_fixture()
+        evidence = data["loops"][0]["evidence"]
+        for unit in (0.75, 3, 8, 16.820792511697714, 48):
+            with self.subTest(unit=unit):
+                threshold = unit / 3
+                # Source-evidence validation must use the same threshold as the
+                # native policy, including subpixel limits at small R.
+                policy = copy.deepcopy(data["policy"]["source"])
+                policy.update(
+                    max_ridge_width_px=1.2 * unit,
+                    tangent_radius_px=unit / 2,
+                    max_backbone_extension_px=2 * unit,
+                    terminal_lookahead_px=1.2 * unit,
+                    terminal_barrier_width_px=unit,
+                    terminal_barrier_depth_px=unit / 4,
+                    loop_flank_search_px=1.2 * unit,
+                    loop_min_valley_length_px=threshold,
+                )
+                validate_source_policy(policy, unit)
+                evidence["max_width_px"] = unit / 4
+                evidence["longest_valley_length_px"] = math.nextafter(threshold, 0)
+                validate_loop_evidence(evidence, 1.2 * unit, threshold)
+                for length in (threshold, math.nextafter(threshold, math.inf)):
+                    evidence["longest_valley_length_px"] = length
+                    with self.assertRaisesRegex(ValueError, "resolved bright source valley"):
+                        validate_loop_evidence(evidence, 1.2 * unit, threshold)
 
     def test_unconfirmed_loop_keeps_both_arms_and_its_cycle(self):
         raw, data = loop_fixture(confirmed=False)

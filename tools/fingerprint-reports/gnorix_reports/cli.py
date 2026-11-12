@@ -184,6 +184,8 @@ Clarity support: **{clarity["supported_pixels"]} / {clarity["total_pixels"]} pix
 Original feature candidates: **{len(data["feature_strength"]["candidates"])}**.
 
 Vermillion dashed paths show removed terminal spurs and duplicate loop arms.
+An interior light valley must persist for at least R/3 to protect a narrow loop from collapse;
+width, source support and the other cleanup checks still apply.
 Overlays retain source coordinates. Green joins were accepted using image evidence;
 amber dashed candidates remain disconnected. Smoothed geometry is an estimate,
 not verified anatomy or a biometric matching score.
