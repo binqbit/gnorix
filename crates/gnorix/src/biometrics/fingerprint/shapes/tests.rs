@@ -31,6 +31,102 @@ fn config(level: u32) -> GridShapeConfig {
 }
 
 #[test]
+fn enrollment_baselines_hash_once_per_subset_and_match_diagnostic_centers() {
+    let source = points(&[(0.0, 0.0), (12.0, 0.0), (4.0, 5.0), (5.0, 1.0)]);
+    let combinations = [combination(&[0, 1, 2]), combination(&[0, 1, 2, 3])];
+    let baselines = prepare_grid_baselines(
+        &source,
+        &combinations,
+        1.0,
+        &GridBaselineConfig {
+            padding_steps: 1,
+            max_baselines: 2,
+            max_work: 10_000,
+        },
+    )
+    .unwrap();
+    let diagnostics = prepare_grid_shapes(&source, &combinations, 1.0, &config(1)).unwrap();
+    assert_eq!(baselines.baseline_count(), 2);
+    let candidates = baselines
+        .candidates(NonZeroUsize::new(4096).unwrap())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(candidates.len(), 2);
+    for (candidate, shape) in candidates.iter().zip(diagnostics.shapes()) {
+        assert_eq!(
+            candidate.as_bytes(),
+            grid_candidate(
+                &shape.baseline,
+                shape.phase,
+                NonZeroUsize::new(4096).unwrap()
+            )
+            .unwrap()
+            .as_bytes()
+        );
+    }
+}
+
+#[test]
+fn enrollment_does_not_count_exponential_uncertainty_products() {
+    let positions: Vec<_> = (0..24).map(|i| (i as f64 * 13.0, (i * i) as f64)).collect();
+    let source = points(&positions);
+    let ids: Vec<_> = (0..24).collect();
+    let combos = [combination(&ids)];
+    let prepared = prepare_grid_baselines(
+        &source,
+        &combos,
+        1.0,
+        &GridBaselineConfig {
+            padding_steps: 1,
+            max_baselines: 1,
+            max_work: 100_000,
+        },
+    )
+    .unwrap();
+    assert_eq!(prepared.baseline_count(), 1);
+    let mut candidates = prepared.candidates(NonZeroUsize::new(4096).unwrap());
+    assert!(candidates.next().unwrap().is_ok());
+    assert!(candidates.next().is_none());
+    assert!(matches!(
+        prepare_grid_shapes(
+            &source,
+            &combos,
+            1.0,
+            &GridShapeConfig {
+                max_variants: u64::MAX,
+                ..config(1)
+            }
+        ),
+        Err(GridShapeError::CountOverflow)
+    ));
+}
+
+#[test]
+fn baseline_bounds_and_late_candidate_errors_remain_explicit() {
+    let source = points(&[(0.0, 0.0), (12.0, 0.0), (4.0, 5.0)]);
+    let combos = [combination(&[0]), combination(&[0, 1, 2])];
+    let mut controls = GridBaselineConfig {
+        padding_steps: 1,
+        max_baselines: 1,
+        max_work: 10_000,
+    };
+    assert!(matches!(
+        prepare_grid_baselines(&source, &combos, 1.0, &controls),
+        Err(GridShapeError::BaselineLimit {
+            required: 2,
+            limit: 1
+        })
+    ));
+    controls.max_baselines = 2;
+    let prepared = prepare_grid_baselines(&source, &combos, 1.0, &controls).unwrap();
+    let mut candidates = prepared.candidates(NonZeroUsize::new(81).unwrap());
+    assert!(candidates.next().unwrap().is_ok());
+    assert!(candidates.next().unwrap().is_err());
+    assert!(candidates.next().is_none());
+    assert!(candidates.next().is_none());
+}
+
+#[test]
 fn keeps_every_point_and_enumerates_all_assignments_in_one_padded_frame() {
     let points = points(&[(0.0, 0.0), (12.0, 0.0), (4.0, 5.0), (5.0, 1.0)]);
     let result =

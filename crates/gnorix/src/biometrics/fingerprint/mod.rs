@@ -52,8 +52,9 @@ pub use quality::WidthConsistency;
 pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
 pub use scale::{BootstrapScale, RidgeSpan, ScaleProfile};
 pub use shapes::{
-    GridCell, GridCollision, GridShape, GridShapeConfig, GridShapeError, GridShapeFrame,
-    GridShapes, GridVariant, GridVariants, grid_candidate, prepare_grid_shapes,
+    GridBaselineConfig, GridBaselines, GridCell, GridCollision, GridShape, GridShapeConfig,
+    GridShapeError, GridShapeFrame, GridShapes, GridVariant, GridVariants, grid_candidate,
+    prepare_grid_baselines, prepare_grid_shapes,
 };
 pub use smoothing::{SmoothingAdjustment, SmoothingControls, SmoothingRejection};
 

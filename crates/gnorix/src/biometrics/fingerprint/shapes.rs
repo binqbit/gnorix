@@ -16,7 +16,26 @@ use crate::biometrics::geometry::{GeometryError, GridPoint};
 pub use encoding::grid_candidate;
 pub use variants::GridVariants;
 
-/// Positional uncertainty is separate from the upstream subset selection budget.
+/// Prepare one canonical assignment per subset, without expanding uncertainty.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GridBaselineConfig {
+    /// Fixed margin shared with the signing uncertainty neighborhood.
+    pub padding_steps: u32,
+    pub max_baselines: u64,
+    pub max_work: usize,
+}
+
+impl GridBaselineConfig {
+    pub fn validate(&self) -> Result<(), GridShapeError> {
+        if self.max_baselines == 0 || self.max_work == 0 {
+            return Err(GridShapeError::InvalidConfig("limits must be nonzero"));
+        }
+        variants::neighborhood_count(self.padding_steps)?;
+        Ok(())
+    }
+}
+
+/// Explicit complete diagnostic traversal, separate from enrollment baselines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridShapeConfig {
     pub uncertainty_steps: u32,
@@ -83,6 +102,42 @@ pub struct GridVariant {
     pub collisions: Vec<GridCollision>,
 }
 
+/// Canonical enrollment figures; no positional product is counted or allocated.
+#[derive(Clone, Debug)]
+pub struct GridBaselines {
+    spacing_px: f64,
+    padding_steps: u32,
+    shapes: Vec<GridShape>,
+    preparation_work: usize,
+    remaining_work: usize,
+}
+
+impl GridBaselines {
+    pub fn spacing_px(&self) -> f64 {
+        self.spacing_px
+    }
+    pub fn padding_steps(&self) -> u32 {
+        self.padding_steps
+    }
+    pub fn shapes(&self) -> &[GridShape] {
+        &self.shapes
+    }
+    pub fn baseline_count(&self) -> u64 {
+        self.shapes.len() as u64
+    }
+    pub fn preparation_work(&self) -> usize {
+        self.preparation_work
+    }
+
+    /// Hash exactly one padded baseline per subset, retaining duplicate geometry.
+    pub fn candidates(
+        &self,
+        max_descriptor_bytes: NonZeroUsize,
+    ) -> crate::biometrics::Candidates<'_> {
+        encoding::baseline_candidates(self, max_descriptor_bytes)
+    }
+}
+
 /// Validated prepared figures. Iteration keeps their common padded frames fixed.
 #[derive(Clone, Debug)]
 pub struct GridShapes {
@@ -139,6 +194,7 @@ pub enum GridShapeError {
     InvalidInput(&'static str),
     Geometry(GeometryError),
     CountOverflow,
+    BaselineLimit { required: u64, limit: u64 },
     VariantLimit { required: u64, limit: u64 },
     WorkLimit,
 }
@@ -150,6 +206,10 @@ impl fmt::Display for GridShapeError {
             Self::InvalidInput(reason) => write!(f, "invalid grid shape input: {reason}"),
             Self::Geometry(error) => write!(f, "grid shape geometry: {error}"),
             Self::CountOverflow => f.write_str("complete variant count exceeds u64"),
+            Self::BaselineLimit { required, limit } => write!(
+                f,
+                "enrollment requires {required} baselines; limit is {limit}"
+            ),
             Self::VariantLimit { required, limit } => {
                 write!(
                     f,
@@ -159,6 +219,58 @@ impl fmt::Display for GridShapeError {
             Self::WorkLimit => f.write_str("grid shape work limit exceeded"),
         }
     }
+}
+
+/// Align and snap selected subsets for enrollment without positional expansion.
+pub fn prepare_grid_baselines(
+    points: &[CombinationPoint],
+    combinations: &[FeatureCombination],
+    unit_px: f64,
+    config: &GridBaselineConfig,
+) -> Result<GridBaselines, GridShapeError> {
+    config.validate()?;
+    validate_input(combinations, unit_px)?;
+    let required = u64::try_from(combinations.len()).map_err(|_| GridShapeError::CountOverflow)?;
+    if required > config.max_baselines {
+        return Err(GridShapeError::BaselineLimit {
+            required,
+            limit: config.max_baselines,
+        });
+    }
+    let mut work = WorkBudget::new(config.max_work);
+    let indexed = index_points(points, &mut work)?;
+    work.spend(combinations.len())?;
+    let shapes = combinations
+        .iter()
+        .enumerate()
+        .map(|(index, combination)| {
+            prepare_shape(
+                index,
+                combination,
+                &indexed,
+                unit_px,
+                config.padding_steps,
+                &mut work,
+            )
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(GridBaselines {
+        spacing_px: unit_px,
+        padding_steps: config.padding_steps,
+        shapes,
+        preparation_work: config.max_work - work.remaining,
+        remaining_work: work.remaining,
+    })
+}
+
+fn validate_input(combinations: &[FeatureCombination], unit_px: f64) -> Result<(), GridShapeError> {
+    if !unit_px.is_finite() || unit_px <= 0.0 {
+        return Err(GridShapeError::Geometry(GeometryError::InvalidSpacing));
+    }
+    if combinations.is_empty() {
+        return Err(GridShapeError::InvalidInput("no point combinations"));
+    }
+    Ok(())
 }
 
 impl Error for GridShapeError {
@@ -187,12 +299,7 @@ pub fn prepare_grid_shapes(
     config: &GridShapeConfig,
 ) -> Result<GridShapes, GridShapeError> {
     config.validate()?;
-    if !unit_px.is_finite() || unit_px <= 0.0 {
-        return Err(GridShapeError::Geometry(GeometryError::InvalidSpacing));
-    }
-    if combinations.is_empty() {
-        return Err(GridShapeError::InvalidInput("no point combinations"));
-    }
+    validate_input(combinations, unit_px)?;
     let mut work = WorkBudget::new(config.max_work);
     let indexed = index_points(points, &mut work)?;
     let variant_count = count_variants(combinations, config, &mut work)?;
@@ -201,7 +308,14 @@ pub fn prepare_grid_shapes(
         .iter()
         .enumerate()
         .map(|(index, combination)| {
-            prepare_shape(index, combination, &indexed, unit_px, config, &mut work)
+            prepare_shape(
+                index,
+                combination,
+                &indexed,
+                unit_px,
+                config.uncertainty_steps,
+                &mut work,
+            )
         })
         .collect::<Result<_, _>>()?;
 
@@ -289,7 +403,7 @@ fn prepare_shape(
     combination: &FeatureCombination,
     points: &BTreeMap<usize, &CombinationPoint>,
     spacing: f64,
-    config: &GridShapeConfig,
+    padding_steps: u32,
     work: &mut WorkBudget,
 ) -> Result<GridShape, GridShapeError> {
     work.spend(combination.feature_ids.len())?;
@@ -313,7 +427,7 @@ fn prepare_shape(
         .collect::<Result<Vec<_>, _>>()?;
     let candidates = frame::candidate_frames(&positions, spacing, work)?;
     let selected = grid::choose_frame(candidates.candidates, work)?;
-    let (baseline, phase) = grid::align_and_pad(&selected.snapped, config.uncertainty_steps)?;
+    let (baseline, phase) = grid::align_and_pad(&selected.snapped, padding_steps)?;
 
     Ok(GridShape {
         combination_index,

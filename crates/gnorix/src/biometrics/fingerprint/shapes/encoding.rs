@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use super::{GridCell, GridShapes};
+use super::{GridBaselines, GridCell, GridShapes, WorkBudget};
 use crate::{
     Error, Result,
     biometrics::{Candidate, Candidates},
@@ -66,6 +66,29 @@ pub(super) fn candidates(
                     grid_candidate(&variant.positions, shape.phase, max_descriptor_bytes)
                         .map_err(Into::into)
                 });
+        failed = result.is_err();
+        Some(result)
+    }))
+}
+
+pub(super) fn baseline_candidates(
+    baselines: &GridBaselines,
+    max_descriptor_bytes: NonZeroUsize,
+) -> Candidates<'_> {
+    let mut shapes = baselines.shapes.iter();
+    let mut work = WorkBudget::new(baselines.remaining_work);
+    let mut failed = false;
+    Box::new(std::iter::from_fn(move || {
+        if failed {
+            return None;
+        }
+        let shape = shapes.next()?;
+        let result = (|| {
+            let bytes = descriptor_size(shape.baseline.len(), max_descriptor_bytes)?;
+            work.spend(shape.baseline.len())?;
+            work.spend(bytes)?;
+            grid_candidate(&shape.baseline, shape.phase, max_descriptor_bytes).map_err(Into::into)
+        })();
         failed = result.is_err();
         Some(result)
     }))
