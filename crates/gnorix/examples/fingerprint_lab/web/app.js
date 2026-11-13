@@ -438,7 +438,7 @@ function drawEvidence(prepared) {
     const regionList = $("region-list");
     regionList.replaceChildren();
     $("feature-filter").textContent =
-        `Priority ≥ ${MIN_VISIBLE_PRIORITY} · display only`;
+        `Priority ≥ ${MIN_VISIBLE_PRIORITY} or matched · display only`;
     if (!prepared) {
         $("scale-value").textContent = "R — not measured yet";
         return;
@@ -501,7 +501,7 @@ function drawEvidence(prepared) {
     }
     const points = prepared.points ?? [];
     const visiblePoints = points.filter(
-        (point) => point.priority >= MIN_VISIBLE_PRIORITY,
+        (point) => point.priority >= MIN_VISIBLE_PRIORITY || matched.has(point.id),
     );
     for (const point of visiblePoints) {
         const included = pool.has(point.id);
@@ -773,7 +773,7 @@ function render() {
             state.mode === "enrollment"
                 ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.candidate_count ?? 0, "baseline candidate")}`
                 : state.server.result?.status === "matched"
-                  ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white rings mark visible matches`
+                  ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white rings mark all matches`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;
     if (state.mode === "signing" && registered && !artifactReady())
         notice = "Updating scan preview · prepare or test when ready";
