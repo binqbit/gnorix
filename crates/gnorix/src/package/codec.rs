@@ -8,9 +8,9 @@ use crate::{
     policy::{Limits, SecretPolicy},
 };
 
-use super::{EnrollmentPackage, PackageError, PackageLimits};
+use super::{EnrollmentPackage, PackageError, PackageLimits, validate_profile_parameters};
 
-const MAGIC: &[u8] = b"GNORIX-GRX\x00\x01";
+const MAGIC: &[u8] = b"GNORIX-GRX\x00\x02";
 const CONTEXT_DOMAIN: &[u8] = b"gnorix.enrollment.v1";
 
 pub(super) fn encode(
@@ -23,11 +23,16 @@ pub(super) fn encode(
         return Err(PackageError::LeafLimit);
     }
     let context = package.commitment.context.encode(limits)?;
+    let parameters = package.profile_parameters().unwrap_or_default();
+    if package.profile_parameters().is_some() {
+        validate_profile_parameters(parameters, &package.commitment.context.profile_id, limits)?;
+    }
     let length = leaves
         .len()
         .checked_mul(32)
-        .and_then(|size| size.checked_add(MAGIC.len() + 8 + 32 + 8))
+        .and_then(|size| size.checked_add(MAGIC.len() + 8 + 8 + 32 + 8))
         .and_then(|size| size.checked_add(context.len()))
+        .and_then(|size| size.checked_add(parameters.len()))
         .filter(|&size| size <= capacity.max_bytes.get())
         .ok_or(PackageError::ByteLimit)?;
     let mut bytes = Vec::new();
@@ -37,6 +42,8 @@ pub(super) fn encode(
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&(context.len() as u64).to_be_bytes());
     bytes.extend_from_slice(&context);
+    bytes.extend_from_slice(&(parameters.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(parameters);
     bytes.extend_from_slice(&package.commitment.root.0);
     bytes.extend_from_slice(&(leaves.len() as u64).to_be_bytes());
     for leaf in leaves {
@@ -67,6 +74,7 @@ pub(super) fn decode(
     if context.encode(limits)? != encoded_context {
         return Err(invalid("noncanonical enrollment context"));
     }
+    let profile_parameters = decode_profile_parameters(&mut reader, &context.profile_id, limits)?;
     let root = MerkleRoot(reader.hash()?);
     let leaf_count = reader.number()?;
     let leaves = decode_leaves(&mut reader, leaf_count, capacity)?;
@@ -82,7 +90,26 @@ pub(super) fn decode(
             leaf_count,
         },
         tree,
+        profile_parameters,
     })
+}
+
+fn decode_profile_parameters(
+    reader: &mut Reader<'_>,
+    profile_id: &Hash,
+    limits: &Limits,
+) -> Result<Option<Vec<u8>>, PackageError> {
+    let encoded = reader.field()?;
+    if encoded.is_empty() {
+        return Ok(None);
+    }
+    validate_profile_parameters(encoded, profile_id, limits)?;
+    let mut parameters = Vec::new();
+    parameters
+        .try_reserve_exact(encoded.len())
+        .map_err(|_| PackageError::ByteLimit)?;
+    parameters.extend_from_slice(encoded);
+    Ok(Some(parameters))
 }
 
 fn decode_context(bytes: &[u8]) -> Result<EnrollmentContext, PackageError> {

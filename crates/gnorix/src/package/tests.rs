@@ -46,7 +46,10 @@ fn context() -> EnrollmentContext {
 }
 
 fn package(keys: &[&[u8]]) -> EnrollmentPackage {
-    let context = context();
+    package_with_context(keys, context())
+}
+
+fn package_with_context(keys: &[&[u8]], context: EnrollmentContext) -> EnrollmentPackage {
     let encoded = context.encode(&limits()).unwrap();
     let tree =
         MerkleTree::from_leaves(keys.iter().map(|key| leaf_hash(&encoded, key)).collect()).unwrap();
@@ -67,7 +70,24 @@ fn encoded(package: &EnrollmentPackage) -> Vec<u8> {
 }
 
 fn root_offset(bytes: &[u8]) -> usize {
+    let parameters = parameters_offset(bytes);
+    parameters
+        + 8
+        + u64::from_be_bytes(bytes[parameters..parameters + 8].try_into().unwrap()) as usize
+}
+
+fn parameters_offset(bytes: &[u8]) -> usize {
     20 + u64::from_be_bytes(bytes[12..20].try_into().unwrap()) as usize
+}
+
+fn parameterized_package(parameters: &[u8]) -> EnrollmentPackage {
+    let context = EnrollmentContext {
+        profile_id: Sha256::digest(parameters).into(),
+        ..context()
+    };
+    package_with_context(&[b"pub-A", b"pub-B", b"pub-C"], context)
+        .with_profile_parameters(parameters.to_vec(), &limits())
+        .unwrap()
 }
 
 #[test]
@@ -81,6 +101,7 @@ fn round_trip_restores_paths_from_hashes_for_singleton_even_and_odd_trees() {
         let bytes = encoded(&original);
         let loaded = EnrollmentPackage::decode(&bytes, &capacity(), &limits()).unwrap();
         assert_eq!(loaded.commitment(), original.commitment());
+        assert_eq!(loaded.profile_parameters(), None);
         assert_eq!(encoded(&loaded), bytes);
         let context = loaded.commitment.context.encode(&limits()).unwrap();
         for key in keys {
@@ -92,7 +113,7 @@ fn round_trip_restores_paths_from_hashes_for_singleton_even_and_odd_trees() {
 }
 
 #[test]
-fn package_is_canonical_and_retains_only_context_and_hashes() {
+fn constant_profile_package_is_canonical_and_retains_only_context_and_hashes() {
     let a = package(&[b"pub-A", b"pub-B", b"pub-C"]);
     let b = package(&[b"pub-C", b"pub-B", b"pub-A", b"pub-A"]);
     assert_eq!(encoded(&a), encoded(&b));
@@ -122,10 +143,18 @@ fn package_bytes_match_an_independent_python_hashlib_vector() {
     let bytes = encoded(&package(&[b"pub-A", b"pub-B", b"pub-C"]));
     // Derived independently from the documented framing and Merkle domains.
     let expected: Hash = [
-        171, 242, 134, 93, 18, 143, 77, 29, 7, 158, 45, 146, 11, 206, 231, 106, 96, 34, 16, 68,
-        212, 181, 28, 165, 157, 246, 227, 118, 144, 102, 109, 158,
+        29, 21, 230, 120, 76, 188, 207, 38, 20, 18, 233, 105, 40, 104, 106, 6, 2, 124, 9, 152, 5,
+        247, 71, 155, 1, 66, 149, 24, 165, 101, 23, 35,
     ];
     assert_eq!(Hash::from(Sha256::digest(&bytes)), expected);
+
+    let parameters = b"gnorix.test.profile.v1\0minimum_pair_span_r=21.5";
+    let with_parameters = encoded(&parameterized_package(parameters));
+    let expected: Hash = [
+        144, 252, 157, 41, 29, 108, 224, 48, 128, 133, 219, 126, 77, 127, 186, 128, 132, 85, 34,
+        54, 118, 122, 160, 7, 157, 115, 184, 119, 58, 126, 164, 94,
+    ];
+    assert_eq!(Hash::from(Sha256::digest(&with_parameters)), expected);
 }
 
 #[test]
@@ -236,4 +265,126 @@ fn rejects_absent_empty_and_oversized_public_keys() {
     ));
     assert!(package.proof_for(b"", &limits()).is_err());
     assert!(package.proof_for(&[0; 129], &limits()).is_err());
+}
+
+#[test]
+fn authenticated_public_profile_parameters_round_trip_without_changing_proofs() {
+    let parameters = b"gnorix.test.profile.v1\0minimum_pair_span_r=21.5";
+    let original = parameterized_package(parameters);
+    assert_eq!(original.profile_parameters(), Some(parameters.as_slice()));
+    let bytes = encoded(&original);
+    let loaded = EnrollmentPackage::decode(&bytes, &capacity(), &limits()).unwrap();
+    assert_eq!(loaded.commitment(), original.commitment());
+    assert_eq!(loaded.profile_parameters(), Some(parameters.as_slice()));
+    assert_eq!(encoded(&loaded), bytes);
+    assert_eq!(
+        loaded.proof_for(b"pub-B", &limits()).unwrap(),
+        original.proof_for(b"pub-B", &limits()).unwrap()
+    );
+    assert_eq!(loaded.filename(), original.filename());
+}
+
+#[test]
+fn parameter_records_require_the_exact_committed_hash_and_reject_empty_records() {
+    assert!(matches!(
+        package(&[b"pub-A"]).with_profile_parameters(Vec::new(), &limits()),
+        Err(PackageError::InvalidFormat(
+            "empty profile parameter record"
+        ))
+    ));
+    assert!(matches!(
+        package(&[b"pub-A"]).with_profile_parameters(b"other-profile".to_vec(), &limits()),
+        Err(PackageError::InvalidFormat(
+            "profile parameters do not match the profile ID"
+        ))
+    ));
+
+    let parameters = b"gnorix.test.profile.v1\0minimum_pair_span_r=21.5";
+    let mut original = parameterized_package(parameters);
+    let bytes = encoded(&original);
+    let start = parameters_offset(&bytes) + 8;
+    let mut corrupted = bytes.clone();
+    corrupted[start] ^= 1;
+    assert!(matches!(
+        EnrollmentPackage::decode(&corrupted, &capacity(), &limits()),
+        Err(PackageError::InvalidFormat(
+            "profile parameters do not match the profile ID"
+        ))
+    ));
+    original.profile_parameters.as_mut().unwrap()[0] ^= 1;
+    assert!(original.encode(&capacity(), &limits()).is_err());
+
+    for length in 0..bytes.len() {
+        assert!(
+            EnrollmentPackage::decode(&bytes[..length], &capacity(), &limits()).is_err(),
+            "parameterized package truncation at {length}"
+        );
+    }
+}
+
+#[test]
+fn parameter_presence_is_explicit_and_old_container_versions_are_rejected() {
+    let parameters = b"gnorix.test.profile.v1\0minimum_pair_span_r=21.5";
+    let original = parameterized_package(parameters);
+    let mut bytes = encoded(&original);
+    let start = parameters_offset(&bytes);
+    bytes.splice(start..start + 8 + parameters.len(), 0_u64.to_be_bytes());
+    let loaded = EnrollmentPackage::decode(&bytes, &capacity(), &limits()).unwrap();
+    // Constant profiles do not need a record; consumers requiring retained
+    // settings distinguish this absence through the accessor and reject it.
+    assert_eq!(loaded.profile_parameters(), None);
+    assert_eq!(loaded.commitment(), original.commitment());
+
+    bytes[11] = 1;
+    assert!(matches!(
+        EnrollmentPackage::decode(&bytes, &capacity(), &limits()),
+        Err(PackageError::InvalidFormat("unsupported magic or version"))
+    ));
+}
+
+#[test]
+fn parameter_and_total_byte_limits_apply_before_rebuilding_the_tree() {
+    let parameters = vec![31; 1024];
+    let original = parameterized_package(&parameters);
+    let bytes = encoded(&original);
+    let mut constrained = capacity();
+    constrained.max_bytes = NonZeroUsize::new(bytes.len() - 1).unwrap();
+    assert!(matches!(
+        original.encode(&constrained, &limits()),
+        Err(PackageError::ByteLimit)
+    ));
+    assert!(matches!(
+        EnrollmentPackage::decode(&bytes, &constrained, &limits()),
+        Err(PackageError::ByteLimit)
+    ));
+    constrained.max_bytes = NonZeroUsize::new(bytes.len()).unwrap();
+    assert_eq!(original.encode(&constrained, &limits()).unwrap(), bytes);
+
+    let mut small = limits();
+    small.context_bytes = NonZeroUsize::new(parameters.len() - 1).unwrap();
+    // The encoded enrollment context fits; only the parameter record exceeds
+    // this independently applied public-metadata allowance.
+    assert!(original.commitment.context.encode(&small).is_ok());
+    for result in [
+        original.encode(&capacity(), &small),
+        EnrollmentPackage::decode(&bytes, &capacity(), &small).map(|_| Vec::new()),
+    ] {
+        assert!(matches!(
+            result,
+            Err(PackageError::Core(Error::LimitExceeded(
+                crate::error::Resource::ContextBytes
+            )))
+        ));
+    }
+    let context = original.commitment.context.clone();
+    assert!(
+        package_with_context(&[b"pub-A"], context)
+            .with_profile_parameters(parameters, &small)
+            .is_err()
+    );
+
+    let mut oversized_length = bytes;
+    let start = parameters_offset(&oversized_length);
+    oversized_length[start..start + 8].copy_from_slice(&u64::MAX.to_be_bytes());
+    assert!(EnrollmentPackage::decode(&oversized_length, &capacity(), &limits()).is_err());
 }

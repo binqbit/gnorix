@@ -36,20 +36,24 @@ For a later public key, `EnrollmentPackage::proof_for(public_key, &limits)` comp
 
 ## Retained package
 
-`EnrollmentPackage` contains the full enrollment context, Merkle root, leaf count and retained hash tree. Its binary representation stores only canonical leaf hashes: all internal nodes and paths are rebuilt on load. It contains no public-key list, private keys, candidate digests, coordinates, source image or independent secret.
+`EnrollmentPackage` contains the full enrollment context, optional public profile parameters, Merkle root, leaf count and retained hash tree. Its tree representation stores only canonical leaf hashes: all internal nodes and paths are rebuilt on load. It contains no public-key list, private keys, candidate digests, feature coordinates, source image or independent secret.
 
 ```text
-magic/version:  "GNORIX-GRX" || 0x00 || 0x01
-context_length: u64be
-context:        exact EnrollmentContext::encode bytes
-root:           32 bytes
-leaf_count:     u64be
-leaves:         leaf_count × 32 bytes, strictly increasing
+magic/version:    "GNORIX-GRX" || 0x00 || 0x02
+context_length:   u64be
+context:          exact EnrollmentContext::encode bytes
+parameter_length: u64be
+parameters:       exact public profile parameter bytes; zero length means absent
+root:             32 bytes
+leaf_count:       u64be
+leaves:           leaf_count × 32 bytes, strictly increasing
 ```
 
-The context includes the domain, subject, enrollment ID/revision, public salt, secret policy, measurement profile ID and crypto suite ID. Its encoding is the existing `gnorix.enrollment.v1` length-prefixed format. A profile ID identifies the interpretation; this package does not serialize the acquisition/reconstruction model. Applications retain their processing settings separately.
+The context includes the domain, subject, enrollment ID/revision, public salt, secret policy, measurement profile ID and crypto suite ID. Its encoding remains the existing `gnorix.enrollment.v1` length-prefixed format. Context and signature framing have not changed.
 
-Loading enforces byte, context and leaf-count bounds, validates fields, rejects duplicate/unsorted hashes and trailing data, and checks the rebuilt root. These checks establish consistency of the hash material. They do not independently authenticate the context or establish that the enrollment belongs to a particular user; the full trusted commitment remains application state. The hexadecimal filename is a locator.
+`EnrollmentPackage::with_profile_parameters(...)` attaches a nonempty public record. SHA-256 of its exact bytes must equal `context.profile_id`; attachment, encoding and decoding check this binding. The record has its own `Limits::context_bytes` bound. Generic constant profiles can omit the record.
+
+Loading enforces byte, context, parameter and leaf-count bounds, validates fields, rejects duplicate/unsorted hashes and trailing data, and checks the rebuilt root. These checks establish consistency of the hash material and its parameter binding. They do not independently authenticate the context or establish that the enrollment belongs to a particular user; the full trusted commitment remains application state. The hexadecimal filename is a locator.
 
 ## Run the complete example
 
@@ -66,4 +70,4 @@ Imported combinations must use `gnorix.feature-combinations.v3`. Enrollment chec
 
 The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`: [HKDF-SHA256](https://www.rfc-editor.org/rfc/rfc5869.html) derives a 32-byte seed, and [ed25519-dalek](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/) handles key generation and signatures. HKDF uses the encoded context as salt; its input frames the domain `gnorix.example.ed25519-input.v1`, candidate digest, secret-presence byte and secret bytes with `u64be` lengths. Expansion info is `gnorix.example.ed25519-seed.v1`. This is an example-selected suite, not a library default or a password-hardening policy.
 
-The command traverses every selected baseline, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses the same package format, profile v4 and crypto suite. Earlier profiles require a new enrollment for reconstruction with the shared priority cutoff; their existing authorizations remain verifiable against the trusted original package. The binary container is unchanged. Repeatability on independent sensor captures and biometric acceptance remain separate work.
+The command traverses every selected baseline, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses container v2, profile v4 and the same crypto suite. Container v1 is rejected by the current decoder, so earlier test enrollments must be recreated. Existing authorizations can still be checked through the generic verifier against their retained original trusted commitment; the current CLI does not load their old `.grx` files. Repeatability on independent sensor captures and biometric acceptance remain separate work.

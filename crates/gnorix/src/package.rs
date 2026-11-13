@@ -1,9 +1,10 @@
 //! Portable enrollment context and retained Merkle hashes in the `.grx` format.
 //!
 //! A package contains no candidate coordinates, candidate digests, private keys,
-//! independent secrets or public-key list. Its sorted leaf hashes reconstruct
-//! all tree levels and membership paths. Decoding checks internal consistency;
-//! the application must still establish trust in the enrollment commitment.
+//! independent secrets or public-key list. Optional public profile parameters
+//! are authenticated by the context's profile ID. Sorted leaf hashes reconstruct
+//! all tree levels and membership paths. The application must still establish
+//! trust in the enrollment commitment.
 
 mod codec;
 
@@ -12,11 +13,13 @@ mod tests;
 
 use std::{error::Error as StdError, fmt, num::NonZeroUsize};
 
+use sha2::{Digest, Sha256};
+
 use crate::{
     Error,
     crypto::validate_public_key,
     enrollment::{Enrollment, EnrollmentCommitment},
-    merkle::{MerkleProof, MerkleTree, leaf_hash},
+    merkle::{Hash, MerkleProof, MerkleTree, leaf_hash},
     policy::Limits,
 };
 
@@ -28,11 +31,13 @@ pub struct PackageLimits {
 }
 
 /// Public enrollment metadata and the hashes needed to find membership proofs.
-/// The acquisition/reconstruction model is deliberately separate from this pack.
+/// It may retain public interpretation settings; captured features and
+/// reconstructed keys remain outside the package.
 #[derive(Debug)]
 pub struct EnrollmentPackage {
     commitment: EnrollmentCommitment,
     tree: MerkleTree,
+    profile_parameters: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -79,7 +84,30 @@ impl EnrollmentPackage {
         Ok(Self {
             commitment: enrollment.commitment().clone(),
             tree: enrollment.proof_material().clone(),
+            profile_parameters: None,
         })
+    }
+
+    /// Attach a public, versioned parameter record authenticated by `profile_id`.
+    ///
+    /// The caller defines the canonical parameter encoding and includes its
+    /// interpretation domain/version in those bytes. The context's profile ID
+    /// must equal SHA-256 of the exact record. Its size is independently bounded
+    /// by `limits.context_bytes`; no secrets or captured features belong here.
+    pub fn with_profile_parameters(
+        mut self,
+        parameters: Vec<u8>,
+        limits: &Limits,
+    ) -> Result<Self, PackageError> {
+        validate_profile_parameters(&parameters, &self.commitment.context.profile_id, limits)?;
+        self.profile_parameters = Some(parameters);
+        Ok(self)
+    }
+
+    /// Authenticated public parameters, if this profile retains a parameter record.
+    /// Profiles that need these settings for reconstruction must reject `None`.
+    pub fn profile_parameters(&self) -> Option<&[u8]> {
+        self.profile_parameters.as_deref()
     }
 
     pub fn commitment(&self) -> &EnrollmentCommitment {
@@ -135,4 +163,27 @@ impl EnrollmentPackage {
     ) -> Result<Self, PackageError> {
         codec::decode(bytes, package_limits, limits)
     }
+}
+
+fn validate_profile_parameters(
+    parameters: &[u8],
+    profile_id: &Hash,
+    limits: &Limits,
+) -> Result<(), PackageError> {
+    if parameters.is_empty() {
+        return Err(PackageError::InvalidFormat(
+            "empty profile parameter record",
+        ));
+    }
+    crate::policy::check_size(
+        parameters.len(),
+        limits.context_bytes,
+        crate::error::Resource::ContextBytes,
+    )?;
+    if Hash::from(Sha256::digest(parameters)) != *profile_id {
+        return Err(PackageError::InvalidFormat(
+            "profile parameters do not match the profile ID",
+        ));
+    }
+    Ok(())
 }
