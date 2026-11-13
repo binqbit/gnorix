@@ -2,8 +2,9 @@
 //!
 //! Applications supply a [`biometrics::MeasurementEngine`] and a
 //! [`crypto::CryptoProvider`]. Per-capture ridge extraction is available in
-//! [`biometrics::fingerprint`]; registration, matching tolerances, candidate
-//! encoding, key derivation and signature algorithms remain explicit choices.
+//! [`biometrics::fingerprint`], including normalized grid candidate hashing.
+//! Registration, matching tolerances, key derivation and signature algorithms
+//! remain explicit choices.
 //! Public verification alone requires only [`crypto::SignatureVerifier`].
 //!
 //! [`authorization::verify`] checks evidence against an independently trusted

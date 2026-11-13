@@ -63,7 +63,7 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
 | `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
 | `combinations.rs`, `combinations/` | Compose candidate projection, region selection, lazy weighted subset enumeration and global deduplication. |
-| `shapes.rs`, `shapes/` | Prepare oriented figures, preserve staggered-grid phase and stream every positional assignment with explicit collisions. |
+| `shapes.rs`, `shapes/` | Prepare oriented figures, preserve staggered-grid phase, stream positional assignments and hash canonical integer-coordinate descriptors. |
 
 Feature assessment separates local evidence (`features/evidence.rs`), extended source-backed structure (`features/context.rs` and its tracing/probe modules), threshold correspondence (`features/stability/`) and bounded crowding (`features/neighborhood.rs`). The orchestration combines these independent measurements; the report adapters only serialize and validate them. All source/graph observation preserves the original topology. Context traversal, sampling and neighborhood work have explicit bounds.
 

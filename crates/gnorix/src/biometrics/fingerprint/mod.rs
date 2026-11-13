@@ -1,7 +1,7 @@
 //! Per-capture ridge extraction, point subsets and geometric grid variants.
 //!
-//! This module exposes observed structure, not stable identities or signing
-//! candidates. Endings can result from missing signal. Extraction measurements
+//! This module exposes observed structure and candidate encodings, not validated
+//! identities. Endings can result from missing signal. Extraction measurements
 //! use source-image pixels; measured ridge spacing is not an inferred DPI.
 //! Final grid figures and positional variants use integer node indices.
 
@@ -52,7 +52,7 @@ pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
 pub use scale::{BootstrapScale, RidgeSpan, ScaleProfile};
 pub use shapes::{
     GridCell, GridCollision, GridShape, GridShapeConfig, GridShapeError, GridShapeFrame,
-    GridShapes, GridVariant, GridVariants, prepare_grid_shapes,
+    GridShapes, GridVariant, GridVariants, grid_candidate, prepare_grid_shapes,
 };
 pub use smoothing::{SmoothingAdjustment, SmoothingControls, SmoothingRejection};
 

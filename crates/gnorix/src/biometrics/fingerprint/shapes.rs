@@ -1,5 +1,6 @@
 //! Oriented point figures and complete positional variants on the measured grid.
 
+mod encoding;
 mod frame;
 mod grid;
 mod variants;
@@ -7,11 +8,12 @@ mod variants;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt, num::NonZeroUsize};
 
 use super::{CombinationPoint, FeatureCombination, Point};
 use crate::biometrics::geometry::{GeometryError, GridPoint};
 
+pub use encoding::grid_candidate;
 pub use variants::GridVariants;
 
 /// Positional uncertainty is separate from the upstream subset selection budget.
@@ -118,6 +120,16 @@ impl GridShapes {
     /// A resource error is yielded explicitly and terminates that traversal.
     pub fn variants(&self) -> GridVariants<'_> {
         GridVariants::new(self)
+    }
+
+    /// Hash every positional variant into a canonical candidate, retaining
+    /// duplicate geometries. The bound applies to the framed descriptor before
+    /// hashing, not the 32-byte digest. An error terminates the candidate stream.
+    pub fn candidates(
+        &self,
+        max_descriptor_bytes: NonZeroUsize,
+    ) -> crate::biometrics::Candidates<'_> {
+        encoding::candidates(self, max_descriptor_bytes)
     }
 }
 
