@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="theme-color" content="#061610" />
+        <title>GNORIX · Fingerprint Lab</title>
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+        <link rel="stylesheet" href="/app.css" />
+    </head>
+    <body>
+        <header class="topbar">
+            <a class="brand" href="/" aria-label="GNORIX Fingerprint Lab"
+                ><img src="/logo.svg" alt="" /><span
+                    >GNORIX<small>FINGERPRINT LAB</small></span
+                ></a
+            >
+            <span class="environment"><i></i> Local test environment</span>
+            <span id="connection" class="connection">Connecting…</span>
+        </header>
+
+        <main>
+            <section class="intro">
+                <div>
+                    <p class="eyebrow hero-eyebrow">
+                        <span></span> GNORIX / BIOMETRIC WORKSPACE
+                    </p>
+                    <h1>From features <span>to digital signatures.</span></h1>
+                    <p class="intro-text">
+                        Explore the fingerprint. Choose a fragment. See the
+                        exact features that reconstruct the key.
+                    </p>
+                </div>
+                <div class="hero-mark" aria-hidden="true">
+                    <img src="/logo.svg" alt="" /><span
+                        >THE SIGNATURE<br />IS IN THE DETAILS.</span
+                    >
+                </div>
+            </section>
+            <section class="workflow" aria-label="Testing workflow">
+                <div class="sequence" aria-label="Stages">
+                    <span id="step-prepare"
+                        ><b>01</b
+                        ><span
+                            >Prepare <small>Find the features</small></span
+                        ></span
+                    ><span id="step-enroll"
+                        ><b>02</b
+                        ><span
+                            >Enroll <small>Create a Merkle set</small></span
+                        ></span
+                    ><span id="step-sign"
+                        ><b>03</b
+                        ><span
+                            >Verify <small>Sign with a fragment</small></span
+                        ></span
+                    >
+                </div>
+            </section>
+
+            <div class="workspace">
+                <section class="viewer-panel" aria-labelledby="viewer-title">
+                    <div class="panel-heading">
+                        <div>
+                            <span class="eyebrow">SOURCE IMAGE</span>
+                            <h2 id="viewer-title">Test fingerprint</h2>
+                        </div>
+                        <span id="image-size" class="tag">PNG</span>
+                    </div>
+                    <div class="viewer-tools">
+                        <div
+                            class="segmented"
+                            role="group"
+                            aria-label="Operation mode"
+                        >
+                            <button
+                                id="mode-enrollment"
+                                class="active"
+                                type="button"
+                            >
+                                01 · Enrollment</button
+                            ><button id="mode-signing" type="button">
+                                02 · Sign with a fragment
+                            </button>
+                        </div>
+                        <button
+                            id="reset-circle"
+                            type="button"
+                            class="text-button"
+                        >
+                            Center circle
+                        </button>
+                    </div>
+                    <div id="image-stage" class="image-stage">
+                        <svg
+                            id="fingerprint"
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 1086 1448"
+                            aria-label="Fingerprint with feature points and circular selection"
+                            tabindex="0"
+                        >
+                            <defs>
+                                <mask id="selection-mask">
+                                    <rect
+                                        id="mask-background"
+                                        width="1086"
+                                        height="1448"
+                                        fill="white"
+                                    />
+                                    <circle id="mask-hole" fill="black" />
+                                </mask>
+                            </defs>
+                            <image
+                                id="source-image"
+                                width="1086"
+                                height="1448"
+                                href="/fingerprint.png"
+                            />
+                            <g id="regions-layer"></g>
+                            <g id="points-layer"></g>
+                            <rect
+                                id="outside-shade"
+                                width="1086"
+                                height="1448"
+                                fill="#001a10"
+                                opacity="0.77"
+                                mask="url(#selection-mask)"
+                                pointer-events="none"
+                            />
+                            <g id="circle-control">
+                                <circle
+                                    id="selection-circle"
+                                    fill="transparent"
+                                    stroke="#b8ff73"
+                                    stroke-width="3"
+                                    vector-effect="non-scaling-stroke"
+                                />
+                                <circle
+                                    id="selection-center"
+                                    r="6"
+                                    fill="#b8ff73"
+                                    vector-effect="non-scaling-stroke"
+                                />
+                                <circle
+                                    id="radius-handle"
+                                    r="10"
+                                    fill="#b8ff73"
+                                    stroke="#062616"
+                                    stroke-width="3"
+                                    vector-effect="non-scaling-stroke"
+                                />
+                            </g>
+                            <g id="matched-layer"></g>
+                        </svg>
+                        <div id="viewer-notice" class="viewer-notice">
+                            Prepare the image to see its detected features.
+                        </div>
+                    </div>
+                    <div class="viewer-footer">
+                        <span
+                            ><i class="legend-dot muted"></i> All features</span
+                        ><span
+                            ><i class="legend-dot selected"></i> Selected
+                            pool</span
+                        ><span><i class="legend-dot matched"></i> Matched</span
+                        ><span id="scale-value" class="scale-value"
+                            >R — not measured yet</span
+                        >
+                    </div>
+                    <div
+                        id="region-list"
+                        class="region-list"
+                        aria-label="Algorithm regions"
+                    ></div>
+                </section>
+
+                <aside class="controls">
+                    <section class="card">
+                        <div class="card-heading">
+                            <span class="eyebrow">EXPERIMENT CONTROLS</span
+                            ><span class="tag">Rust engine</span>
+                        </div>
+                        <h2 id="action-title">Prepare a Merkle set</h2>
+                        <p id="mode-help" class="help">
+                            Inspect the regions and points first. Create the set
+                            when you are ready.
+                        </p>
+                        <div
+                            id="circle-settings"
+                            class="circle-settings"
+                            hidden
+                        >
+                            <div class="field-line">
+                                <label for="circle-radius"
+                                    >Selected fragment radius</label
+                                ><output id="radius-value">— px</output>
+                            </div>
+                            <input
+                                id="circle-radius"
+                                type="range"
+                                min="16"
+                                max="1000"
+                                step="1"
+                                value="360"
+                            />
+                            <div class="field-grid">
+                                <label
+                                    >Center X, px<input
+                                        id="circle-x"
+                                        type="number"
+                                        min="0"
+                                        step="1" /></label
+                                ><label
+                                    >Center Y, px<input
+                                        id="circle-y"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                /></label>
+                            </div>
+                            <p class="microcopy">
+                                Drag the circle or its edge on the image. Arrow
+                                keys move the center; + / − change the radius.
+                            </p>
+                        </div>
+                        <div class="primary-actions">
+                            <button
+                                id="prepare"
+                                class="button primary"
+                                type="button"
+                            >
+                                <span>Prepare features</span><b>↗</b></button
+                            ><button
+                                id="execute"
+                                class="button secondary"
+                                type="button"
+                                disabled
+                            >
+                                Create Merkle set
+                            </button>
+                        </div>
+                        <div
+                            id="job-status"
+                            class="job-status"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <span class="status-dot"></span
+                            ><span>Ready to prepare</span>
+                        </div>
+                        <div
+                            id="feedback"
+                            class="feedback"
+                            role="alert"
+                            hidden
+                        ></div>
+                    </section>
+
+                    <section class="card config-card">
+                        <div class="card-heading">
+                            <span class="eyebrow">ALGORITHM SETTINGS</span
+                            ><span id="config-status" class="small-status"
+                                >Before enrollment</span
+                            >
+                        </div>
+                        <div class="field-grid">
+                            <label
+                                >Minimum points, n<input
+                                    id="min-points"
+                                    type="number"
+                                    min="1"
+                                    max="8"
+                                    step="1"
+                                    value="3"
+                            /></label>
+                            <label
+                                >Pool size, ×n<input
+                                    id="pool-multiplier"
+                                    type="number"
+                                    min="1"
+                                    max="4"
+                                    step="1"
+                                    value="2"
+                            /></label>
+                            <label
+                                >Region radius, R<input
+                                    id="radius-units"
+                                    type="number"
+                                    min="1"
+                                    max="200"
+                                    step="0.25"
+                                    value="30"
+                            /></label>
+                            <label
+                                >Combinations / region<input
+                                    id="per-region"
+                                    type="number"
+                                    min="1"
+                                    max="256"
+                                    step="1"
+                                    value="12"
+                            /></label>
+                            <label
+                                >Grid tolerance, L<input
+                                    id="uncertainty"
+                                    type="number"
+                                    min="0"
+                                    max="3"
+                                    step="1"
+                                    value="1"
+                            /></label>
+                            <label
+                                >Candidate attempt limit<input
+                                    id="attempt-limit"
+                                    type="number"
+                                    min="1"
+                                    max="1000000000"
+                                    step="1"
+                                    value="1000000000"
+                            /></label>
+                        </div>
+                        <p id="config-help" class="microcopy">
+                            R is the measured mean dark-ridge width. Adjust
+                            these settings before creating the set.
+                        </p>
+                        <details class="advanced">
+                            <summary>Computation limits</summary>
+                            <label
+                                >Search work limit<input
+                                    id="work-limit"
+                                    type="number"
+                                    min="1000"
+                                    max="1000000000"
+                                    step="1000"
+                                    value="1000000000"
+                            /></label>
+                            <p class="microcopy">
+                                This limit counts internal operations and may
+                                stop the search before the candidate limit. That
+                                is an incomplete search, not a no-match result.
+                            </p>
+                        </details>
+                    </section>
+                </aside>
+                <section class="card root-card">
+                    <span class="eyebrow">ENROLLED SET</span>
+                    <div class="root-line">
+                        <h2>Merkle root</h2>
+                        <button
+                            id="copy-root"
+                            type="button"
+                            class="text-button"
+                            disabled
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    <code id="merkle-root" class="hash-value"
+                        >No set created yet</code
+                    >
+                    <div class="root-meta">
+                        <span id="leaf-count">— keys</span
+                        ><span id="root-state">Awaiting enrollment</span>
+                    </div>
+                </section>
+            </div>
+
+            <section
+                id="result-panel"
+                class="result-panel"
+                hidden
+                aria-labelledby="result-title"
+            >
+                <div class="result-header">
+                    <div>
+                        <span class="eyebrow">EXPERIMENT RESULT</span>
+                        <h2 id="result-title">Signing result</h2>
+                        <p id="result-message"></p>
+                    </div>
+                    <span id="result-badge" class="result-badge"></span>
+                </div>
+                <div class="result-metrics">
+                    <span><b id="result-attempts">—</b> candidates checked</span
+                    ><span><b id="result-features">—</b> matched features</span
+                    ><span id="verified-label">—</span>
+                </div>
+                <div class="result-data">
+                    <div>
+                        <div class="data-heading">
+                            <h3>Public key · Ed25519</h3>
+                            <button
+                                class="text-button"
+                                type="button"
+                                data-copy="public-key"
+                            >
+                                Copy
+                            </button>
+                        </div>
+                        <code id="public-key" class="hash-value"></code>
+                        <div class="data-heading">
+                            <h3>Signature</h3>
+                            <button
+                                class="text-button"
+                                type="button"
+                                data-copy="signature"
+                            >
+                                Copy
+                            </button>
+                        </div>
+                        <code id="signature" class="hash-value"></code>
+                    </div>
+                    <div>
+                        <div class="data-heading">
+                            <h3>Merkle proof</h3>
+                            <button
+                                class="text-button"
+                                type="button"
+                                data-copy="proof-json"
+                            >
+                                Copy JSON
+                            </button>
+                        </div>
+                        <p id="proof-meta" class="microcopy"></p>
+                        <pre id="proof-json" class="proof-json"></pre>
+                    </div>
+                </div>
+                <details class="authorization-details">
+                    <summary>Complete public proof · JSON</summary>
+                    <pre id="authorization-json"></pre>
+                </details>
+            </section>
+
+            <section class="payload-panel">
+                <div>
+                    <span class="eyebrow">SIGNING DATA</span>
+                    <h2>Message</h2>
+                    <p class="help">
+                        These exact bytes are signed. Change the text after
+                        signing to check that the proof is bound to the message.
+                    </p>
+                </div>
+                <div class="payload-input">
+                    <label class="sr-only" for="payload">Message to sign</label
+                    ><textarea id="payload" rows="3" maxlength="16384">
+Gnorix fingerprint test</textarea
+                    ><button
+                        id="verify"
+                        class="button secondary"
+                        type="button"
+                        disabled
+                    >
+                        Verify signature
+                    </button>
+                </div>
+            </section>
+        </main>
+        <footer>
+            <span>GNORIX <b>LAB</b></span>
+            <p>
+                Synthetic test fingerprint · computed on this device · no
+                external services
+            </p>
+        </footer>
+        <script type="module" src="/app.js"></script>
+    </body>
+</html>

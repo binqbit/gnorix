@@ -28,3 +28,5 @@ The next [grid-figure stage](../docs/grid-shapes.md) consumes that JSON and writ
 The [enrollment example](../docs/grx-packages.md) can write `enrollment/<merkle-root>.grx`. This separate package contains context and Merkle leaf hashes for later public-key membership lookup. Fingerprint report refresh does not remove enrollment packages.
 
 The [fresh-image signing example](../docs/fingerprint-signing.md) keeps crop images, public authorizations and its [run record](enrollment/signing/results.json) under `enrollment/signing/`. It extracts each image again and signs with the first key found in the existing package. The current full-image and four crop runs all verified; these are crops of one synthetic fixture, not independent sensor captures. This directory also survives fingerprint report refreshes.
+
+The [interactive fingerprint test stand](../docs/fingerprint-lab.md) keeps generated packages and public test records under `fingerprint-lab/`. Its active session is held in memory and its artifacts survive fingerprint-report refreshes.

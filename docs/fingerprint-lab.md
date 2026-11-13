@@ -1,0 +1,46 @@
+# Fingerprint test stand
+
+Run the local web interface from the checkout root:
+
+```sh
+cargo run -p gnorix --example fingerprint_lab --release --locked
+```
+
+Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic operations run in Rust. HTML, CSS, JavaScript, the logo and the existing test fingerprint are bundled with the executable; no frontend installation or external services are needed. The first build needs Cargo dependencies. Use `-- --port 8766` after the command to choose another local port. Stop the server with Ctrl+C.
+
+## Test a signature
+
+1. In **Enrollment**, adjust the parameters and select **Prepare features**. Inspect the actual detected points and algorithm regions. Region buttons highlight each selected pool. Preparation also checks the complete grid-variant count before enrollment.
+2. Select **Create Merkle set**. The stand derives the enrolled keys, creates the package, checks its readback and displays its Merkle root and leaf count.
+3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Select **Prepare features** to extract the circular capture again and inspect its regions and points.
+4. Select **Sign message**. The stand searches the prepared candidate stream and stops at the first enrolled member. On success, white rings mark the exact features in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
+5. **Verify signature** checks the authorization against the retained enrollment and current message. Changing the message makes verification fail. A consumed search needs another preparation before retrying.
+
+The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves original grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
+
+## Parameters and outcomes
+
+The stand exposes minimum subset size, enrollment pool multiplier, search radius in R, selected combinations per region, grid uncertainty steps, attempt limit and search-work limit. It uses the same library mechanisms as the command-line examples. The weight curve remains `0.1 + 0.9 × priority²`.
+
+The attempt limit defaults to **1,000,000,000 candidate keys** and accepts values from 1 through that maximum. Search remains lazy: this capacity does not allocate or generate a billion candidates upfront. The separate work budget counts preparation, subset enumeration, deduplication and geometry operations, so it can stop a search before the key-attempt limit is reached. Both limits retain the **incomplete** outcome; neither means that all possible candidates were tested.
+
+Changing enrollment parameters requires a newly prepared and registered set. Changing the search-work limit requires preparing the fragment again; the attempt limit can change before signing. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
+
+- **Matched:** a member key was found, and both signature and Merkle proof were verified.
+- **No match:** the configured regional search was exhausted without a member.
+- **Incomplete:** an attempt or search-work limit stopped signing. This is not a completed no-match result. Excessive enrollment variant counts are rejected during preparation, before a package is created.
+- **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
+
+The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed.
+
+## Local data
+
+Successful enrollment writes `<root>.grx` and a public preparation record under **`reports/fingerprint-lab/`**. Signing writes its public result record there. These artifacts survive ordinary fingerprint-report refreshes. The active enrollment and preparations are held in server memory; after a server restart, create a new test enrollment. Private keys are transient and are not exported.
+
+The stand binds to loopback and requires its session token for mutations. It accepts the bundled fixture and bounded numeric controls; the HTTP API does not accept filesystem paths. Each enrollment uses a new public context and salt, so its root can differ between runs. The test suite is HKDF-SHA256/Ed25519 with no independent secret. This is a demonstration on a synthetic image, not a qualification of repeatability across independent scanner captures or biometric key entropy.
+
+## Checked example
+
+On the bundled fixture with the defaults, the full preparation produced four regions, 48 combinations and 111,132 grid assignments. A circular capture centered at `(543, 724)` with radius `369 px` produced 29 scored features in two search regions. Signing found a member after 51 candidates using features `11, 33, 38, 42`; signature and Merkle verification passed. A one-attempt search returned **incomplete** without an authorization. Changed message bytes failed verification.
+
+The browser workflow was checked at desktop and 390px mobile widths. See the local [stand preview](../reports/fingerprint-lab/preview.png). These are observations on the synthetic fixture, not acceptance rates across captures.

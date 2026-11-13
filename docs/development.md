@@ -79,6 +79,8 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/fingerprint_signing.rs` extracts a fresh image, searches ranked subsets within adaptive overlapping regions and signs with the first member of an existing package. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls, evidence and crop results. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
 
+`examples/fingerprint_lab.rs` serves the [local test stand](fingerprint-lab.md). Its HTTP adapter, typed view/request models, synchronous biometric workflows and circular capture adapter live in `examples/fingerprint_lab/`. The server calls the library directly and shares the example crypto provider and enrollment profile. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
+
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
 ## Connecting algorithms
