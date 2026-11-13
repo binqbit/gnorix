@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    CombinationError, CombinationPoint, RegionBounds, WorkBudget, collect_points,
+    CombinationError, CombinationPoint, Point, RegionBounds, WorkBudget, collect_points,
     enumeration::RankedSubsets, regions,
 };
 use crate::{
@@ -79,6 +79,16 @@ pub fn signing_candidates(
     fingerprint: &Fingerprint,
     config: &SigningSearchConfig,
 ) -> Result<Candidates<'static>, CombinationError> {
+    Ok(Box::new(prepare_signing_search(fingerprint, config)?))
+}
+
+/// Prepare the same stream as [`signing_candidates`], retaining its observed
+/// points, actual circles and most recently yielded feature identities.
+/// Diagnostics do not change selection, ranking, geometry or candidate bytes.
+pub fn prepare_signing_search(
+    fingerprint: &Fingerprint,
+    config: &SigningSearchConfig,
+) -> Result<SigningSearch, CombinationError> {
     config.validate()?;
     let spacing = fingerprint.scale.unit_px;
     if !spacing.is_finite() || spacing <= 0.0 {
@@ -89,12 +99,27 @@ pub fn signing_candidates(
     let mut work = WorkBudget::new(config.max_work);
     let (points, _) = collect_points(fingerprint, &mut work)?;
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
-    let mut search = SigningSearch::new(points, bounds, spacing, *config, work)?;
-    Ok(Box::new(std::iter::from_fn(move || search.next())))
+    SigningSearch::new(points, bounds, spacing, *config, work)
 }
 
-struct SigningSearch {
+/// One actual search circle, expressed in the current capture's pixel frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SigningRegion {
+    pub id: usize,
+    pub center: Point,
+    pub initial_radius: f64,
+    pub radius: f64,
+    /// Every eligible source ID inside this circle, in descending priority order.
+    /// Equal priorities use ascending source IDs. This is not a truncated pool.
+    pub feature_ids: Vec<usize>,
+}
+
+/// Owned, lazy candidate stream with read-only source diagnostics.
+/// Work and geometry failures yield one error and then terminate the stream.
+pub struct SigningSearch {
     points: Vec<CombinationPoint>,
+    regions: Vec<SigningRegion>,
+    last_feature_ids: Vec<usize>,
     subsets: RegionalSubsets,
     spacing: f64,
     config: SigningSearchConfig,
@@ -103,6 +128,23 @@ struct SigningSearch {
 }
 
 impl SigningSearch {
+    /// All eligible points in descending priority order, with source IDs as ties.
+    pub fn points(&self) -> &[CombinationPoint] {
+        &self.points
+    }
+
+    /// The circles used by this stream, including sparse-circle expansion.
+    pub fn regions(&self) -> &[SigningRegion] {
+        &self.regions
+    }
+
+    /// Ascending source IDs of the most recently yielded successful candidate.
+    /// Empty before the first success; an error or exhaustion retains that last
+    /// successful set. Pending lookahead never changes these identities.
+    pub fn last_feature_ids(&self) -> &[usize] {
+        &self.last_feature_ids
+    }
+
     fn new(
         mut points: Vec<CombinationPoint>,
         bounds: RegionBounds,
@@ -126,32 +168,18 @@ impl SigningSearch {
             2 * config.min_points,
             &mut work,
         )?;
+        let regions = describe_regions(&points, &circles, &mut work)?;
         let subsets = RegionalSubsets::new(&points, circles, config.min_points, &mut work)?;
         Ok(Self {
             points,
+            regions,
+            last_feature_ids: Vec::new(),
             subsets,
             spacing,
             config,
             work,
             finished: false,
         })
-    }
-
-    fn next(&mut self) -> Option<Result<Candidate, AlgorithmError>> {
-        if self.finished {
-            return None;
-        }
-        match self.advance() {
-            Ok(Some(candidate)) => Some(Ok(candidate)),
-            Ok(None) => {
-                self.finished = true;
-                None
-            }
-            Err(error) => {
-                self.finished = true;
-                Some(Err(error))
-            }
-        }
     }
 
     fn advance(&mut self) -> Result<Option<Candidate>, AlgorithmError> {
@@ -169,6 +197,7 @@ impl SigningSearch {
             .iter()
             .map(|point| point.position)
             .collect::<Vec<_>>();
+        self.work.spend(selected.len())?;
         let (candidate, used) = shapes::baseline_candidate(
             &positions,
             self.spacing,
@@ -177,8 +206,57 @@ impl SigningSearch {
             self.config.max_descriptor_bytes,
         )?;
         self.work.spend(used)?;
+        self.last_feature_ids.clear();
+        self.last_feature_ids
+            .extend(selected.iter().map(|point| point.id));
         Ok(Some(candidate))
     }
+}
+
+impl Iterator for SigningSearch {
+    type Item = Result<Candidate, AlgorithmError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        match self.advance() {
+            Ok(Some(candidate)) => Some(Ok(candidate)),
+            Ok(None) => {
+                self.finished = true;
+                None
+            }
+            Err(error) => {
+                self.finished = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+fn describe_regions(
+    points: &[CombinationPoint],
+    circles: &[regions::RegionCandidates],
+    work: &mut WorkBudget,
+) -> Result<Vec<SigningRegion>, CombinationError> {
+    work.spend(circles.len())?;
+    circles
+        .iter()
+        .map(|circle| {
+            work.spend(circle.indices.len())?;
+            Ok(SigningRegion {
+                id: circle.id,
+                center: circle.center,
+                initial_radius: circle.initial_radius,
+                radius: circle.radius,
+                feature_ids: circle
+                    .indices
+                    .iter()
+                    .map(|&index| points[index].id)
+                    .collect(),
+            })
+        })
+        .collect()
 }
 
 struct RegionCursor {
@@ -419,15 +497,21 @@ mod tests {
             source.reverse();
             let mut actual = search(source.clone(), config(2, padding));
             assert_eq!(actual.subsets.regions.len(), 1);
+            assert!(actual.last_feature_ids().is_empty());
             for (ranks, _) in &expected {
-                let ids = ranks.iter().map(|&rank| ranked[rank].id).collect();
+                let mut ids: Vec<_> = ranks.iter().map(|&rank| ranked[rank].id).collect();
+                ids.sort_unstable();
+                let candidate = actual.next().unwrap().unwrap();
+                assert_eq!(actual.last_feature_ids(), ids);
                 assert_eq!(
-                    actual.next().unwrap().unwrap().as_bytes(),
+                    candidate.as_bytes(),
                     baseline(&source, ids, padding).as_bytes()
                 );
             }
+            let last = actual.last_feature_ids().to_vec();
             assert!(actual.next().is_none());
             assert!(actual.next().is_none());
+            assert_eq!(actual.last_feature_ids(), last);
         }
     }
 
@@ -496,12 +580,28 @@ mod tests {
             let mut shuffled = source.clone();
             shuffled.reverse();
             let mut actual = search(shuffled, controls);
-            for ranks in &expected {
-                let ids = ranks.iter().map(|&rank| source[rank].id).collect();
+            assert_eq!(actual.points(), source);
+            assert_eq!(actual.regions().len(), circles.len());
+            for (diagnostic, circle) in actual.regions().iter().zip(&circles) {
+                assert_eq!(diagnostic.id, circle.id);
+                assert_eq!(diagnostic.center, circle.center);
+                assert_eq!(diagnostic.initial_radius, circle.initial_radius);
+                assert_eq!(diagnostic.radius, circle.radius);
                 assert_eq!(
-                    actual.next().unwrap().unwrap().as_bytes(),
-                    baseline(&source, ids, 1).as_bytes()
+                    diagnostic.feature_ids,
+                    circle
+                        .indices
+                        .iter()
+                        .map(|&index| source[index].id)
+                        .collect::<Vec<_>>()
                 );
+            }
+            for ranks in &expected {
+                let mut ids: Vec<_> = ranks.iter().map(|&rank| source[rank].id).collect();
+                ids.sort_unstable();
+                let candidate = actual.next().unwrap().unwrap();
+                assert_eq!(actual.last_feature_ids(), ids);
+                assert_eq!(candidate.as_bytes(), baseline(&source, ids, 1).as_bytes());
             }
             assert!(actual.next().is_none());
             assert_eq!(actual.subsets.seen.len(), expected.len());
@@ -583,6 +683,7 @@ mod tests {
             },
         );
         assert!(bounded.next().unwrap().is_ok());
+        let last = bounded.last_feature_ids().to_vec();
         assert!(matches!(
             bounded
                 .next()
@@ -592,6 +693,7 @@ mod tests {
             Some(CombinationError::WorkLimit)
         ));
         assert!(bounded.next().is_none());
+        assert_eq!(bounded.last_feature_ids(), last);
 
         let mut source = points(3);
         for point in &mut source {
@@ -605,11 +707,13 @@ mod tests {
             },
         );
         assert!(limited.next().unwrap().is_ok()); // Two records fit exactly.
+        let last = limited.last_feature_ids().to_vec();
         assert!(matches!(
             limited.next().unwrap().unwrap_err().downcast_ref::<Error>(),
             Some(Error::LimitExceeded(Resource::CandidateBytes))
         ));
         assert!(limited.next().is_none());
+        assert_eq!(limited.last_feature_ids(), last);
     }
 
     #[test]
