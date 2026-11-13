@@ -412,13 +412,15 @@
                                     value="3"
                             /></label>
                             <label
-                                >Minimum priority, 0–1<input
+                                >Minimum feature priority<input
                                     id="min-priority"
                                     type="number"
                                     min="0"
                                     max="1"
                                     step="any"
                                     value="0.5"
+                                    aria-label="Exact minimum feature priority, 0 to 1"
+                                    aria-describedby="config-help"
                                     required
                             /></label>
                             <label
@@ -498,9 +500,9 @@
                             /></label>
                         </div>
                         <p id="config-help" class="microcopy">
-                            Only features at or above the minimum priority
-                            enter key combinations. Adjust these settings
-                            before creating the set.
+                            Drag a slider or enter an exact value. Only features
+                            at or above the minimum priority enter key combinations.
+                            Adjust these settings before creating the set.
                         </p>
                         <p id="minimum-span" class="microcopy" aria-live="polite">
                             D and d are fractions of the enrolled pattern's

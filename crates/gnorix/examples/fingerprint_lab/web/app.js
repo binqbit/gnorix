@@ -692,6 +692,39 @@ function renderGallery() {
         : `${image.description} SOCOFing gallery images are not installed on this server.`;
 }
 
+function installNumberSliders() {
+    return [...document.querySelectorAll('input[type="number"]')].map((input) => {
+        const label = input.closest("label");
+        const control = document.createElement("div");
+        control.className = "number-control";
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.id = `${input.id}-range`;
+        slider.disabled = true;
+        slider.setAttribute("aria-label", label.textContent.trim().replace(/\s+/g, " "));
+        if (input.hasAttribute("aria-describedby"))
+            slider.setAttribute("aria-describedby", input.getAttribute("aria-describedby"));
+        slider.addEventListener("input", () => {
+            input.value = slider.value;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        label.replaceWith(control);
+        control.append(label, slider);
+        return { input, slider };
+    });
+}
+
+function syncNumberSliders() {
+    for (const { input, slider } of numberSliders) {
+        slider.min = input.min;
+        slider.max = input.max;
+        slider.step = input.step === "any" ? "0.01" : input.step || "1";
+        slider.disabled = input.disabled;
+        // The number is authoritative: ranges can round a restored policy value.
+        if (input.value !== "" && input.checkValidity()) slider.value = input.value;
+    }
+}
+
 function resetSourceView(image) {
     clearTimeout(artifactTimer);
     state.imageAbort?.abort();
@@ -889,6 +922,7 @@ function render() {
     drawSelection();
     drawEvidence(prepared);
     renderResult(prepared);
+    syncNumberSliders();
 }
 
 function feedback(message) {
@@ -1228,6 +1262,7 @@ document
             copyText(button, $(button.dataset.copy).textContent),
         ),
     );
+const numberSliders = installNumberSliders();
 refresh();
 
 new ResizeObserver(() => {

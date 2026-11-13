@@ -38,7 +38,7 @@ Every selected combination satisfies the configured [spatial policy](feature-com
 
 Feature markers use the same style as the static fingerprint reports: red → orange → yellow → green on the fixed 0–1 priority scale, with opacity `0.4 + 0.5 × sqrt(priority)` (40–90%). Endings are circles, bifurcations are triangles, junctions are diamonds, isolated nodes are squares, and isolated cycles are plus signs. The marker size stays fixed for each kind. A small neutral underline identifies the selected pool; a concentric white ring identifies a matching feature. These separate indicators preserve the marker’s priority color and opacity.
 
-The viewer shows every feature that meets the shared **Minimum priority** setting, which defaults to **0.5** for both enrollment and signing. There is no additional display threshold. Matched features retain their original priority color and opacity, plus a concentric white ring. The counter reports all eligible features; the palette still uses the full 0–1 scale.
+The viewer shows every feature that meets the shared **Minimum feature priority** setting, which defaults to **0.5** for both enrollment and signing. Drag its **0–1 slider** in steps of **0.01**, or enter an exact value in the linked number field. Changing the threshold invalidates the current preparation; an existing enrollment requires a new Merkle set with that threshold. There is no additional display threshold. Matched features retain their original priority color and opacity, plus a concentric white ring. The counter reports all eligible features; the palette still uses the full 0–1 scale.
 
 ## Test capture artifacts
 
@@ -51,6 +51,8 @@ A changed severity or **Randomize** produces a new time-seeded variation. The se
 Public test records include the artifact level, seed, clean ridge-width scale, generator version and grayscale-image SHA-256 for reproduction. Preview revisions bind preparations to a specific image; stale preparations are rejected.
 
 ## Parameters and outcomes
+
+Each number field is paired with a slider, including circle coordinates and computation limits. Sliders use the displayed setting's bounds and step; fractional priority and spatial controls move in steps of 0.01 while their number fields retain exact values. Moving a slider changes only that parameter. The controls share the existing validation and become unavailable during computation; changing them does not automatically launch analysis or generate keys.
 
 The stand exposes minimum subset size, minimum feature priority, enrollment pool multiplier, search radius in R, selected combinations per region, minimum diameter fraction, minimum anchor count, pairwise anchor separation fraction, grid uncertainty steps, enrollment memory budget, attempt limit and search-work limit. The spatial fractions use the enrolled bounds' shorter side; the summary shows their resolved R values. These controls determine geometric admission and search cost, not a calibrated cryptographic strength in bits. It uses the same library mechanisms as the command-line examples. Each point must have final `priority >= min_priority` in both enrollment and signing; equality is included. Filtering happens before regions, and low-priority points never refill a pool. Too few eligible points, an anchor count that cannot fit, or an uncovered selected pool point produces an explicit error. The weight curve remains `0.1 + 0.9 × priority²` for eligible points, subject to geometric admission.
 

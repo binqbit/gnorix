@@ -732,6 +732,10 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 13px;
 }
+.number-control input[type="range"] {
+    display: block;
+    margin: 12px 0 3px;
+}
 label {
     display: flex;
     flex-direction: column;
