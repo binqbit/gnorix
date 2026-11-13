@@ -1,4 +1,4 @@
-//! Explicit example controls shared by grid export and enrollment.
+//! Explicit controls for the complete positional-grid diagnostic export.
 
 use std::{collections::BTreeMap, env, str::FromStr};
 

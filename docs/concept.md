@@ -16,11 +16,11 @@ There is also a disclosure problem. A person may want to sign data or authorize 
 
 ## Core principle: accept an enrolled set rather than one exact reading
 
-Gnorix's enrollment model accounts for a defined range of measurement variation. Instead of requiring every later capture to recover one identical representative, the process derives candidate signing keys from the variations accepted for that enrollment.
+Gnorix's enrollment model accounts for a defined range of measurement variation. Instead of requiring every later capture to recover one identical representative, it enrolls keys from multiple selected feature combinations. Each combination contributes its normalized, rounded baseline positions; enrollment does not expand their positional uncertainty.
 
 Each candidate has a private signing key and a corresponding public verification key. The allowed public keys are collected into a Merkle tree, a structure that combines their hashes into one compact commitment called the root. The root represents the enrolled set without requiring the verifier to store or search every key individually.
 
-On a later capture, the library attempts to reconstruct one candidate private key. If its public key belongs to the enrolled set, the person can provide a membership proof and sign the intended action. Matching one enrolled candidate is sufficient; reconstructing every possible key is not necessary during ordinary signing.
+On a later capture, the library tries feature combinations in priority order. For each combination it tests the rounded baseline, then positional variations within the configured uncertainty, checking membership as each key is derived. If a public key belongs to the enrolled set, the person can provide a membership proof and sign the intended action. Matching one enrolled candidate is sufficient; reconstructing every possible key is not necessary during ordinary signing.
 
 This replaces an exact-reading requirement with an accepted-set requirement. It does not mean that every future capture will succeed, or that accepting more variations inherently improves security. The accepted range remains a meaningful part of the enrollment policy.
 

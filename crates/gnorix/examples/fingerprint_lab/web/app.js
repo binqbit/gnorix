@@ -665,9 +665,9 @@ function render() {
         state.mode !== "enrollment" ||
         !prepared ||
         prepared.estimated_peak_bytes == null ||
-        prepared.variant_limit == null;
+        prepared.candidate_limit == null;
     if (!estimate.hidden)
-        estimate.textContent = `Estimated peak: ${format.format(prepared.estimated_peak_bytes / 1024 ** 3)} GiB of ${prepared.memory_budget_gib} GiB · variant limit: ${format.format(prepared.variant_limit)}`;
+        estimate.textContent = `Estimated peak: ${format.format(prepared.estimated_peak_bytes / 1024 ** 3)} GiB of ${prepared.memory_budget_gib} GiB · baseline candidate limit: ${format.format(prepared.candidate_limit)}`;
     $("artifact-value").textContent =
         state.artifactLevel === 0
             ? "Original · 0"
@@ -694,8 +694,8 @@ function render() {
             : "Sign with a fragment";
     $("mode-help").textContent =
         state.mode === "enrollment"
-            ? "Inspect the regions and points first. Create the set when you are ready."
-            : "Choose a circle, prepare its features, then search for a key in the enrolled set.";
+            ? "Inspect the regions and baseline combinations, then create the set. Positional variants are searched during signing."
+            : "Choose a circle and prepare its features. Search checks each combination and its positional variants until a key is found.";
     $("execute").textContent =
         state.mode === "enrollment" ? "Create Merkle set" : "Sign message";
     const signingReady =
@@ -771,7 +771,7 @@ function render() {
     if (prepared)
         notice =
             state.mode === "enrollment"
-                ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.combination_count, "combination")} · ${countLabel(prepared.variant_count ?? 0, "positional variant")}`
+                ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.candidate_count ?? 0, "baseline candidate")}`
                 : state.server.result?.status === "matched"
                   ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white rings mark visible matches`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;

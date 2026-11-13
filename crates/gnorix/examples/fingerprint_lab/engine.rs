@@ -10,8 +10,8 @@ use std::{
 use gnorix::{
     authorization::{self, Action, Authorization, EnrollmentStatus},
     biometrics::fingerprint::{
-        self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind, GridShapeConfig,
-        GridShapeError, GridShapes, SigningSearch, SigningSearchConfig,
+        self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind,
+        GridBaselineConfig, GridBaselines, GridShapeError, SigningSearch, SigningSearchConfig,
     },
     crypto::SignatureVerifier,
     enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
@@ -46,10 +46,10 @@ struct Prepared {
 
 enum PreparedWork {
     Enrollment {
-        grid: GridShapes,
+        grid: GridBaselines,
         budget: EnrollmentBudget,
     },
-    Signing(SigningSearch),
+    Signing(Box<SigningSearch>),
 }
 
 struct Enrolled {
@@ -238,9 +238,9 @@ impl Engine {
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 0,
-            variant_count: None,
+            candidate_count: None,
             memory_budget_gib: None,
-            variant_limit: None,
+            candidate_limit: None,
             estimated_peak_bytes: None,
         };
         let work = if request.kind == "enrollment" {
@@ -271,10 +271,10 @@ impl Engine {
                 request.work_limit,
                 budget,
             )?;
-            view.variant_count = Some(grid.variant_count());
+            view.candidate_count = Some(grid.baseline_count());
             view.memory_budget_gib = Some(budget.memory_budget_gib());
-            view.variant_limit = Some(budget.variant_limit());
-            view.estimated_peak_bytes = Some(budget.estimated_peak_bytes(grid.variant_count())?);
+            view.candidate_limit = Some(budget.candidate_limit());
+            view.estimated_peak_bytes = Some(budget.estimated_peak_bytes(grid.baseline_count())?);
             PreparedWork::Enrollment { grid, budget }
         } else {
             let search = fingerprint::prepare_signing_search(
@@ -282,7 +282,7 @@ impl Engine {
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
                     radius_units: request.config.radius_units,
-                    enrollment_padding: request.config.uncertainty_steps,
+                    uncertainty_steps: request.config.uncertainty_steps,
                     max_work: request.work_limit,
                     max_descriptor_bytes: nonzero(1024 * 1024)?,
                 },
@@ -301,7 +301,7 @@ impl Engine {
                     available_points: region.feature_ids.len(),
                 })
                 .collect();
-            PreparedWork::Signing(search)
+            PreparedWork::Signing(Box::new(search))
         };
         self.data.prepared = Some(view.clone());
         self.prepared = Some(Prepared {
@@ -323,13 +323,13 @@ impl Engine {
             return Err("this preparation is a signing fragment".into());
         };
         let effective_budget = EnrollmentBudget::new(budget.memory_budget_gib(), retained_leaves)?;
-        let estimated_peak = effective_budget.estimated_peak_bytes(grid.variant_count())?;
+        let estimated_peak = effective_budget.estimated_peak_bytes(grid.baseline_count())?;
         *budget = effective_budget;
-        prepared.view.variant_limit = Some(budget.variant_limit());
+        prepared.view.candidate_limit = Some(budget.candidate_limit());
         prepared.view.estimated_peak_bytes = Some(estimated_peak);
         self.data.prepared = Some(prepared.view.clone());
         phase("Deriving keys and building the Merkle tree");
-        let limits = limits(usize::try_from(budget.variant_limit())?)?;
+        let limits = limits(usize::try_from(budget.candidate_limit())?)?;
         let package_limits = budget.package_limits()?;
         let context = enrollment_context(prepared.view.config)?;
         let enrolled = enrollment::enroll_candidates(
@@ -461,8 +461,7 @@ impl Engine {
                 let status = failure_status(&error);
                 let message = match status {
                     "no_match" => {
-                        "No match found after exhausting all permitted regional combinations."
-                            .into()
+                        "No match found after exhausting all regional combinations and their grid uncertainty variants.".into()
                     }
                     "incomplete" => format!("Search incomplete: {}", error_detail(&error)),
                     _ => format!("Computation failed: {}", error_detail(&error)),
@@ -609,15 +608,15 @@ fn prepare_enrollment_grid(
     uncertainty_steps: u32,
     max_work: usize,
     budget: EnrollmentBudget,
-) -> Result<GridShapes> {
-    let config = GridShapeConfig {
-        uncertainty_steps,
+) -> Result<GridBaselines> {
+    let config = GridBaselineConfig {
+        padding_steps: uncertainty_steps,
         max_work,
-        max_variants: budget.variant_limit(),
+        max_baselines: budget.candidate_limit(),
     };
-    match fingerprint::prepare_grid_shapes(points, combinations, unit_px, &config) {
+    match fingerprint::prepare_grid_baselines(points, combinations, unit_px, &config) {
         Ok(grid) => Ok(grid),
-        Err(error @ GridShapeError::VariantLimit { required, .. }) => {
+        Err(error @ GridShapeError::BaselineLimit { required, .. }) => {
             match budget.estimated_peak_bytes(required) {
                 Err(reason) => Err(reason),
                 Ok(_) => Err(error.into()),
@@ -747,6 +746,7 @@ fn failure_status(error: &(dyn StdError + 'static)) -> &'static str {
         error.downcast_ref::<GridShapeError>(),
         Some(
             GridShapeError::WorkLimit
+                | GridShapeError::BaselineLimit { .. }
                 | GridShapeError::VariantLimit { .. }
                 | GridShapeError::CountOverflow
         )
@@ -813,9 +813,9 @@ mod tests {
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 1,
-            variant_count: Some(1),
+            candidate_count: Some(1),
             memory_budget_gib: Some(DEFAULT_MEMORY_GIB),
-            variant_limit: Some(budget.variant_limit()),
+            candidate_limit: Some(budget.candidate_limit()),
             estimated_peak_bytes: Some(budget.estimated_peak_bytes(1).unwrap()),
         };
         engine.prepared = Some(Prepared {
@@ -1053,6 +1053,13 @@ mod tests {
             "incomplete"
         );
         assert_eq!(failure_status(&CombinationError::WorkLimit), "incomplete");
+        assert_eq!(
+            failure_status(&GridShapeError::BaselineLimit {
+                required: 2,
+                limit: 1,
+            }),
+            "incomplete"
+        );
         assert_eq!(
             failure_status(&gnorix::Error::Algorithm {
                 stage: gnorix::error::Stage::Reconstruction,

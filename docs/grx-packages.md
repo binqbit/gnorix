@@ -1,6 +1,6 @@
 # Grid candidates and `.grx` packages
 
-Each complete grid assignment becomes a candidate digest. The caller's `CryptoProvider` derives a private/public key pair; the shared enrollment pipeline commits the public-key hashes to a Merkle tree. The resulting `<merkle-root>.grx` stores the context and hashes needed to find a member and reconstruct its proof later.
+Enrollment turns the normalized, snapped baseline of each selected point subset into one candidate digest. The caller's `CryptoProvider` derives a private/public key pair; the shared enrollment pipeline commits the public-key hashes to a Merkle tree. Positional uncertainty is searched lazily during signing and does not multiply the enrolled set. The resulting `<merkle-root>.grx` stores the context and hashes needed to find a member and reconstruct its proof later.
 
 ## Coordinates to a candidate
 
@@ -22,13 +22,13 @@ point_count:u64be
 (column:u64be, row:u64be) repeated in sorted order
 ```
 
-The complete descriptor occupies `65 + 16 × point_count` bytes. Its size is checked before sorting/allocation. `GridShapes::candidates(...)` applies this operation to the complete positional stream and propagates failures; it does not silently truncate the set.
+The complete descriptor occupies `65 + 16 × point_count` bytes. Its size is checked before sorting/allocation. `GridBaselines::candidates(...)` applies this operation once per prepared baseline and propagates failures; it does not silently truncate the enrolled set. The separate `GridShapes` API remains available for complete diagnostic exports of positional variants.
 
 ## Keys and membership
 
 `enrollment::enroll_candidates(...)` accepts an existing candidate stream and an explicit `EnrollmentContext`. It shares context validation, secret policy, resource limits and key/Merkle construction with `enrollment::enroll(...)`. The supplied provider must deterministically bind the candidate, context and any required independent secret. Transient candidates and private keys are not retained by enrollment.
 
-Each leaf is the existing context-bound `merkle::leaf_hash(context, public_key)`. The tree sorts and deduplicates these hashes. Repeated assignments can therefore produce fewer distinct leaves; they still count toward traversal limits.
+Each leaf is the existing context-bound `merkle::leaf_hash(context, public_key)`. The tree sorts and deduplicates these hashes. Equal baselines can therefore produce fewer distinct leaves; each supplied baseline still counts toward enrollment limits.
 
 For a later public key, `EnrollmentPackage::proof_for(public_key, &limits)` computes the same leaf hash, searches the sorted leaves, and constructs the membership path. Verify it with `merkle::verify` against the application's trusted root. An absent leaf is an explicit error.
 
@@ -60,8 +60,8 @@ cargo run -p gnorix --example enroll_grid --release --locked -- \
   reports/enrollment
 ```
 
-The included context has fixed public values for the local test image. The example uses the same `GNORIX_GRID_*` controls as [grid export](grid-shapes.md), with one neighbor step by default. The context JSON explicitly supplies `network`, `verifier`, `subject`, 32-byte hexadecimal `id`, nonzero `revision`, hexadecimal `public_salt`, and `secret_policy` (`absent` or `required`). For `required`, supply `GNORIX_ENROLL_SECRET`; it is not written to the package or logs.
+The included context has fixed public values for the local test image. `GNORIX_GRID_UNCERTAINTY_STEPS` selects the shared L-step padding and later signing neighborhood (default 1). `GNORIX_ENROLLMENT_MAX_CANDIDATES` limits baseline candidates (default 1,000,000); `GNORIX_GRID_MAX_WORK` limits preparation/iteration work (default 10,000,000). The diagnostic `GNORIX_GRID_MAX_VARIANTS` setting does not control enrollment. The context JSON explicitly supplies `network`, `verifier`, `subject`, 32-byte hexadecimal `id`, nonzero `revision`, hexadecimal `public_salt`, and `secret_policy` (`absent` or `required`). For `required`, supply `GNORIX_ENROLL_SECRET`; it is not written to the package or logs.
 
 The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`: [HKDF-SHA256](https://www.rfc-editor.org/rfc/rfc5869.html) derives a 32-byte seed, and [ed25519-dalek](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/) handles key generation and signatures. HKDF uses the encoded context as salt; its input frames the domain `gnorix.example.ed25519-input.v1`, candidate digest, secret-presence byte and secret bytes with `u64be` lengths. Expansion info is `gnorix.example.ed25519-seed.v1`. This is an example-selected suite, not a library default or a password-hardening policy.
 
-The command traverses the full configured set, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses the same package format, profile and crypto suite. Its crop checks validate the implemented search path; repeatability on independent sensor captures and biometric acceptance remain separate work.
+The command traverses every selected baseline, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses the same package format, profile v3 and crypto suite. Earlier profiles require a new enrollment for baseline enrollment and lazy uncertainty search; their existing authorizations remain verifiable against the trusted original package. The binary container is unchanged. Repeatability on independent sensor captures and biometric acceptance remain separate work.

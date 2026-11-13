@@ -14,6 +14,7 @@ use super::{CombinationPoint, FeatureCombination, Point};
 use crate::biometrics::geometry::{GeometryError, GridPoint};
 
 pub use encoding::grid_candidate;
+pub(super) use variants::CandidateVariants;
 pub use variants::GridVariants;
 
 /// Prepare one canonical assignment per subset, without expanding uncertainty.
@@ -330,17 +331,14 @@ pub fn prepare_grid_shapes(
     })
 }
 
-/// Reuses enrollment's canonical frame and padding for one observed subset.
-/// No positional-neighborhood count or variants are prepared during signing.
-/// The caller passes its remaining cumulative budget and debits the returned
-/// work; any failure terminates that candidate stream.
-pub(super) fn baseline_candidate(
+/// Prepare a bounded lazy uncertainty stream for one observed subset.
+pub(super) fn candidate_variants(
     positions: &[Point],
     spacing: f64,
     padding: u32,
     max_work: usize,
     max_descriptor_bytes: NonZeroUsize,
-) -> Result<(crate::biometrics::Candidate, usize), crate::error::AlgorithmError> {
+) -> Result<CandidateVariants, crate::error::AlgorithmError> {
     let mut work = WorkBudget::new(max_work);
     let descriptor_bytes = encoding::descriptor_size(positions.len(), max_descriptor_bytes)?;
     let candidates = frame::candidate_frames(positions, spacing, &mut work)?;
@@ -348,9 +346,15 @@ pub(super) fn baseline_candidate(
 
     work.spend(positions.len())?;
     let (baseline, phase) = grid::align_and_pad(&selected.snapped, padding)?;
-    work.spend(descriptor_bytes)?;
-    let candidate = grid_candidate(&baseline, phase, max_descriptor_bytes)?;
-    Ok((candidate, max_work - work.remaining))
+    let offsets = variants::neighborhood_offsets(padding, &mut work)?;
+    CandidateVariants::new(
+        baseline,
+        phase,
+        offsets,
+        work.remaining,
+        descriptor_bytes,
+        max_descriptor_bytes,
+    )
 }
 
 fn index_points<'a>(

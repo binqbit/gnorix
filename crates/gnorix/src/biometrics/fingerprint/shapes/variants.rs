@@ -1,11 +1,104 @@
 //! Complete positional assignments in each figure's fixed padded grid frame.
 
-use std::{collections::BTreeMap, iter::FusedIterator};
+use std::{collections::BTreeMap, iter::FusedIterator, num::NonZeroUsize};
 
 use super::{
     GeometryError, GridCell, GridCollision, GridPoint, GridShape, GridShapeError, GridShapes,
     GridVariant, WorkBudget,
 };
+use crate::{biometrics::Candidate, error::AlgorithmError};
+
+/// Own one subset's traversal without evaluating its Cartesian product size.
+pub(in super::super) struct CandidateVariants {
+    baseline: Vec<GridCell>,
+    phase: u8,
+    offsets: Vec<GridPoint>,
+    choices: Vec<usize>,
+    work: WorkBudget,
+    descriptor_bytes: usize,
+    max_descriptor_bytes: NonZeroUsize,
+    first: bool,
+    finished: bool,
+}
+
+impl CandidateVariants {
+    pub(super) fn new(
+        baseline: Vec<GridCell>,
+        phase: u8,
+        offsets: Vec<GridPoint>,
+        remaining_work: usize,
+        descriptor_bytes: usize,
+        max_descriptor_bytes: NonZeroUsize,
+    ) -> Result<Self, AlgorithmError> {
+        if baseline.is_empty() || offsets.is_empty() || phase > 1 {
+            return Err(Box::new(GridShapeError::InvalidInput(
+                "invalid positional traversal",
+            )));
+        }
+        let mut work = WorkBudget::new(remaining_work);
+        work.spend(baseline.len())?;
+        let mut choices = Vec::new();
+        choices
+            .try_reserve_exact(baseline.len())
+            .map_err(|_| GridShapeError::WorkLimit)?;
+        choices.resize(baseline.len(), 0);
+        Ok(Self {
+            baseline,
+            phase,
+            offsets,
+            choices,
+            work,
+            descriptor_bytes,
+            max_descriptor_bytes,
+            first: true,
+            finished: false,
+        })
+    }
+
+    pub(in super::super) fn remaining_work(&self) -> usize {
+        self.work.remaining
+    }
+
+    fn advance(&mut self) -> Result<Option<Candidate>, AlgorithmError> {
+        if !self.first && !advance_choices(&mut self.choices, self.offsets.len()) {
+            return Ok(None);
+        }
+        self.first = false;
+        let positions = place_positions(
+            &self.baseline,
+            self.phase,
+            &self.offsets,
+            &self.choices,
+            &mut self.work,
+        )?;
+        self.work.spend(self.descriptor_bytes)?;
+        super::grid_candidate(&positions, self.phase, self.max_descriptor_bytes)
+            .map(Some)
+            .map_err(Into::into)
+    }
+}
+
+impl Iterator for CandidateVariants {
+    type Item = Result<Candidate, AlgorithmError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        match self.advance() {
+            Ok(Some(candidate)) => Some(Ok(candidate)),
+            Ok(None) => {
+                self.finished = true;
+                None
+            }
+            Err(error) => {
+                self.finished = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+impl FusedIterator for CandidateVariants {}
 
 pub(super) fn neighborhood_count(level: u32) -> Result<u64, GridShapeError> {
     let radius = u64::from(level);
@@ -163,24 +256,29 @@ fn place_assignment(
     work: &mut WorkBudget,
 ) -> Result<GridVariant, GridShapeError> {
     // Each feature contributes one output position and one collision-index entry.
-    let entries = shape
-        .baseline
-        .len()
-        .checked_mul(2)
-        .ok_or(GridShapeError::WorkLimit)?;
-    work.spend(entries)?;
-    let positions = shape
-        .baseline
-        .iter()
-        .zip(choices)
-        .map(|(&cell, &choice)| shift_cell(cell, shape.phase, offsets[choice]))
-        .collect::<Result<Vec<_>, _>>()?;
+    work.spend(shape.baseline.len())?;
+    let positions = place_positions(&shape.baseline, shape.phase, offsets, choices, work)?;
     let collisions = collision_groups(&shape.feature_ids, &positions);
     Ok(GridVariant {
         shape_index,
         positions,
         collisions,
     })
+}
+
+fn place_positions(
+    baseline: &[GridCell],
+    phase: u8,
+    offsets: &[GridPoint],
+    choices: &[usize],
+    work: &mut WorkBudget,
+) -> Result<Vec<GridCell>, GridShapeError> {
+    work.spend(baseline.len())?;
+    baseline
+        .iter()
+        .zip(choices)
+        .map(|(&cell, &choice)| shift_cell(cell, phase, offsets[choice]))
+        .collect()
 }
 
 fn shift_cell(cell: GridCell, phase: u8, offset: GridPoint) -> Result<GridCell, GridShapeError> {

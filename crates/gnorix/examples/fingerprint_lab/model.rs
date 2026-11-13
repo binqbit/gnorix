@@ -154,9 +154,9 @@ pub struct PreparedView {
     pub points: Vec<PointView>,
     pub regions: Vec<RegionView>,
     pub combination_count: usize,
-    pub variant_count: Option<u64>,
+    pub candidate_count: Option<u64>,
     pub memory_budget_gib: Option<u8>,
-    pub variant_limit: Option<u64>,
+    pub candidate_limit: Option<u64>,
     pub estimated_peak_bytes: Option<u64>,
 }
 

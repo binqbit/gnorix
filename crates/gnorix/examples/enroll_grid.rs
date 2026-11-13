@@ -1,9 +1,7 @@
-//! Enroll every imported grid variant using an explicit example crypto suite.
+//! Enroll one baseline per imported feature combination with the example crypto suite.
 
 #[path = "support/enrollment_profile.rs"]
 mod enrollment_profile;
-#[path = "support/grid_config.rs"]
-mod grid_config;
 #[path = "feature_grid/input.rs"]
 mod input;
 #[path = "support/output.rs"]
@@ -23,7 +21,7 @@ use std::{
 };
 
 use gnorix::{
-    biometrics::fingerprint::{self, GridShapes},
+    biometrics::fingerprint::{self, GridBaselines},
     crypto::{CryptoProvider, SecretInput, SignatureVerifier},
     enrollment::{self, EnrollmentContext},
     merkle,
@@ -42,8 +40,8 @@ fn main() -> Result<()> {
     let package = enroll(&prepared)?;
     let (path, bytes) = publish(&package, &prepared, &output_directory)?;
     println!(
-        "{} assignments; {} distinct Merkle leaves; {} bytes; membership and signature readback verified\n{}",
-        prepared.grid.variant_count(),
+        "{} baseline candidates; {} distinct Merkle leaves; {} bytes; membership and signature readback verified\n{}",
+        prepared.grid.baseline_count(),
         package.commitment().leaf_count,
         bytes,
         path.display(),
@@ -52,7 +50,7 @@ fn main() -> Result<()> {
 }
 
 struct PreparedEnrollment {
-    grid: GridShapes,
+    grid: GridBaselines,
     context: EnrollmentContext,
     secret: Option<SecretInput>,
     limits: Limits,
@@ -60,7 +58,7 @@ struct PreparedEnrollment {
 }
 
 fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment> {
-    let config = grid_config::read()?;
+    let config = settings::baseline_config()?;
     let limits = settings::limits(&config)?;
     let package_limits = settings::package_limits(&config)?;
     let spec = settings::read_context(&mut File::open(context_path)?)?;
@@ -72,7 +70,7 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
         suite_id: ExampleCrypto.suite_id().to_owned(),
     };
     context.encode(&limits)?;
-    let grid = fingerprint::prepare_grid_shapes(
+    let grid = fingerprint::prepare_grid_baselines(
         &input.points,
         &input.combinations,
         input.unit_px,
@@ -142,7 +140,7 @@ fn arguments() -> Result<(PathBuf, PathBuf, PathBuf)> {
 }
 
 fn verify_member(
-    prepared: &GridShapes,
+    prepared: &GridBaselines,
     package: &EnrollmentPackage,
     secret: Option<&SecretInput>,
     limits: &Limits,

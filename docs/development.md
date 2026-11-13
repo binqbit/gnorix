@@ -39,8 +39,8 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Grid mathematics | `src/biometrics/geometry.rs` | Explicit triangular positions, Euclidean-nearest nodes and six-neighbor coordinates, with overflow/finite-value checks. |
 | Fingerprint extraction | `src/biometrics/fingerprint/` | Native per-capture image stages, topology-preserving skeleton tracing, curve geometry and diagnostic output. |
 | Regional subsets | `src/biometrics/fingerprint/combinations/` | Surviving feature projection, adaptive overlapping circles in measured ridge units and bounded weighted point combinations. |
-| Fresh-image search | `src/biometrics/fingerprint/combinations/search.rs` | Ranked n–2n subsets inside adaptive circles, overlap deduplication, lazy baseline candidates and bounded search work. |
-| Grid figures | `src/biometrics/fingerprint/shapes/` | Convex-hull frames, measured-width snapping, fixed uncertainty padding and complete positional traversal. |
+| Fresh-image search | `src/biometrics/fingerprint/combinations/search.rs` | Ranked n–2n subsets inside adaptive circles, overlap deduplication and lazy per-subset positional uncertainty search. |
+| Grid figures | `src/biometrics/fingerprint/shapes/` | Convex-hull frames, measured-width snapping, baseline enrollment and fixed-frame positional traversal. |
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
 | Enrollment | `src/enrollment.rs` | Bind profile and context, prepare a model, process the complete candidate set, retain its commitment/model/hash tree. |
@@ -75,9 +75,9 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/feature_grid.rs` orchestrates the [complete grid variants](grid-shapes.md) stage and its environment controls. Its `feature_grid/input.rs` module reads the bounded combination export; `feature_grid/output.rs` streams bounded JSON and removes partial outputs if traversal or writing fails. File I/O stays outside the library.
 
-`examples/enroll_grid.rs` consumes that same combination input, streams grid candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. Both grid examples use `examples/support/grid_config.rs` for their controls.
+`examples/enroll_grid.rs` consumes that same combination input, prepares one rounded baseline per subset with `prepare_grid_baselines`, streams those candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. The grid helpers keep baseline-enrollment limits separate from the full diagnostic variant limit.
 
-`examples/fingerprint_signing.rs` extracts a fresh image, searches ranked subsets within adaptive overlapping regions and signs with the first member of an existing package. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls, evidence and crop results. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
+`examples/fingerprint_signing.rs` extracts a fresh image and searches ranked subsets within adaptive overlapping regions. Each subset's baseline and neighbor assignments are generated and tested one at a time; the first member of the existing package signs the action. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls and evidence. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
 
 `examples/fingerprint_lab.rs` serves the [local test stand](fingerprint-lab.md). Its HTTP adapter, typed view/request models, synchronous biometric workflows and circular capture adapter live in `examples/fingerprint_lab/`. The server calls the library directly and shares the example crypto provider and enrollment profile. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
 
@@ -107,7 +107,7 @@ Use these public entry points in order:
 
 The [lifecycle integration tests](../crates/gnorix/tests/lifecycle/main.rs) demonstrate this wiring with deliberately nonproduction measurement and crypto doubles. The suite groups enrollment, verification and failure behavior into cohesive modules with shared fixtures. They are test fixtures, not algorithms to copy into an application.
 
-For an existing fingerprint `.grx` package, the alternative path is `fingerprint::extract` → `fingerprint::signing_candidates` → `authorization::sign_candidates`, followed by the same trusted verification. This path uses the enrolled profile and padding, stops at the first matching public key and leaves the accepted set unchanged.
+For an existing fingerprint `.grx` package, the alternative path is `fingerprint::extract` → `fingerprint::signing_candidates` → `authorization::sign_candidates`, followed by the same trusted verification. This path uses profile v3's baseline enrollment and shared padding, expands uncertainty lazily during signing, stops at the first matching public key and leaves the accepted set unchanged. Earlier fingerprint profiles require a new enrollment.
 
 ## Bounds and failure semantics
 

@@ -1,6 +1,6 @@
 # Grid figures and positional variants
 
-`fingerprint::prepare_grid_shapes(points, combinations, R, &config)` consumes the [selected point combinations](feature-combinations.md). R is the measured **mean dark-ridge width from the same capture**. It is the distance between neighboring triangular-grid nodes; there is no independent pixel-spacing setting.
+`fingerprint::prepare_grid_baselines(points, combinations, R, &config)` prepares one normalized, snapped baseline for each [selected point combination](feature-combinations.md). Enrollment hashes only these baselines. R is the measured **mean dark-ridge width from the same capture**. It is the distance between neighboring triangular-grid nodes; there is no independent pixel-spacing setting.
 
 ## One fixed frame per combination
 
@@ -21,13 +21,17 @@ Thus the two Cartesian boundaries can both be zero before padding even when the 
 
 Equal longest edges are compared by their normalized, sorted grid geometry, without using priority or capture-local IDs. Machine-rounding guards cover arithmetic collinearity and equal lengths; they are not extra biometric tolerances. A point or collinear subset remains a point/line rather than disappearing. Rounding can also turn a thin polygon into a line. Coincident features keep their separate IDs and appear in explicit collision groups.
 
+`GridBaselineConfig` supplies `padding_steps`, `max_baselines` and `max_work`. `GridBaselines::baseline_count()` counts the prepared subsets, and `GridBaselines::candidates(...)` hashes one baseline per subset. Baseline preparation does not enumerate or preflight a Cartesian uncertainty product. The same L-step frame is reused when [signing](fingerprint-signing.md) lazily searches nearby positions.
+
 ## Complete positional traversal
 
 Level L includes every node at most L steps away through the six nearest neighbors. Each point has `1 + 3L(L + 1)` choices: 1, 7, 19 and 37 at levels 0–3. These are hexagonal graph neighborhoods, not Euclidean circular cutoffs.
 
 For n points the complete Cartesian product contains `(1 + 3L(L + 1))^n` assignments. Every point moves independently, including points that established the frame. Neighborhood order is center first, then successive rings ordered by `(q, r)`; the last source-ID-ordered feature varies fastest. Collisions, common translations and repeated unlabeled geometries remain in the traversal. No extra subset omission or geometry deduplication occurs here.
 
-`GridShapes::variants()` is a fallible iterator; it does not hold the product in memory. A checked total count rejects a request exceeding `max_variants` before traversal. Preparation and iteration share a work allowance. Exhausting it yields an error and stops, rather than reporting an incomplete traversal as successful.
+The signing iterator expands this product only for its current ranked subset and tests each candidate immediately. It does not need the full product to fit a counter before beginning its bounded search.
+
+For an explicit diagnostic export, `fingerprint::prepare_grid_shapes(...)` and `GridShapes::variants()` retain complete-traversal behavior. The fallible iterator does not hold the product in memory, but a checked total rejects diagnostic requests exceeding `max_variants` before traversal. Preparation and iteration share a work allowance. Exhausting it yields an error rather than reporting a partial export as complete. These diagnostic limits do not multiply the keys registered by baseline enrollment.
 
 ## Run on the existing combinations
 
@@ -47,8 +51,8 @@ The output file must not already exist. The adapter reads the combination export
 
 The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
-For the checked-in image's 48 selected subsets at radius 30R (30 triples, 14 quadruples, four quintuples), level 1 traverses **111,132 assignments**. They are positional alternatives, not distinct keys.
+For the checked-in image's 48 selected subsets at radius 30R (30 triples, 14 quadruples, four quintuples), a level-1 diagnostic export traverses **111,132 assignments**. Enrollment uses only the **48 baselines**, before duplicate-key removal. The larger number describes positional alternatives searched later, not the number of registered keys.
 
 ## Interpretation
 
-This is per-subset geometric normalization, not registration of whole captures. The next [candidate and package stage](grx-packages.md) canonically hashes these integer positions and commits caller-selected public keys. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.
+This is per-subset geometric normalization, not registration of whole captures. The [candidate and package stage](grx-packages.md) canonically hashes the baseline integer positions and commits caller-selected public keys. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.

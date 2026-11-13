@@ -1,12 +1,14 @@
 //! Public enrollment input, resource bounds and the imported-grid profile.
 
 use std::{
+    env,
     io::Read,
     num::{NonZeroU64, NonZeroUsize},
+    str::FromStr,
 };
 
 use gnorix::{
-    biometrics::fingerprint::{CombinationConfig, GridShapeConfig},
+    biometrics::fingerprint::{CombinationConfig, GridBaselineConfig},
     enrollment::{Domain, EnrollmentSpec},
     merkle::Hash,
     package::PackageLimits,
@@ -19,9 +21,31 @@ use super::{Result, enrollment_profile};
 pub(super) const MAX_CONTEXT_JSON_BYTES: usize = 64 * 1024;
 pub(super) const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 
-pub(super) fn limits(grid: &GridShapeConfig) -> Result<Limits> {
+pub(super) fn baseline_config() -> Result<GridBaselineConfig> {
+    let config = GridBaselineConfig {
+        padding_steps: number("GNORIX_GRID_UNCERTAINTY_STEPS", 1)?,
+        max_baselines: number("GNORIX_ENROLLMENT_MAX_CANDIDATES", 1_000_000)?,
+        max_work: number("GNORIX_GRID_MAX_WORK", 10_000_000)?,
+    };
+    config.validate()?;
+    Ok(config)
+}
+
+fn number<T: FromStr>(name: &str, default: T) -> Result<T> {
+    match env::var(name) {
+        Ok(raw) => raw
+            .parse()
+            .map_err(|_| format!("invalid numeric value for {name}").into()),
+        Err(env::VarError::NotPresent) => Ok(default),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(format!("{name} must be UTF-8 numeric text").into())
+        }
+    }
+}
+
+pub(super) fn limits(grid: &GridBaselineConfig) -> Result<Limits> {
     Ok(Limits {
-        candidate_attempts: nonzero(usize::try_from(grid.max_variants)?)?,
+        candidate_attempts: nonzero(usize::try_from(grid.max_baselines)?)?,
         candidate_bytes: nonzero(32)?,
         public_key_bytes: nonzero(32)?,
         signature_bytes: nonzero(64)?,
@@ -30,10 +54,15 @@ pub(super) fn limits(grid: &GridShapeConfig) -> Result<Limits> {
     })
 }
 
-pub(super) fn package_limits(grid: &GridShapeConfig) -> Result<PackageLimits> {
+pub(super) fn package_limits(grid: &GridBaselineConfig) -> Result<PackageLimits> {
+    let maximum_bytes = grid
+        .max_baselines
+        .checked_mul(32)
+        .and_then(|bytes| bytes.checked_add(MAX_CONTEXT_JSON_BYTES as u64 + 128))
+        .ok_or("enrollment package byte limit overflow")?;
     Ok(PackageLimits {
-        max_bytes: nonzero(64 * 1024 * 1024)?,
-        max_leaves: nonzero(usize::try_from(grid.max_variants)?)?,
+        max_bytes: nonzero(usize::try_from(maximum_bytes)?)?,
+        max_leaves: nonzero(usize::try_from(grid.max_baselines)?)?,
     })
 }
 
@@ -127,7 +156,7 @@ fn hex(text: &str) -> Result<Vec<u8>> {
 
 /// Identify the imported-combination interpretation, not an entire capture engine.
 /// Sampling IDs, image scale and resource-only work limits do not enter this ID.
-pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) -> Result<Hash> {
+pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridBaselineConfig) -> Result<Hash> {
     let config = metadata
         .get("config")
         .and_then(Value::as_object)
@@ -154,7 +183,7 @@ pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) 
         combinations_per_region: integer(config, "combinations_per_region")?,
         max_work: integer(config, "max_work")?,
     };
-    enrollment_profile::profile_id(&controls, grid.uncertainty_steps)
+    enrollment_profile::profile_id(&controls, grid.padding_steps)
 }
 
 fn integer(fields: &Map<String, Value>, name: &str) -> Result<usize> {
@@ -199,6 +228,25 @@ mod tests {
     }
 
     #[test]
+    fn package_capacity_tracks_baselines_and_rejects_byte_overflow() {
+        let mut config = GridBaselineConfig {
+            padding_steps: 3,
+            max_baselines: 3_000_000,
+            max_work: 10_000_000,
+        };
+        let package = package_limits(&config).unwrap();
+        assert_eq!(package.max_leaves.get(), 3_000_000);
+        assert_eq!(
+            package.max_bytes.get(),
+            3_000_000 * 32 + MAX_CONTEXT_JSON_BYTES + 128
+        );
+        assert_eq!(limits(&config).unwrap().candidate_attempts.get(), 3_000_000);
+
+        config.max_baselines = u64::MAX;
+        assert!(package_limits(&config).is_err());
+    }
+
+    #[test]
     fn profile_tracks_selection_and_uncertainty_but_not_pixels_or_limits() {
         let mut metadata = json!({"config":{"min_points":3,"pool_multiplier":2,
             "radius_units":30.0,"combinations_per_region":12,"max_work":10000000},
@@ -206,24 +254,27 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let mut grid = GridShapeConfig {
-            uncertainty_steps: 1,
-            max_variants: 1000000,
+        let mut grid = GridBaselineConfig {
+            padding_steps: 1,
+            max_baselines: 1000000,
             max_work: 10000000,
         };
         let baseline = profile_id(&metadata, &grid).unwrap();
         let previous_profile =
             hex("8bd0d14924be772d55dc471ce7c448f72d8a926c29f70022e98b59627413494b").unwrap();
         assert_ne!(baseline.as_slice(), previous_profile);
+        let expanded_profile =
+            hex("9285906b7fb81701a2059b4e59dc5b7b27028b1299f1feac02e848cf63f141dc").unwrap();
+        assert_ne!(baseline.as_slice(), expanded_profile);
         metadata.insert("unit_px".into(), json!(33.6));
         metadata.insert("source".into(), json!({"image":"b.png"}));
         metadata.get_mut("config").unwrap()["max_work"] = json!(20000000);
         grid.max_work *= 2;
-        grid.max_variants *= 2;
+        grid.max_baselines *= 2;
         assert_eq!(baseline, profile_id(&metadata, &grid).unwrap());
-        grid.uncertainty_steps = 2;
+        grid.padding_steps = 2;
         assert_ne!(baseline, profile_id(&metadata, &grid).unwrap());
-        grid.uncertainty_steps = 1;
+        grid.padding_steps = 1;
         metadata.get_mut("config").unwrap()["radius_units"] = json!(31.0);
         assert_ne!(baseline, profile_id(&metadata, &grid).unwrap());
     }
@@ -235,9 +286,9 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let grid = GridShapeConfig {
-            uncertainty_steps: 1,
-            max_variants: 1000000,
+        let grid = GridBaselineConfig {
+            padding_steps: 1,
+            max_baselines: 1000000,
             max_work: 10000000,
         };
         for invalid in [json!(0), json!(-1), json!("30"), json!(null)] {

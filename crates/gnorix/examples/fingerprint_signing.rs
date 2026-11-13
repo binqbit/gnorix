@@ -6,8 +6,6 @@ mod authorization_json;
 mod combination_config;
 #[path = "support/enrollment_profile.rs"]
 mod enrollment_profile;
-#[path = "support/grid_config.rs"]
-mod grid_config;
 #[path = "support/image_input.rs"]
 mod image_input;
 #[path = "support/output.rs"]

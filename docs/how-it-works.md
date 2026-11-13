@@ -1,6 +1,6 @@
 # How it works
 
-Gnorix separates enrollment, later signing and application authorization. Enrollment defines an accepted measurement space. A later capture attempts to recover one key from that space. Verification checks both membership and the signature before the application decides whether the action is permitted.
+Gnorix separates enrollment, later signing and application authorization. Enrollment commits to baseline keys from selected feature combinations. A later capture searches for one of those keys within the configured measurement tolerance. Verification checks both membership and the signature before the application decides whether the action is permitted.
 
 ## 1. Capture enough usable biometric information
 
@@ -18,13 +18,13 @@ If alignment or coverage is inadequate, the process requests another capture or 
 
 ## 3. Define the accepted variation
 
-Enrollment specifies which variations can produce a valid candidate. This includes the policy for incomplete observations and tolerated measurement differences. The same interpretation must apply when the person signs later.
+Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. The same interpretation must apply when the person signs later.
 
 The goal is not to flatten all measurements into a trivial common value. It is to preserve useful distinctions while accounting for expected variability. Greater tolerance can improve acceptance of genuine recaptures but can also expand the space accepted by the enrollment. The policy must balance these effects.
 
 ## 4. Derive candidate signing keys
 
-The accepted variations are used to derive candidate private keys and their corresponding public keys. If a PIN or password is part of the enrollment, it contributes as a secret input during both enrollment and later reconstruction.
+Each selected feature combination is normalized and rounded to the grid. These baseline positions produce one candidate private key and its corresponding public key. Positional uncertainty is searched during later signing; it does not multiply the enrolled keys. If a PIN or password is part of the enrollment, it contributes as a secret input during both enrollment and later reconstruction.
 
 This additional secret can be simple or strong according to the chosen protection policy. A public salt is not a substitute for it. Neither a long output key nor a large number of candidate keys establishes how difficult the original inputs are to guess.
 
@@ -46,7 +46,7 @@ This material is not automatically harmless because it omits raw images or priva
 
 ## 7. Reconstruct one candidate from a fresh capture
 
-When signing, the person supplies another capture and any required additional secret. The library applies the enrollment's measurement interpretation and attempts to reconstruct a candidate key.
+When signing, the person supplies another capture and any required additional secret. The library applies the enrollment's measurement interpretation and visits feature combinations in deterministic priority order. It first tests a combination's rounded baseline, then lazily tries its neighboring-position combinations in the same fixed grid frame. Each derived key is checked against the enrolled set immediately. A match stops the search; only after exhausting that combination's positional variations does the search move to a lower-priority combination.
 
 The result need not equal the single reading used as an enrollment reference. It must belong to the set already committed by that enrollment. If no candidate is found, the system follows its retry or recovery policy; it does not silently enlarge the enrolled set to make the request pass.
 
@@ -81,10 +81,10 @@ The diagram separates enrollment from later signing and shows the two inputs nee
 ```mermaid
 flowchart TD
   A[Enrollment captures] --> B[Align and assess usable measurements]
-  B --> C[Define accepted variations]
-  C --> D[Derive candidate public keys]
+  B --> C[Select combinations and define tolerance]
+  C --> D[Derive baseline public keys]
   D --> E[Commitment and retained proof material]
-  F[Fresh capture and required secret] --> G[Reconstruct one candidate key]
+  F[Fresh capture and required secret] --> G[Search baseline and neighboring positions lazily]
   E --> H[Find its membership path]
   G --> H
   G --> I[Sign the approved action]

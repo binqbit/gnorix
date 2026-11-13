@@ -6,8 +6,8 @@ use gnorix::{biometrics::fingerprint::CombinationConfig, merkle::Hash};
 use sha2::{Digest, Sha256};
 
 /// Identify candidate interpretation, excluding source pixels and search budgets.
-/// Adaptive regions deliberately use a new profile rather than accepting the
-/// region interpretation from earlier packages.
+/// Baseline-only enrollment and lazy signing uncertainty deliberately use a
+/// new profile rather than accepting earlier expanded enrollment packages.
 pub(super) fn profile_id(
     controls: &CombinationConfig,
     uncertainty_steps: u32,
@@ -15,9 +15,10 @@ pub(super) fn profile_id(
     controls.validate()?;
     let mut hasher = Sha256::new();
     for field in [
-        b"gnorix.example.imported-grid-profile.v2".as_slice(),
+        b"gnorix.example.imported-grid-profile.v3".as_slice(),
         b"gnorix.feature-combinations.v2",
         b"gnorix.grid-candidate.v1",
+        b"baseline-only-enrollment;lazy-per-subset-uncertainty-signing.v1",
         b"gnorix.adaptive-regions.v1;radius-in-ridge-units;pattern-and-eligible-point-bounds;row-major-cell-centers",
         b"longest-hull-edge;top-right-origin;mean-ridge-spacing;fixed-padding;retained-collisions",
         &(controls.min_points as u64).to_be_bytes(),

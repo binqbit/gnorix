@@ -2,7 +2,7 @@
 
 Gnorix is an independent biometric-cryptographic library for signing data and digital actions with keys reconstructed from biometric measurements. It separates the signing mechanism from the application that verifies a signature and decides what it authorizes.
 
-Repeated biometric captures are not identical. Gnorix accounts for an accepted range of measurement variation during enrollment and derives a set of candidate signing keys. A Merkle root, a compact commitment to their public keys, represents the enrollment without requiring the verifier to hold the entire set.
+Repeated biometric captures are not identical. The native fingerprint path enrolls one canonical grid position set per selected feature combination. Reconstruction searches bounded positional variations lazily, checking each candidate immediately. A Merkle root, a compact commitment to the enrolled public keys, represents the enrollment without requiring the verifier to hold the entire set.
 
 For a later signature, the library reconstructs one candidate key from a fresh capture and any required PIN or password. The authorization combines that key's public counterpart, evidence that it belongs to the enrolled set, and a signature over the approved action. Verification does not require the raw biometric sample or every other candidate key.
 

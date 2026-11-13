@@ -19,14 +19,14 @@ use crate::{
 };
 
 /// Signing searches every retained, scored point inside each adaptive circle.
-/// Applications supply the enrolled minimum, circle radius and frame padding.
+/// Applications supply the enrolled minimum, circle radius and uncertainty.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningSearchConfig {
     pub min_points: usize,
     /// Initial circle radius measured in the fresh capture's mean ridge width R.
     pub radius_units: f64,
-    /// Fixed frame padding used during enrollment, not a new neighbor search.
-    pub enrollment_padding: u32,
+    /// Hex-neighbor steps per point; also the fixed padding used at enrollment.
+    pub uncertainty_steps: u32,
     /// Cumulative projection, regions, frontier, deduplication and geometry work.
     /// The caller's authorization limits separately bound candidate attempts.
     pub max_work: usize,
@@ -45,9 +45,9 @@ impl SigningSearchConfig {
                 "circle radius must be finite and positive in ridge units",
             ));
         }
-        if self.enrollment_padding > i32::MAX as u32 {
+        if self.uncertainty_steps > i32::MAX as u32 {
             return Err(CombinationError::InvalidConfig(
-                "enrollment padding must fit the signed grid neighborhood",
+                "uncertainty steps must fit the signed grid neighborhood",
             ));
         }
         if self.max_work == 0 {
@@ -59,8 +59,8 @@ impl SigningSearchConfig {
     }
 }
 
-/// Produces one canonical baseline for each distinct regional point subset of
-/// size `min_points..=min(2 * min_points, points_in_region)`.
+/// Searches positional uncertainty for distinct regional point subsets of size
+/// `min_points..=min(2 * min_points, points_in_region)`.
 ///
 /// Adaptive circles cover the confirmed pattern and grow to include twice the
 /// minimum, or all available points when fewer exist. Every scored point inside
@@ -68,11 +68,14 @@ impl SigningSearchConfig {
 /// Subsets are merged by mean `0.1 + 0.9 * priority²`, then global point rank;
 /// equal point priorities use ascending source IDs. Known zero scores remain
 /// eligible, while unknown scores do not. There is no global-search fallback.
-/// No coverage seeds, regional pool cap or positional perturbations are added.
-/// The same observed subset retains enrollment's frame, phase and fixed padding.
+/// Every ranked subset yields its rounded baseline first, then its complete
+/// Cartesian neighborhood before the next lower-ranked subset is requested.
+/// There is no upfront Cartesian count. The observed
+/// subset retains enrollment's frame, phase and fixed padding for all variants.
 ///
 /// Preparation owns the projected points. Each request generates only the next
-/// candidate, so the caller can stop immediately at a Merkle membership match.
+/// candidate, so the caller can stop immediately at a Merkle membership match
+/// without expanding further variants or requesting another subset.
 /// Natural exhaustion covers only the configured regional space. Work or
 /// geometry errors are yielded once, then the stream is exhausted.
 pub fn signing_candidates(
@@ -121,6 +124,7 @@ pub struct SigningSearch {
     regions: Vec<SigningRegion>,
     last_feature_ids: Vec<usize>,
     subsets: RegionalSubsets,
+    active: Option<ActiveSubset>,
     spacing: f64,
     config: SigningSearchConfig,
     work: WorkBudget,
@@ -175,6 +179,7 @@ impl SigningSearch {
             regions,
             last_feature_ids: Vec::new(),
             subsets,
+            active: None,
             spacing,
             config,
             work,
@@ -183,34 +188,53 @@ impl SigningSearch {
     }
 
     fn advance(&mut self) -> Result<Option<Candidate>, AlgorithmError> {
-        let Some(ranks) = self.subsets.next(&mut self.work)? else {
-            return Ok(None);
-        };
-        self.work.spend(ranks.len())?;
-        let mut selected = ranks
-            .iter()
-            .map(|&rank| &self.points[rank])
-            .collect::<Vec<_>>();
-        selected.sort_unstable_by_key(|point| point.id);
-        self.work.spend(selected.len())?;
-        let positions = selected
-            .iter()
-            .map(|point| point.position)
-            .collect::<Vec<_>>();
-        self.work.spend(selected.len())?;
-        let (candidate, used) = shapes::baseline_candidate(
-            &positions,
-            self.spacing,
-            self.config.enrollment_padding,
-            self.work.remaining,
-            self.config.max_descriptor_bytes,
-        )?;
-        self.work.spend(used)?;
-        self.last_feature_ids.clear();
-        self.last_feature_ids
-            .extend(selected.iter().map(|point| point.id));
-        Ok(Some(candidate))
+        loop {
+            if let Some(active) = self.active.as_mut() {
+                let next = active.variants.next();
+                // Only the active traversal spends work until it is exhausted.
+                self.work.remaining = active.variants.remaining_work();
+                if let Some(candidate) = next {
+                    let candidate = candidate?;
+                    self.last_feature_ids.clone_from(&active.feature_ids);
+                    return Ok(Some(candidate));
+                }
+                self.active = None;
+            }
+            let Some(ranks) = self.subsets.next(&mut self.work)? else {
+                return Ok(None);
+            };
+            self.work.spend(ranks.len())?;
+            let mut selected = ranks
+                .iter()
+                .map(|&rank| &self.points[rank])
+                .collect::<Vec<_>>();
+            selected.sort_unstable_by_key(|point| point.id);
+            self.work.spend(selected.len())?;
+            let positions = selected
+                .iter()
+                .map(|point| point.position)
+                .collect::<Vec<_>>();
+            self.work.spend(selected.len())?;
+            let feature_ids = selected.iter().map(|point| point.id).collect();
+            let variants = shapes::candidate_variants(
+                &positions,
+                self.spacing,
+                self.config.uncertainty_steps,
+                self.work.remaining,
+                self.config.max_descriptor_bytes,
+            )?;
+            self.work.remaining = variants.remaining_work();
+            self.active = Some(ActiveSubset {
+                feature_ids,
+                variants,
+            });
+        }
     }
+}
+
+struct ActiveSubset {
+    feature_ids: Vec<usize>,
+    variants: shapes::CandidateVariants,
 }
 
 impl Iterator for SigningSearch {
@@ -387,11 +411,11 @@ mod tests {
         error::Resource,
     };
 
-    fn config(min_points: usize, enrollment_padding: u32) -> SigningSearchConfig {
+    fn config(min_points: usize, uncertainty_steps: u32) -> SigningSearchConfig {
         SigningSearchConfig {
             min_points,
             radius_units: 100_000.0,
-            enrollment_padding,
+            uncertainty_steps,
             max_work: 1_000_000,
             max_descriptor_bytes: NonZeroUsize::new(4096).unwrap(),
         }
@@ -493,26 +517,21 @@ mod tests {
         assert_eq!(expected.len(), 50);
         assert!(expected.iter().any(|(ranks, _)| ranks == &[4, 5]));
 
-        for padding in 0..=3 {
-            source.reverse();
-            let mut actual = search(source.clone(), config(2, padding));
-            assert_eq!(actual.subsets.regions.len(), 1);
-            assert!(actual.last_feature_ids().is_empty());
-            for (ranks, _) in &expected {
-                let mut ids: Vec<_> = ranks.iter().map(|&rank| ranked[rank].id).collect();
-                ids.sort_unstable();
-                let candidate = actual.next().unwrap().unwrap();
-                assert_eq!(actual.last_feature_ids(), ids);
-                assert_eq!(
-                    candidate.as_bytes(),
-                    baseline(&source, ids, padding).as_bytes()
-                );
-            }
-            let last = actual.last_feature_ids().to_vec();
-            assert!(actual.next().is_none());
-            assert!(actual.next().is_none());
-            assert_eq!(actual.last_feature_ids(), last);
+        source.reverse();
+        let mut actual = search(source.clone(), config(2, 0));
+        assert_eq!(actual.subsets.regions.len(), 1);
+        assert!(actual.last_feature_ids().is_empty());
+        for (ranks, _) in &expected {
+            let mut ids: Vec<_> = ranks.iter().map(|&rank| ranked[rank].id).collect();
+            ids.sort_unstable();
+            let candidate = actual.next().unwrap().unwrap();
+            assert_eq!(actual.last_feature_ids(), ids);
+            assert_eq!(candidate.as_bytes(), baseline(&source, ids, 0).as_bytes());
         }
+        let last = actual.last_feature_ids().to_vec();
+        assert!(actual.next().is_none());
+        assert!(actual.next().is_none());
+        assert_eq!(actual.last_feature_ids(), last);
     }
 
     #[test]
@@ -529,7 +548,7 @@ mod tests {
             source.sort_unstable_by(|a, b| b.priority.total_cmp(&a.priority).then(a.id.cmp(&b.id)));
             let controls = SigningSearchConfig {
                 radius_units: 10.0,
-                ..config(2, 1)
+                ..config(2, 0)
             };
             let circles = regions::circular_regions(
                 &source,
@@ -601,7 +620,7 @@ mod tests {
                 ids.sort_unstable();
                 let candidate = actual.next().unwrap().unwrap();
                 assert_eq!(actual.last_feature_ids(), ids);
-                assert_eq!(candidate.as_bytes(), baseline(&source, ids, 1).as_bytes());
+                assert_eq!(candidate.as_bytes(), baseline(&source, ids, 0).as_bytes());
             }
             assert!(actual.next().is_none());
             assert_eq!(actual.subsets.seen.len(), expected.len());
@@ -614,22 +633,22 @@ mod tests {
         let mut source = points(3);
         source[1].position = source[0].position;
         source[2].position = source[0].position;
-        let mut actual = search(source.clone(), config(2, 1));
+        let mut actual = search(source.clone(), config(2, 0));
         let candidates = std::iter::from_fn(|| actual.next())
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(candidates.len(), 4); // C(3,2) + C(3,3), not positional variants.
         assert_eq!(
             candidates[0].as_bytes(),
-            baseline(&source, vec![3, 2], 1).as_bytes()
+            baseline(&source, vec![3, 2], 0).as_bytes()
         );
         assert!(candidates.iter().any(
-            |candidate| candidate.as_bytes() == baseline(&source, vec![1, 2, 3], 1).as_bytes()
+            |candidate| candidate.as_bytes() == baseline(&source, vec![1, 2, 3], 0).as_bytes()
         ));
     }
 
     #[test]
-    fn first_result_does_not_enumerate_the_regional_space_or_enrollment_neighbors() {
+    fn first_result_does_not_enumerate_the_regional_or_uncertainty_space() {
         let mut large = search(
             points(299),
             SigningSearchConfig {
@@ -638,9 +657,9 @@ mod tests {
             },
         );
         assert!(large.next().unwrap().is_ok());
+        assert_eq!(large.subsets.seen.len(), 1);
 
-        // Enrollment's 7^24 neighbor assignments exceed u64. Signing only
-        // prepares the one baseline, retaining the same one-row/column padding.
+        // The Cartesian size exceeds u64, but lazy signing needs no total count.
         let source = points(24);
         assert!(matches!(
             prepare_grid_shapes(
@@ -661,7 +680,8 @@ mod tests {
         ));
         let mut actual = search(source, config(24, 1));
         assert!(actual.next().unwrap().is_ok());
-        assert!(actual.next().is_none());
+        assert!(actual.next().unwrap().is_ok());
+        assert_eq!(actual.subsets.seen.len(), 1);
     }
 
     #[test]
@@ -689,6 +709,37 @@ mod tests {
                 .next()
                 .unwrap()
                 .unwrap_err()
+                .downcast_ref::<GridShapeError>(),
+            Some(GridShapeError::WorkLimit)
+        ));
+        assert!(bounded.next().is_none());
+        assert_eq!(bounded.last_feature_ids(), last);
+
+        // The same budget must survive crossing from a completed uncertainty
+        // neighborhood into the next subset's preparation.
+        let source = points(3);
+        let controls = config(2, 1);
+        let mut measured = search(source.clone(), controls);
+        for _ in 0..49 {
+            measured.next().unwrap().unwrap();
+        }
+        let first_subset_work = controls.max_work - measured.work.remaining;
+        let mut bounded = search(
+            source,
+            SigningSearchConfig {
+                max_work: first_subset_work,
+                ..controls
+            },
+        );
+        for _ in 0..49 {
+            bounded.next().unwrap().unwrap();
+        }
+        let last = bounded.last_feature_ids().to_vec();
+        assert!(matches!(
+            bounded
+                .next()
+                .unwrap()
+                .unwrap_err()
                 .downcast_ref::<CombinationError>(),
             Some(CombinationError::WorkLimit)
         ));
@@ -703,7 +754,7 @@ mod tests {
             source,
             SigningSearchConfig {
                 max_descriptor_bytes: NonZeroUsize::new(97).unwrap(),
-                ..config(2, 1)
+                ..config(2, 0)
             },
         );
         assert!(limited.next().unwrap().is_ok()); // Two records fit exactly.
@@ -714,6 +765,108 @@ mod tests {
         ));
         assert!(limited.next().is_none());
         assert_eq!(limited.last_feature_ids(), last);
+    }
+
+    #[test]
+    fn ranked_subsets_are_exhausted_one_at_a_time_with_center_first() {
+        let source = points(3);
+        let mut actual = search(source.clone(), config(2, 1));
+        // Subset ranking is unchanged; only its positional variants are nested.
+        for ids in [vec![2, 3], vec![1, 3], vec![1, 2, 3], vec![1, 2]] {
+            let diagnostic = prepare_grid_shapes(
+                &source,
+                &[FeatureCombination {
+                    feature_ids: ids.clone(),
+                    score: 1.0,
+                    regions: vec![0],
+                }],
+                2.3,
+                &GridShapeConfig {
+                    uncertainty_steps: 1,
+                    max_variants: 1000,
+                    max_work: 100_000,
+                },
+            )
+            .unwrap();
+            for expected in diagnostic.candidates(NonZeroUsize::new(4096).unwrap()) {
+                let observed = actual.next().unwrap().unwrap();
+                assert_eq!(actual.last_feature_ids(), ids);
+                assert_eq!(observed.as_bytes(), expected.unwrap().as_bytes());
+            }
+        }
+        assert!(actual.next().is_none());
+        assert!(actual.next().is_none());
+    }
+
+    #[test]
+    fn a_neighbor_matches_an_enrolled_baseline_before_any_weaker_subset_is_prepared() {
+        use crate::{
+            biometrics::fingerprint::{GridBaselineConfig, prepare_grid_baselines},
+            merkle::{MerkleTree, leaf_hash},
+        };
+        let original: Vec<_> = [(0.0, 0.0), (20.0, 0.0), (10.0, 15.0), (8.0, 4.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (x, y))| CombinationPoint {
+                id,
+                kind: FeatureKind::Ending,
+                position: Point::new(x, y).unwrap(),
+                priority: 1.0 - id as f64 * 0.1,
+            })
+            .collect();
+        let baselines = prepare_grid_baselines(
+            &original,
+            &[FeatureCombination {
+                feature_ids: vec![0, 1, 2, 3],
+                score: 1.0,
+                regions: vec![0],
+            }],
+            2.3,
+            &GridBaselineConfig {
+                padding_steps: 1,
+                max_baselines: 1,
+                max_work: 100_000,
+            },
+        )
+        .unwrap();
+        let enrolled = baselines
+            .candidates(NonZeroUsize::new(4096).unwrap())
+            .next()
+            .unwrap()
+            .unwrap();
+        let tree =
+            MerkleTree::from_leaves(vec![leaf_hash(b"test-context", enrolled.as_bytes())]).unwrap();
+        let mut observed = original;
+        observed[3].position = Point::new(10.3, 4.0).unwrap();
+        observed.push(CombinationPoint {
+            id: 4,
+            kind: FeatureKind::Ending,
+            position: Point::new(7.0, 7.0).unwrap(),
+            priority: 0.0,
+        });
+        let mut candidates = search(observed, config(4, 1));
+        let first = candidates.next().unwrap().unwrap();
+        assert!(
+            tree.proof_for(&leaf_hash(b"test-context", first.as_bytes()))
+                .is_err()
+        );
+        let mut attempts = 1;
+        let matched = candidates.by_ref().find(|candidate| {
+            attempts += 1;
+            tree.proof_for(&leaf_hash(
+                b"test-context",
+                candidate.as_ref().unwrap().as_bytes(),
+            ))
+            .is_ok()
+        });
+        assert!(matched.is_some());
+        assert!(
+            attempts <= 7,
+            "one moved final point should match within its first ring"
+        );
+        assert_eq!(candidates.last_feature_ids(), [0, 1, 2, 3]);
+        assert_eq!(candidates.subsets.seen.len(), 1);
+        assert_eq!(tree.leaf_count(), 1);
     }
 
     #[test]
@@ -732,7 +885,7 @@ mod tests {
                 ..config(2, 1)
             },
             SigningSearchConfig {
-                enrollment_padding: u32::MAX,
+                uncertainty_steps: u32::MAX,
                 ..config(2, 1)
             },
             SigningSearchConfig {
