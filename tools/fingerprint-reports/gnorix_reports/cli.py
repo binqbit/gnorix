@@ -16,9 +16,13 @@ from .snapshot import MAX_SNAPSHOT_BYTES, SCHEMA, SOURCE_IMAGE_FILES
 from .structure import REPORT_FILES, render_structure
 
 _DATA_FILES = {"features.json", *SOURCE_IMAGE_FILES}
+# Previous owned outputs may be removed during refresh; importers remain strict.
 _STAGE_SCHEMAS = {
-    "feature-combinations.json": "gnorix.feature-combinations.v2",
-    "feature-grid.json": "gnorix.feature-grid.v1",
+    "feature-combinations.json": (
+        "gnorix.feature-combinations.v2",
+        "gnorix.feature-combinations.v3",
+    ),
+    "feature-grid.json": ("gnorix.feature-grid.v1",),
 }
 _STAGE_FILES = {*_STAGE_SCHEMAS, "feature-combinations.png", "feature-grid.png"}
 
@@ -81,9 +85,9 @@ def _validate_existing(output: Path) -> None:
         not path.is_file() for name, path in children.items() if name != "data"
     ):
         raise ValueError("reports/fingerprint contains unexpected file types")
-    for name, schema in _STAGE_SCHEMAS.items():
+    for name, schemas in _STAGE_SCHEMAS.items():
         if name in children:
-            _validate_existing_json(children[name], schema)
+            _validate_existing_json(children[name], schemas)
     if stages_only:
         return
 
@@ -92,10 +96,10 @@ def _validate_existing(output: Path) -> None:
         path.is_symlink() or not path.is_file() for path in data.values()
     ):
         raise ValueError("reports/fingerprint/data contains unrelated or incomplete files")
-    _validate_existing_json(data["features.json"], SCHEMA)
+    _validate_existing_json(data["features.json"], (SCHEMA,))
 
 
-def _validate_existing_json(path: Path, schema: str) -> None:
+def _validate_existing_json(path: Path, schemas: tuple[str, ...]) -> None:
     with path.open("rb") as stream:
         # Identification only: the full new bundle is validated by the renderer.
         # An existing broken report is still replaceable if its schema is intact.
@@ -106,7 +110,7 @@ def _validate_existing_json(path: Path, schema: str) -> None:
         snapshot = json.loads(encoded)
     except (ValueError, UnicodeError, RecursionError) as error:
         raise ValueError(f"existing {path.name} does not contain identifiable output") from error
-    if not isinstance(snapshot, dict) or snapshot.get("schema") != schema:
+    if not isinstance(snapshot, dict) or snapshot.get("schema") not in schemas:
         raise ValueError(f"existing {path.name} is not recognized Gnorix output")
 
 

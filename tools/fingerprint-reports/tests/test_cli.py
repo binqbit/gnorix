@@ -96,11 +96,13 @@ class CommandTests(unittest.TestCase):
             if path.is_file()
         }
 
-    def write_combinations(self, *, include_json=True, include_png=True):
+    def write_combinations(
+        self, *, include_json=True, include_png=True, schema="gnorix.feature-combinations.v3"
+    ):
         self.output.mkdir(parents=True, exist_ok=True)
         if include_json:
             (self.output / "feature-combinations.json").write_text(
-                json.dumps({"schema": "gnorix.feature-combinations.v2"}), encoding="utf-8"
+                json.dumps({"schema": schema}), encoding="utf-8"
             )
         if include_png:
             shutil.copyfile(self.image, self.output / "feature-combinations.png")
@@ -189,16 +191,20 @@ class CommandTests(unittest.TestCase):
         self.assert_only_canonical_folder()
 
     def test_optional_combinations_survive_failures_and_expire_on_successful_refresh(self):
-        for native, include_json, include_png in (
-            (False, True, False),
-            (False, True, True),
-            (True, True, True),
-            (True, False, True),
+        for native, include_json, include_png, schema in (
+            (False, True, False, "gnorix.feature-combinations.v3"),
+            (False, True, True, "gnorix.feature-combinations.v3"),
+            (True, True, True, "gnorix.feature-combinations.v3"),
+            (True, False, True, "gnorix.feature-combinations.v3"),
+            (False, True, True, "gnorix.feature-combinations.v2"),
+            (True, True, True, "gnorix.feature-combinations.v2"),
         ):
-            with self.subTest(native=native, json=include_json, png=include_png):
+            with self.subTest(native=native, json=include_json, png=include_png, schema=schema):
                 if native:
                     self.complete_previous()
-                self.write_combinations(include_json=include_json, include_png=include_png)
+                self.write_combinations(
+                    include_json=include_json, include_png=include_png, schema=schema
+                )
                 previous = self.contents()
 
                 with patch("gnorix_reports.cli.subprocess.run", side_effect=OSError("extraction")):
@@ -232,11 +238,11 @@ class CommandTests(unittest.TestCase):
 
     def test_unidentified_combination_files_and_symlinks_remain_protected(self):
         outside = self.root / "outside.json"
-        outside.write_text('{"schema":"gnorix.feature-combinations.v2"}')
+        outside.write_text('{"schema":"gnorix.feature-combinations.v3"}')
         for native in (False, True):
             for case in (
                 "wrong-schema",
-                "obsolete-schema",
+                "obsolete-v1-schema",
                 "malformed-json",
                 "non-object",
                 "extra",
@@ -252,7 +258,7 @@ class CommandTests(unittest.TestCase):
                     data = self.output / "feature-combinations.json"
                     if case == "wrong-schema":
                         data.write_text('{"schema":"other"}')
-                    elif case == "obsolete-schema":
+                    elif case == "obsolete-v1-schema":
                         data.write_text('{"schema":"gnorix.feature-combinations.v1"}')
                     elif case == "malformed-json":
                         data.write_text("{")
@@ -278,7 +284,7 @@ class CommandTests(unittest.TestCase):
                     run.assert_not_called()
                     self.assertEqual(self.contents(), before)
                     self.assertEqual(
-                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v2"}'
+                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v3"}'
                     )
                     shutil.rmtree(self.output.parent)
 
