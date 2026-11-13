@@ -47,6 +47,7 @@ fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
     let config = CombinationConfig {
         min_points: 1,
         min_priority: 0.0,
+        min_span_fraction: 0.0,
         pool_multiplier: 2,
         radius_units: 5.0,
         combinations_per_region: 2,
@@ -57,6 +58,7 @@ fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
         bounds(6.0, 2.0),
         1.0,
         &config,
+        0.0,
         &mut WorkBudget::new(1000),
     )
     .unwrap();

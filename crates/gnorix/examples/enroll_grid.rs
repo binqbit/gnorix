@@ -29,6 +29,7 @@ use gnorix::{
     policy::Limits,
 };
 
+use enrollment_profile::ProfileParameters;
 use provider::ExampleCrypto;
 
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
@@ -50,6 +51,7 @@ fn main() -> Result<()> {
 }
 
 struct PreparedEnrollment {
+    parameters: ProfileParameters,
     grid: GridBaselines,
     context: EnrollmentContext,
     secret: Option<SecretInput>,
@@ -64,9 +66,10 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
     let spec = settings::read_context(&mut File::open(context_path)?)?;
     let secret = secret_input::read_secret(spec.secret_policy)?;
     let input = input::read(&mut File::open(input_path)?, MAX_JSON_BYTES)?;
+    let parameters = settings::parameters(&input, &config)?;
     let context = EnrollmentContext {
         spec,
-        profile_id: settings::profile_id(&input, &config)?,
+        profile_id: parameters.profile_id(),
         suite_id: ExampleCrypto.suite_id().to_owned(),
     };
     context.encode(&limits)?;
@@ -77,6 +80,7 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
         &config,
     )?;
     Ok(PreparedEnrollment {
+        parameters,
         grid,
         context,
         secret,
@@ -96,10 +100,10 @@ fn enroll(prepared: &PreparedEnrollment) -> Result<EnrollmentPackage> {
         prepared.secret.as_ref(),
         &prepared.limits,
     )?;
-    Ok(EnrollmentPackage::from_enrollment(
-        &enrollment,
-        &prepared.limits,
-    )?)
+    Ok(
+        EnrollmentPackage::from_enrollment(&enrollment, &prepared.limits)?
+            .with_profile_parameters(prepared.parameters.encoded().to_vec(), &prepared.limits)?,
+    )
 }
 
 fn publish(

@@ -35,6 +35,7 @@ pub(super) fn parse_configuration<'a>(
     let config = CombinationConfig {
         min_points: number(ENVIRONMENT[0], value(ENVIRONMENT[0]), 3)?,
         min_priority: number(ENVIRONMENT[5], value(ENVIRONMENT[5]), 0.5)?,
+        min_span_fraction: 1.0 / 3.0,
         pool_multiplier: number(ENVIRONMENT[1], value(ENVIRONMENT[1]), 2)?,
         radius_units: number(ENVIRONMENT[2], value(ENVIRONMENT[2]), 30.0)?,
         combinations_per_region: number(ENVIRONMENT[3], value(ENVIRONMENT[3]), 12)?,

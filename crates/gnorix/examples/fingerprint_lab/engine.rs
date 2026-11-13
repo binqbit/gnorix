@@ -26,7 +26,10 @@ use super::{
     model::*,
     resources::{DEFAULT_MEMORY_GIB, EnrollmentBudget},
 };
-use crate::{Result, authorization_json, enrollment_profile, output, provider::ExampleCrypto};
+use crate::{
+    Result, authorization_json, enrollment_profile::ProfileParameters, output,
+    provider::ExampleCrypto,
+};
 
 pub struct Engine {
     source: GrayImage,
@@ -48,6 +51,7 @@ enum PreparedWork {
     Enrollment {
         grid: GridBaselines,
         budget: EnrollmentBudget,
+        parameters: Box<ProfileParameters>,
     },
     Signing(Box<SigningSearch>),
 }
@@ -57,6 +61,7 @@ struct Enrolled {
     config: LabConfig,
     authorization: Option<Authorization>,
     unit_px: f64,
+    min_pair_span_units: f64,
 }
 
 struct ArtifactFrame {
@@ -235,6 +240,10 @@ impl Engine {
             work_limit: request.work_limit,
             artifact_revision: request.artifact_revision,
             unit_px: extracted.scale.unit_px,
+            min_pair_span_units: self
+                .enrolled
+                .as_ref()
+                .map_or(0.0, |enrolled| enrolled.min_pair_span_units),
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 0,
@@ -262,6 +271,12 @@ impl Engine {
                 })
                 .collect();
             view.combination_count = combinations.combinations.len();
+            view.min_pair_span_units = combinations.min_pair_span_units;
+            let parameters = ProfileParameters::new(
+                &combination_config,
+                request.config.uncertainty_steps,
+                combinations.min_pair_span_units,
+            )?;
             let budget = enrollment_budget.ok_or("enrollment memory budget missing")?;
             let grid = prepare_enrollment_grid(
                 &combinations.points,
@@ -275,13 +290,18 @@ impl Engine {
             view.memory_budget_gib = Some(budget.memory_budget_gib());
             view.candidate_limit = Some(budget.candidate_limit());
             view.estimated_peak_bytes = Some(budget.estimated_peak_bytes(grid.baseline_count())?);
-            PreparedWork::Enrollment { grid, budget }
+            PreparedWork::Enrollment {
+                grid,
+                budget,
+                parameters: Box::new(parameters),
+            }
         } else {
             let search = fingerprint::prepare_signing_search(
                 &extracted,
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
                     min_priority: request.config.min_priority,
+                    min_pair_span_units: view.min_pair_span_units,
                     radius_units: request.config.radius_units,
                     uncertainty_steps: request.config.uncertainty_steps,
                     max_work: request.work_limit,
@@ -320,7 +340,12 @@ impl Engine {
             .as_mut()
             .ok_or("prepare the full fingerprint first")?;
         require_prepared(prepared.view.id, request.prepared_id)?;
-        let PreparedWork::Enrollment { grid, budget } = &mut prepared.work else {
+        let PreparedWork::Enrollment {
+            grid,
+            budget,
+            parameters,
+        } = &mut prepared.work
+        else {
             return Err("this preparation is a signing fragment".into());
         };
         let effective_budget = EnrollmentBudget::new(budget.memory_budget_gib(), retained_leaves)?;
@@ -332,7 +357,7 @@ impl Engine {
         phase("Deriving keys and building the Merkle tree");
         let limits = limits(usize::try_from(budget.candidate_limit())?)?;
         let package_limits = budget.package_limits()?;
-        let context = enrollment_context(prepared.view.config)?;
+        let context = enrollment_context(parameters)?;
         let enrolled = enrollment::enroll_candidates(
             &ExampleCrypto,
             grid.candidates(nonzero(1024 * 1024)?),
@@ -340,7 +365,8 @@ impl Engine {
             None,
             &limits,
         )?;
-        let package = EnrollmentPackage::from_enrollment(&enrolled, &limits)?;
+        let package = EnrollmentPackage::from_enrollment(&enrolled, &limits)?
+            .with_profile_parameters(parameters.encoded().to_vec(), &limits)?;
         drop(enrolled);
         phase("Verifying and saving enrollment");
         let expected = package.commitment().clone();
@@ -355,7 +381,14 @@ impl Engine {
         if restored.commitment() != &expected {
             return Err("retained package differs after readback".into());
         }
+        let retained = ProfileParameters::decode(
+            restored
+                .profile_parameters()
+                .ok_or("fingerprint package lacks reconstruction parameters")?,
+            restored.commitment().context.profile_id,
+        )?;
         let view = EnrollmentView {
+            min_pair_span_units: retained.min_pair_span_units(),
             root: hex(&restored.commitment().root.0),
             leaf_count: restored.commitment().leaf_count,
             config: prepared.view.config,
@@ -372,6 +405,7 @@ impl Engine {
             config: prepared.view.config,
             authorization: None,
             unit_px: prepared.view.unit_px,
+            min_pair_span_units: retained.min_pair_span_units(),
         });
         Ok(())
     }
@@ -683,7 +717,7 @@ fn random_bytes<const N: usize>() -> Result<[u8; N]> {
     Ok(value)
 }
 
-fn enrollment_context(config: LabConfig) -> Result<EnrollmentContext> {
+fn enrollment_context(parameters: &ProfileParameters) -> Result<EnrollmentContext> {
     Ok(EnrollmentContext {
         spec: EnrollmentSpec {
             domain: Domain {
@@ -696,10 +730,7 @@ fn enrollment_context(config: LabConfig) -> Result<EnrollmentContext> {
             public_salt: random_bytes::<32>()?.to_vec(),
             secret_policy: SecretPolicy::Absent,
         },
-        profile_id: enrollment_profile::profile_id(
-            &config.combinations()?,
-            config.uncertainty_steps,
-        )?,
+        profile_id: parameters.profile_id(),
         suite_id: ExampleCrypto.suite_id().into(),
     })
 }
@@ -811,6 +842,7 @@ mod tests {
             work_limit: MAX_WORK,
             artifact_revision: None,
             unit_px: 4.0,
+            min_pair_span_units: 1.0,
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 1,
@@ -819,9 +851,19 @@ mod tests {
             candidate_limit: Some(budget.candidate_limit()),
             estimated_peak_bytes: Some(budget.estimated_peak_bytes(1).unwrap()),
         };
+        let parameters = ProfileParameters::new(
+            &config.combinations().unwrap(),
+            config.uncertainty_steps,
+            1.0,
+        )
+        .unwrap();
         engine.prepared = Some(Prepared {
             view: view.clone(),
-            work: PreparedWork::Enrollment { grid, budget },
+            work: PreparedWork::Enrollment {
+                grid,
+                budget,
+                parameters: Box::new(parameters),
+            },
             consumed: false,
         });
         engine.data.prepared = Some(view);
@@ -861,16 +903,26 @@ mod tests {
         let limits = limits(1).unwrap();
         let candidate = gnorix::biometrics::Candidate::new(vec![7; 32]).unwrap();
         let candidates = Box::new(std::iter::once(Ok(candidate)));
+        let parameters = ProfileParameters::new(
+            &config.combinations().unwrap(),
+            config.uncertainty_steps,
+            1.0,
+        )
+        .unwrap();
         let enrollment = enrollment::enroll_candidates(
             &ExampleCrypto,
             candidates,
-            enrollment_context(config).unwrap(),
+            enrollment_context(&parameters).unwrap(),
             None,
             &limits,
         )
         .unwrap();
-        let package = EnrollmentPackage::from_enrollment(&enrollment, &limits).unwrap();
+        let package = EnrollmentPackage::from_enrollment(&enrollment, &limits)
+            .unwrap()
+            .with_profile_parameters(parameters.encoded().to_vec(), &limits)
+            .unwrap();
         engine.data.enrollment = Some(EnrollmentView {
+            min_pair_span_units: 1.0,
             root: hex(&package.commitment().root.0),
             leaf_count: package.commitment().leaf_count,
             config,
@@ -880,6 +932,7 @@ mod tests {
             config,
             authorization: None,
             unit_px: 5.0,
+            min_pair_span_units: 1.0,
         });
         engine
     }

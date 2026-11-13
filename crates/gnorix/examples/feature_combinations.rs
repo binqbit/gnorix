@@ -131,12 +131,14 @@ fn snapshot(
         .collect();
 
     json!({
-        "schema": "gnorix.feature-combinations.v3",
+        "schema": "gnorix.feature-combinations.v4",
         "source": {"image": input.to_string_lossy(), "width": width, "height": height},
         "unit_px": unit_px,
+        "min_pair_span_units": result.min_pair_span_units,
         "config": {
             "min_points": config.min_points,
             "min_priority": config.min_priority,
+            "min_span_fraction": config.min_span_fraction,
             "pool_multiplier": config.pool_multiplier,
             "radius_units": config.radius_units,
             "combinations_per_region": config.combinations_per_region,
@@ -144,6 +146,7 @@ fn snapshot(
         },
         "policy": {
             "point_eligibility": "known final priority >= min_priority",
+            "minimum_subset_span": "at least one source-point pair spans min_pair_span_units * R before grid alignment",
             "region_layout": "adaptive row-major cell centers covering confirmed-pattern and eligible-point bounds",
             "region_coverage": "minimum cell count whose half-diagonals fit the initial radius; closest-to-square cells break ties",
             "initial_radius": "radius_units * measured mean ridge width R",
@@ -255,13 +258,14 @@ mod tests {
                 max: origin,
             },
             points: Vec::new(),
+            min_pair_span_units: 1.0,
             unscored_features: 0,
             regions: Vec::new(),
             combinations: Vec::new(),
             work_used: 0,
         };
         let document = snapshot(Path::new("capture.png"), 1, 1, 4.0, &config, &result);
-        assert_eq!(document["schema"], "gnorix.feature-combinations.v3");
+        assert_eq!(document["schema"], "gnorix.feature-combinations.v4");
         assert_eq!(document["config"]["min_priority"], 0.5);
         assert_eq!(
             document["policy"]["point_eligibility"],

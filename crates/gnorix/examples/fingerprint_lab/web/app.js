@@ -741,6 +741,13 @@ function render() {
         : enrollment && !registered
           ? "These settings differ from the enrolled set. Prepare and create a new set, or restore the previous settings."
           : "Only features at or above the minimum priority enter key combinations. R is the mean dark-ridge width. Changing these settings requires a new Merkle set.";
+    const minimumSpan =
+        prepared?.min_pair_span_units ??
+        (registered ? enrollment?.min_pair_span_units : null);
+    $("minimum-span").textContent =
+        minimumSpan == null
+            ? "Each combination needs a pair spanning at least one third of the enrollment pattern's shorter side. Measured during enrollment preparation."
+            : `Minimum point span: ${format.format(minimumSpan)}R · one third of the enrolled pattern's shorter side. The same distance in R applies when signing a fragment.`;
     $("merkle-root").textContent = enrollment?.root ?? "No set created yet";
     $("leaf-count").textContent = enrollment
         ? countLabel(enrollment.leaf_count, "key")

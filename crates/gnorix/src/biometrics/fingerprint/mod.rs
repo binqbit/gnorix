@@ -36,7 +36,8 @@ pub use cleanup::{
 pub use combinations::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FeatureCombination,
     FeatureCombinations, RegionBounds, SigningRegion, SigningSearch, SigningSearchConfig,
-    generate_combinations, prepare_signing_search, signing_candidates,
+    derive_min_pair_span_units, generate_combinations, prepare_signing_search,
+    satisfies_min_pair_span, signing_candidates,
 };
 pub use enhancement::LocalPalette;
 pub use features::{

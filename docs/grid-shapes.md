@@ -1,6 +1,6 @@
 # Grid figures and positional variants
 
-`fingerprint::prepare_grid_baselines(points, combinations, R, &config)` prepares one normalized, snapped baseline for each [selected point combination](feature-combinations.md). Enrollment hashes only these baselines. R is the measured **mean dark-ridge width from the same capture**. It is the distance between neighboring triangular-grid nodes; there is no independent pixel-spacing setting.
+`fingerprint::prepare_grid_baselines(points, combinations, R, &config)` prepares one normalized, snapped baseline for each [selected point combination](feature-combinations.md). Point priority and minimum source-pair span are checked before this stage. Enrollment hashes only these baselines. R is the measured **mean dark-ridge width from the same capture**. It is the distance between neighboring triangular-grid nodes; there is no independent pixel-spacing setting.
 
 ## One fixed frame per combination
 
@@ -29,7 +29,7 @@ Level L includes every node at most L steps away through the six nearest neighbo
 
 For n points the complete Cartesian product contains `(1 + 3L(L + 1))^n` assignments. Every point moves independently, including points that established the frame. Neighborhood order is center first, then successive rings ordered by `(q, r)`; the last source-ID-ordered feature varies fastest. Collisions, common translations and repeated unlabeled geometries remain in the traversal. No extra subset omission or geometry deduplication occurs here.
 
-The signing iterator expands this product only for its current ranked subset and tests each candidate immediately. It does not need the full product to fit a counter before beginning its bounded search.
+The signing iterator expands this product only for its current admitted ranked subset and tests each candidate immediately. It does not need the full product to fit a counter before beginning its bounded search. The source-space span rule does not prune individual snapped or moved assignments from this product.
 
 For an explicit diagnostic export, `fingerprint::prepare_grid_shapes(...)` and `GridShapes::variants()` retain complete-traversal behavior. The fallible iterator does not hold the product in memory, but a checked total rejects diagnostic requests exceeding `max_variants` before traversal. Preparation and iteration share a work allowance. Exhausting it yields an error rather than reporting a partial export as complete. These diagnostic limits do not multiply the keys registered by baseline enrollment.
 
@@ -51,7 +51,7 @@ The output file must not already exist. The adapter reads the combination export
 
 The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
-With **`min_priority = 0.5`**, the checked-in image supplies 48 selected subsets at radius 30R (30 triples, 14 quadruples, four quintuples). The checked level-1 diagnostic export traverses **111,132 assignments**, while enrollment uses only the **48 baselines**, before duplicate-key removal. The larger number describes positional alternatives searched later, not the number of registered keys.
+With `min_priority = 0.5` and the one-third span rule, the checked-in fixture supplies 48 valid subsets at radius 30R: 28 triples, 16 quadruples and four quintuples. The checked level-1 diagnostic export traverses **115,248 assignments** with no collisions, while enrollment uses only the **48 baselines**, before duplicate-key removal. The Cartesian count describes positional alternatives searched later, not the number of registered keys.
 
 ## Interpretation
 

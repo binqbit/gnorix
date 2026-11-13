@@ -7,7 +7,7 @@ mod tests;
 
 use super::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, Fingerprint,
-    FingerprintError, Point, RegionBounds, WorkBudget,
+    FingerprintError, Point, RegionBounds, WorkBudget, span,
 };
 
 pub(super) struct RegionCandidates {
@@ -91,6 +91,7 @@ pub(super) fn select(
     bounds: RegionBounds,
     unit_px: f64,
     config: &CombinationConfig,
+    minimum_span: f64,
     work: &mut WorkBudget,
 ) -> Result<Vec<CombinationRegion>, CombinationError> {
     let target = config
@@ -102,21 +103,21 @@ pub(super) fn select(
         .into_iter()
         .map(|region| {
             work.spend(target)?;
-            Ok(CombinationRegion {
+            let Some(indices) = span::pool(points, &region.indices, target, minimum_span, work)?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(CombinationRegion {
                 id: region.id,
                 center: region.center,
                 initial_radius: region.initial_radius,
                 radius: region.radius,
                 available_points: region.indices.len(),
-                pool: region
-                    .indices
-                    .into_iter()
-                    .take(target)
-                    .map(|index| points[index].id)
-                    .collect(),
+                pool: indices.into_iter().map(|index| points[index].id).collect(),
                 combination_count: 0,
-            })
+            }))
         })
+        .filter_map(|result| result.transpose())
         .collect()
 }
 

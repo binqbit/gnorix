@@ -2,8 +2,6 @@
 
 #[path = "support/authorization_json.rs"]
 mod authorization_json;
-#[path = "support/combination_config.rs"]
-mod combination_config;
 #[path = "support/enrollment_profile.rs"]
 mod enrollment_profile;
 #[path = "support/image_input.rs"]
@@ -60,15 +58,18 @@ fn main() -> Result<()> {
 
 fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Path) -> Result<()> {
     require_new_output(output_path)?;
-    let controls = settings::read()?;
-    let limits = settings::limits(controls.attempts)?;
+    let limits = settings::limits(settings::attempt_limit()?)?;
     let package = read_package(package_path, &limits)?;
+    let controls = settings::read(&package)?;
     let action = read_action(action_path, &limits)?;
     validate_profile(&package, controls.profile_id)?;
     let secret = secret_input::read_secret(package.commitment().context.spec.secret_policy)?;
     let fingerprint = extract(image)?;
     let unit_px = fingerprint.scale.unit_px;
-    let candidates = fingerprint::signing_candidates(&fingerprint, &controls.search)?;
+    let candidates = fingerprint::prepare_signing_search(&fingerprint, &controls.search)?;
+    let point_count = candidates.points().len();
+    let region_count = candidates.regions().len();
+    let min_pair_span_units = controls.search.min_pair_span_units;
     let attempted = Cell::new(0_usize);
     let counted = Box::new(candidates.inspect(|result| {
         if result.is_ok() {
@@ -88,15 +89,15 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
         Ok(signed) => signed,
         Err(error) => {
             eprintln!(
-                "search failed after generating {} candidates: {error}",
-                attempted.get()
+                "search failed after generating {} candidates; {point_count} eligible features; {region_count} regions; minimum pair span {min_pair_span_units:.6}R: {error}",
+                attempted.get(),
             );
             return Err(error.into());
         }
     };
     publish_verified(&package, &action, &signed, output_path, &limits)?;
     println!(
-        "first matching key after {} candidates; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
+        "first matching key after {} candidates; {point_count} eligible features; {region_count} regions; minimum pair span {min_pair_span_units:.6}R; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
         attempted.get(),
         output_path.display(),
     );
@@ -140,7 +141,9 @@ fn validate_profile(package: &EnrollmentPackage, expected: gnorix::merkle::Hash)
 fn read_package(path: &Path, limits: &Limits) -> Result<EnrollmentPackage> {
     let capacity = settings::package_limits()?;
     let bytes = output::read(path, capacity.max_bytes.get())?;
-    Ok(EnrollmentPackage::decode(&bytes, &capacity, limits)?)
+    let package = EnrollmentPackage::decode(&bytes, &capacity, limits)?;
+    settings::parameters(&package)?;
+    Ok(package)
 }
 
 fn read_action(path: &Path, limits: &Limits) -> Result<Action> {

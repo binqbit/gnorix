@@ -65,6 +65,7 @@ impl LabConfig {
         Ok(CombinationConfig {
             min_points: self.min_points,
             min_priority: self.min_priority,
+            min_span_fraction: 1.0 / 3.0,
             pool_multiplier: self.pool_multiplier,
             radius_units: self.radius_units,
             combinations_per_region: self.combinations_per_region,
@@ -156,6 +157,7 @@ pub struct PreparedView {
     pub work_limit: usize,
     pub artifact_revision: Option<u64>,
     pub unit_px: f64,
+    pub min_pair_span_units: f64,
     pub points: Vec<PointView>,
     pub regions: Vec<RegionView>,
     pub combination_count: usize,
@@ -187,6 +189,7 @@ pub struct RegionView {
 
 #[derive(Clone, Serialize)]
 pub struct EnrollmentView {
+    pub min_pair_span_units: f64,
     pub root: String,
     pub leaf_count: u64,
     pub config: LabConfig,

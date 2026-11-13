@@ -19,7 +19,7 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const FIXED_RESERVE: u64 = 512 * 1024 * 1024;
 const BYTES_PER_CANDIDATE: u64 = 512;
 const BYTES_PER_RETAINED_LEAF: u64 = 96;
-const PACKAGE_ALLOWANCE: u64 = 128 * 1024;
+const PACKAGE_ALLOWANCE: u64 = 128 * 1024 + 128;
 
 pub fn default_memory_budget_gib() -> u8 {
     DEFAULT_MEMORY_GIB
