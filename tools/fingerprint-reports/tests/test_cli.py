@@ -97,7 +97,7 @@ class CommandTests(unittest.TestCase):
         }
 
     def write_combinations(
-        self, *, include_json=True, include_png=True, schema="gnorix.feature-combinations.v3"
+        self, *, include_json=True, include_png=True, schema="gnorix.feature-combinations.v4"
     ):
         self.output.mkdir(parents=True, exist_ok=True)
         if include_json:
@@ -192,12 +192,14 @@ class CommandTests(unittest.TestCase):
 
     def test_optional_combinations_survive_failures_and_expire_on_successful_refresh(self):
         for native, include_json, include_png, schema in (
-            (False, True, False, "gnorix.feature-combinations.v3"),
-            (False, True, True, "gnorix.feature-combinations.v3"),
-            (True, True, True, "gnorix.feature-combinations.v3"),
-            (True, False, True, "gnorix.feature-combinations.v3"),
+            (False, True, False, "gnorix.feature-combinations.v4"),
+            (False, True, True, "gnorix.feature-combinations.v4"),
+            (True, True, True, "gnorix.feature-combinations.v4"),
+            (True, False, True, "gnorix.feature-combinations.v4"),
             (False, True, True, "gnorix.feature-combinations.v2"),
             (True, True, True, "gnorix.feature-combinations.v2"),
+            (False, True, True, "gnorix.feature-combinations.v3"),
+            (True, True, True, "gnorix.feature-combinations.v3"),
         ):
             with self.subTest(native=native, json=include_json, png=include_png, schema=schema):
                 if native:
@@ -238,7 +240,7 @@ class CommandTests(unittest.TestCase):
 
     def test_unidentified_combination_files_and_symlinks_remain_protected(self):
         outside = self.root / "outside.json"
-        outside.write_text('{"schema":"gnorix.feature-combinations.v3"}')
+        outside.write_text('{"schema":"gnorix.feature-combinations.v4"}')
         for native in (False, True):
             for case in (
                 "wrong-schema",
@@ -284,7 +286,7 @@ class CommandTests(unittest.TestCase):
                     run.assert_not_called()
                     self.assertEqual(self.contents(), before)
                     self.assertEqual(
-                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v3"}'
+                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v4"}'
                     )
                     shutil.rmtree(self.output.parent)
 
