@@ -526,13 +526,13 @@ function drawEvidence(prepared) {
         }
         if (isMatched) {
             diagnosticsLayer.append(
-                svgElement("path", {
-                    d: `M${point.x + 9},${point.y - 4}L${point.x + 11},${point.y - 2}L${point.x + 15},${point.y - 7}`,
+                svgElement("circle", {
+                    cx: point.x,
+                    cy: point.y,
+                    r: 14,
                     fill: "none",
                     stroke: "#ffffff",
-                    "stroke-width": 0.9,
-                    "stroke-linecap": "round",
-                    "stroke-linejoin": "round",
+                    "stroke-width": 1.5,
                     "vector-effect": "non-scaling-stroke",
                     "pointer-events": "none",
                     "data-indicator": "matched",
@@ -747,7 +747,7 @@ function render() {
             state.mode === "enrollment"
                 ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.combination_count, "combination")} · ${countLabel(prepared.variant_count ?? 0, "positional variant")}`
                 : state.server.result?.status === "matched"
-                  ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white ticks mark visible matches`
+                  ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white rings mark visible matches`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;
     if (state.mode === "signing" && registered && !artifactReady())
         notice = "Updating scan preview · prepare or test when ready";
