@@ -50,66 +50,13 @@ pub(super) fn candidate_frames(
 }
 
 fn convex_hull(points: &[Point], work: &mut WorkBudget) -> Result<Vec<usize>, GridShapeError> {
-    work.spend(points.len())?;
-    let mut ordered: Vec<_> = (0..points.len()).collect();
-    ordered.sort_unstable_by(|&a, &b| {
-        coordinate(points[a].x())
-            .total_cmp(&coordinate(points[b].x()))
-            .then(coordinate(points[a].y()).total_cmp(&coordinate(points[b].y())))
-            .then(a.cmp(&b))
-    });
-    ordered.dedup_by(|a, b| points[*a] == points[*b]);
-    if ordered.len() <= 2 {
-        return Ok(ordered);
-    }
-
-    let mut lower = hull_half(points, ordered.iter().copied(), work)?;
-    let mut upper = hull_half(points, ordered.iter().rev().copied(), work)?;
-    lower.pop();
-    upper.pop();
-    lower.extend(upper);
-    Ok(lower)
-}
-
-fn hull_half(
-    points: &[Point],
-    ordered: impl Iterator<Item = usize>,
-    work: &mut WorkBudget,
-) -> Result<Vec<usize>, GridShapeError> {
-    let mut half = Vec::new();
-    for next in ordered {
-        work.spend(1)?;
-        while half.len() >= 2 {
-            work.spend(1)?;
-            let a = points[half[half.len() - 2]];
-            let b = points[half[half.len() - 1]];
-            if positive_turn(a, b, points[next])? {
-                break;
-            }
-            half.pop();
-        }
-        half.push(next);
-    }
-    Ok(half)
-}
-
-fn positive_turn(a: Point, b: Point, c: Point) -> Result<bool, GridShapeError> {
-    let ab = difference(b, a)?;
-    let ac = difference(c, a)?;
-    let ab_scale = ab.x().abs().max(ab.y().abs());
-    let ac_scale = ac.x().abs().max(ac.y().abs());
-    if ab_scale == 0.0 || ac_scale == 0.0 {
-        return Ok(false);
-    }
-    // Positive vector scales preserve orientation while avoiding overflow or
-    // underflow of the area product when coordinate units are very large/small.
-    let left = (ab.x() / ab_scale) * (ac.y() / ac_scale);
-    let right = (ab.y() / ab_scale) * (ac.x() / ac_scale);
-    let turn = left - right;
-    // This guard covers floating arithmetic at collinearity, not a geometric
-    // tolerance in cursor units.
-    let uncertainty = 8.0 * f64::EPSILON * left.abs().max(right.abs());
-    Ok(turn > uncertainty)
+    use crate::biometrics::geometry::hull::{self, HullError};
+    let (hull, used) = hull::convex_hull(points, work.remaining).map_err(|error| match error {
+        HullError::Geometry(error) => GridShapeError::Geometry(error),
+        HullError::WorkLimit => GridShapeError::WorkLimit,
+    })?;
+    work.spend(used)?;
+    Ok(hull)
 }
 
 fn longest_edges(

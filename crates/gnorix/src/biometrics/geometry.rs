@@ -1,5 +1,7 @@
 use std::{error::Error, fmt};
 
+pub(crate) mod hull;
+
 /// A finite point in a caller-defined two-dimensional coordinate frame.
 ///
 /// Units and axis directions must agree with those of the consuming algorithm.
