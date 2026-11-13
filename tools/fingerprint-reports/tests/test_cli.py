@@ -192,6 +192,9 @@ class CommandTests(unittest.TestCase):
 
     def test_optional_combinations_survive_failures_and_expire_on_successful_refresh(self):
         for native, include_json, include_png, schema in (
+            (False, True, False, "gnorix.feature-combinations.v5"),
+            (False, True, True, "gnorix.feature-combinations.v5"),
+            (True, True, True, "gnorix.feature-combinations.v5"),
             (False, True, False, "gnorix.feature-combinations.v4"),
             (False, True, True, "gnorix.feature-combinations.v4"),
             (True, True, True, "gnorix.feature-combinations.v4"),
