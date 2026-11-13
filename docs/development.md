@@ -148,6 +148,8 @@ The complete report lives in `reports/fingerprint/`. Each successful run refresh
 
 ## Change discipline
 
+Maintain documentation, interface text, runtime messages and report captions in English.
+
 Keep pipeline, mechanism and primitive responsibilities distinct. Prefer clear function names and cohesive modules, and use blank lines between logical segments. Refactor when current requirements outgrow a structure; remove unused code and obsolete fields. Before the first release, correct architecture takes priority over compatibility with old internal APIs. Add abstractions and package boundaries only when current responsibilities justify them.
 
 Keep maintained tests next to the behavior they verify or in the crate's `tests/` directory. Add regressions for actual failure modes. Do not add production fallbacks that silently accept invalid proofs, widen enrollment, bypass missing algorithms or hide budget failures. Update the relevant API documentation and tests together with changed contracts.

@@ -235,7 +235,7 @@ mod tests {
             enrollment_id: [3; 32],
             revision: NonZeroU64::new(2).unwrap(),
             action: Action {
-                operation: "підпис/дані".into(),
+                operation: "sign/\u{1f512}".into(),
                 payload: vec![0, 255, 128, 1, b'\n', b'\"'],
                 nonce: [4; 32],
                 expires_at: u64::MAX,
