@@ -23,6 +23,8 @@ mod capture;
 mod engine;
 #[path = "fingerprint_lab/model.rs"]
 mod model;
+#[path = "fingerprint_lab/resources.rs"]
+mod resources;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

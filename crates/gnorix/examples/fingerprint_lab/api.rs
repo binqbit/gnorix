@@ -24,6 +24,7 @@ use super::{
         ArtifactRequest, LabConfig, LabData, PrepareRequest, PreparedId, SignRequest, TestRequest,
         VerifyRequest,
     },
+    resources::{DEFAULT_MEMORY_GIB, MAX_MEMORY_GIB, MIN_MEMORY_GIB},
 };
 
 const SOURCE: &[u8] = include_bytes!("../../tests/assets/test-fingerprint.png");
@@ -50,6 +51,7 @@ struct Snapshot {
     token: String,
     image: Image,
     defaults: LabConfig,
+    enrollment_memory: EnrollmentMemory,
     #[serde(flatten)]
     data: LabData,
     job: Option<Job>,
@@ -57,6 +59,13 @@ struct Snapshot {
     preview: Arc<[u8]>,
     #[serde(skip)]
     preview_revision: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct EnrollmentMemory {
+    default_gib: u8,
+    min_gib: u8,
+    max_gib: u8,
 }
 
 #[derive(Clone, Serialize)]
@@ -92,6 +101,11 @@ pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
                 height,
             },
             defaults: LabConfig::default(),
+            enrollment_memory: EnrollmentMemory {
+                default_gib: DEFAULT_MEMORY_GIB,
+                min_gib: MIN_MEMORY_GIB,
+                max_gib: MAX_MEMORY_GIB,
+            },
             data: engine.view(),
             job: None,
             preview,
@@ -393,6 +407,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), 1_000_000).await.unwrap();
         let state: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            state["enrollment_memory"],
+            json!({"default_gib": 2, "min_gib": 1, "max_gib": 10})
+        );
         let token = state["token"].as_str().unwrap();
         let response = app
             .clone()

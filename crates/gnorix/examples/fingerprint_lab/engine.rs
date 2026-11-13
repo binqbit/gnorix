@@ -10,18 +10,22 @@ use std::{
 use gnorix::{
     authorization::{self, Action, Authorization, EnrollmentStatus},
     biometrics::fingerprint::{
-        self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind, GridShapeError,
-        GridShapes, SigningSearch, SigningSearchConfig,
+        self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind, GridShapeConfig,
+        GridShapeError, GridShapes, SigningSearch, SigningSearchConfig,
     },
     crypto::SignatureVerifier,
     enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
-    package::{EnrollmentPackage, PackageLimits},
+    package::EnrollmentPackage,
     policy::{Limits, SecretPolicy},
 };
 use image::{GrayImage, ImageEncoder};
 use sha2::{Digest, Sha256};
 
-use super::{artifacts, capture, model::*};
+use super::{
+    artifacts, capture,
+    model::*,
+    resources::{DEFAULT_MEMORY_GIB, EnrollmentBudget},
+};
 use crate::{Result, authorization_json, enrollment_profile, output, provider::ExampleCrypto};
 
 pub struct Engine {
@@ -41,7 +45,10 @@ struct Prepared {
 }
 
 enum PreparedWork {
-    Enrollment(GridShapes),
+    Enrollment {
+        grid: GridShapes,
+        budget: EnrollmentBudget,
+    },
     Signing(SigningSearch),
 }
 
@@ -141,6 +148,7 @@ impl Engine {
                 selection: Some(request.selection),
                 work_limit: request.work_limit,
                 artifact_revision: Some(request.artifact_revision),
+                memory_budget_gib: DEFAULT_MEMORY_GIB,
             },
             &phase,
         )?;
@@ -185,6 +193,15 @@ impl Engine {
             require_config(enrolled.config, request.config)?;
         }
 
+        let enrollment_budget = if request.kind == "enrollment" {
+            Some(EnrollmentBudget::new(
+                request.memory_budget_gib,
+                self.retained_leaf_count(),
+            )?)
+        } else {
+            None
+        };
+
         self.prepared = None;
         self.data.prepared = None;
         self.data.result = None;
@@ -222,6 +239,9 @@ impl Engine {
             regions: Vec::new(),
             combination_count: 0,
             variant_count: None,
+            memory_budget_gib: None,
+            variant_limit: None,
+            estimated_peak_bytes: None,
         };
         let work = if request.kind == "enrollment" {
             let mut combination_config = request.config.combinations()?;
@@ -242,16 +262,20 @@ impl Engine {
                 })
                 .collect();
             view.combination_count = combinations.combinations.len();
-            let mut grid_config = request.config.grid();
-            grid_config.max_work = request.work_limit;
-            let grid = fingerprint::prepare_grid_shapes(
+            let budget = enrollment_budget.ok_or("enrollment memory budget missing")?;
+            let grid = prepare_enrollment_grid(
                 &combinations.points,
                 &combinations.combinations,
                 view.unit_px,
-                &grid_config,
+                request.config.uncertainty_steps,
+                request.work_limit,
+                budget,
             )?;
             view.variant_count = Some(grid.variant_count());
-            PreparedWork::Enrollment(grid)
+            view.memory_budget_gib = Some(budget.memory_budget_gib());
+            view.variant_limit = Some(budget.variant_limit());
+            view.estimated_peak_bytes = Some(budget.estimated_peak_bytes(grid.variant_count())?);
+            PreparedWork::Enrollment { grid, budget }
         } else {
             let search = fingerprint::prepare_signing_search(
                 &extracted,
@@ -289,16 +313,24 @@ impl Engine {
     }
 
     pub fn enroll(&mut self, request: PreparedId, phase: impl Fn(&str)) -> Result<()> {
+        let retained_leaves = self.retained_leaf_count();
         let prepared = self
             .prepared
-            .as_ref()
+            .as_mut()
             .ok_or("prepare the full fingerprint first")?;
         require_prepared(prepared.view.id, request.prepared_id)?;
-        let PreparedWork::Enrollment(grid) = &prepared.work else {
+        let PreparedWork::Enrollment { grid, budget } = &mut prepared.work else {
             return Err("this preparation is a signing fragment".into());
         };
+        let effective_budget = EnrollmentBudget::new(budget.memory_budget_gib(), retained_leaves)?;
+        let estimated_peak = effective_budget.estimated_peak_bytes(grid.variant_count())?;
+        *budget = effective_budget;
+        prepared.view.variant_limit = Some(budget.variant_limit());
+        prepared.view.estimated_peak_bytes = Some(estimated_peak);
+        self.data.prepared = Some(prepared.view.clone());
         phase("Deriving keys and building the Merkle tree");
-        let limits = limits(usize::try_from(MAX_VARIANTS)?)?;
+        let limits = limits(usize::try_from(budget.variant_limit())?)?;
+        let package_limits = budget.package_limits()?;
         let context = enrollment_context(prepared.view.config)?;
         let enrolled = enrollment::enroll_candidates(
             &ExampleCrypto,
@@ -308,16 +340,18 @@ impl Engine {
             &limits,
         )?;
         let package = EnrollmentPackage::from_enrollment(&enrolled, &limits)?;
+        drop(enrolled);
         phase("Verifying and saving enrollment");
-        let bytes = package.encode(&package_limits()?, &limits)?;
+        let expected = package.commitment().clone();
+        let bytes = package.encode(&package_limits, &limits)?;
         let path = self.output.join(package.filename());
         output::write_new(&path, &bytes)?;
-        let restored = EnrollmentPackage::decode(
-            &output::read(&path, 64 * 1024 * 1024)?,
-            &package_limits()?,
-            &limits,
-        )?;
-        if restored.commitment() != package.commitment() {
+        drop(bytes);
+        drop(package);
+        let bytes = output::read(&path, package_limits.max_bytes.get())?;
+        let restored = EnrollmentPackage::decode(&bytes, &package_limits, &limits)?;
+        drop(bytes);
+        if restored.commitment() != &expected {
             return Err("retained package differs after readback".into());
         }
         let view = EnrollmentView {
@@ -494,6 +528,12 @@ impl Engine {
         }
         Ok(())
     }
+
+    fn retained_leaf_count(&self) -> u64 {
+        self.enrolled
+            .as_ref()
+            .map_or(0, |enrolled| enrolled.package.commitment().leaf_count)
+    }
 }
 
 impl ArtifactFrame {
@@ -562,6 +602,31 @@ fn point_views(points: &[CombinationPoint], offset: [f64; 2]) -> Vec<PointView> 
         .collect()
 }
 
+fn prepare_enrollment_grid(
+    points: &[CombinationPoint],
+    combinations: &[fingerprint::FeatureCombination],
+    unit_px: f64,
+    uncertainty_steps: u32,
+    max_work: usize,
+    budget: EnrollmentBudget,
+) -> Result<GridShapes> {
+    let config = GridShapeConfig {
+        uncertainty_steps,
+        max_work,
+        max_variants: budget.variant_limit(),
+    };
+    match fingerprint::prepare_grid_shapes(points, combinations, unit_px, &config) {
+        Ok(grid) => Ok(grid),
+        Err(error @ GridShapeError::VariantLimit { required, .. }) => {
+            match budget.estimated_peak_bytes(required) {
+                Err(reason) => Err(reason),
+                Ok(_) => Err(error.into()),
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn require_prepared(actual: u64, requested: u64) -> Result<()> {
     if actual != requested {
         return Err("preparation is stale; prepare again".into());
@@ -609,13 +674,6 @@ fn limits(attempts: usize) -> Result<Limits> {
         signature_bytes: nonzero(64)?,
         action_bytes: nonzero(64 * 1024)?,
         context_bytes: nonzero(64 * 1024)?,
-    })
-}
-
-fn package_limits() -> Result<PackageLimits> {
-    Ok(PackageLimits {
-        max_bytes: nonzero(64 * 1024 * 1024)?,
-        max_leaves: nonzero(usize::try_from(MAX_VARIANTS)?)?,
     })
 }
 
@@ -714,6 +772,85 @@ fn error_detail(error: &(dyn StdError + 'static)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_enrollment_rechecks_memory_without_requiring_new_preparation() {
+        let directory = std::env::temp_dir().join(format!(
+            "gnorix-memory-enrollment-{}",
+            hex(&random_bytes::<12>().unwrap())
+        ));
+        let mut engine = Engine::new(GrayImage::new(2, 2), directory.clone()).unwrap();
+        let config = LabConfig {
+            uncertainty_steps: 0,
+            ..LabConfig::default()
+        };
+        let points: Vec<_> = [(0.0, 0.0), (16.0, 0.0), (5.0, 12.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (x, y))| CombinationPoint {
+                id,
+                kind: FeatureKind::Ending,
+                position: gnorix::biometrics::geometry::Point::new(x, y).unwrap(),
+                priority: 1.0,
+            })
+            .collect();
+        let combinations = [fingerprint::FeatureCombination {
+            feature_ids: vec![0, 1, 2],
+            score: 1.0,
+            regions: vec![0],
+        }];
+        let budget = EnrollmentBudget::new(DEFAULT_MEMORY_GIB, 0).unwrap();
+        let grid =
+            prepare_enrollment_grid(&points, &combinations, 4.0, 0, MAX_WORK, budget).unwrap();
+        let view = PreparedView {
+            id: 1,
+            kind: "enrollment".into(),
+            config,
+            selection: None,
+            work_limit: MAX_WORK,
+            artifact_revision: None,
+            unit_px: 4.0,
+            points: Vec::new(),
+            regions: Vec::new(),
+            combination_count: 1,
+            variant_count: Some(1),
+            memory_budget_gib: Some(DEFAULT_MEMORY_GIB),
+            variant_limit: Some(budget.variant_limit()),
+            estimated_peak_bytes: Some(budget.estimated_peak_bytes(1).unwrap()),
+        };
+        engine.prepared = Some(Prepared {
+            view: view.clone(),
+            work: PreparedWork::Enrollment { grid, budget },
+            consumed: false,
+        });
+        engine.data.prepared = Some(view);
+        engine
+            .enroll(PreparedId { prepared_id: 1 }, |_| {})
+            .unwrap();
+        let first = engine.data.enrollment.as_ref().unwrap().root.clone();
+        let first_estimate = engine
+            .data
+            .prepared
+            .as_ref()
+            .unwrap()
+            .estimated_peak_bytes
+            .unwrap();
+        engine
+            .enroll(PreparedId { prepared_id: 1 }, |_| {})
+            .unwrap();
+        assert_ne!(engine.data.enrollment.as_ref().unwrap().root, first);
+        assert_eq!(
+            engine
+                .data
+                .prepared
+                .as_ref()
+                .unwrap()
+                .estimated_peak_bytes
+                .unwrap(),
+            first_estimate + 96
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     fn enrolled_engine() -> Engine {
         let source =
@@ -827,6 +964,7 @@ mod tests {
             }),
             work_limit: MAX_WORK,
             artifact_revision: Some(0),
+            memory_budget_gib: DEFAULT_MEMORY_GIB,
         };
         assert!(
             engine
@@ -841,6 +979,7 @@ mod tests {
             selection: None,
             work_limit: MAX_WORK,
             artifact_revision: Some(engine.data.artifact.revision),
+            memory_budget_gib: DEFAULT_MEMORY_GIB,
         };
         assert!(
             engine

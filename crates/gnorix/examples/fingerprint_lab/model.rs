@@ -1,4 +1,4 @@
-use gnorix::biometrics::fingerprint::{CombinationConfig, GridShapeConfig};
+use gnorix::biometrics::fingerprint::CombinationConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -6,7 +6,6 @@ use crate::Result;
 
 pub const MAX_WORK: usize = 1_000_000_000;
 pub const MAX_ATTEMPTS: usize = 1_000_000_000;
-pub const MAX_VARIANTS: u64 = 1_000_000;
 pub const ARTIFACT_GENERATOR: &str = "gnorix.test-artifacts.v3";
 
 pub fn default_work_limit() -> usize {
@@ -67,14 +66,6 @@ impl LabConfig {
             max_work: MAX_WORK,
         })
     }
-
-    pub fn grid(&self) -> GridShapeConfig {
-        GridShapeConfig {
-            uncertainty_steps: self.uncertainty_steps,
-            max_variants: MAX_VARIANTS,
-            max_work: MAX_WORK,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +78,8 @@ pub struct PrepareRequest {
     pub work_limit: usize,
     #[serde(default)]
     pub artifact_revision: Option<u64>,
+    #[serde(default = "super::resources::default_memory_budget_gib")]
+    pub memory_budget_gib: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +155,9 @@ pub struct PreparedView {
     pub regions: Vec<RegionView>,
     pub combination_count: usize,
     pub variant_count: Option<u64>,
+    pub memory_budget_gib: Option<u8>,
+    pub variant_limit: Option<u64>,
+    pub estimated_peak_bytes: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -234,5 +230,15 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn preparation_defaults_to_two_gib_without_changing_biometric_config() {
+        let config = LabConfig::default();
+        let value =
+            serde_json::json!({ "kind": "enrollment", "config": config, "selection": null });
+        let request: PrepareRequest = serde_json::from_value(value).unwrap();
+        assert_eq!(request.memory_budget_gib, 2);
+        assert_eq!(request.config, config);
     }
 }
