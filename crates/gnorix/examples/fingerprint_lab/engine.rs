@@ -11,8 +11,8 @@ use gnorix::{
     authorization::{self, Action, Authorization, EnrollmentStatus},
     biometrics::fingerprint::{
         self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind,
-        GridBaselineConfig, GridBaselines, GridShapeError, SigningSearch, SigningSearchConfig,
-        SpatialRequirements,
+        FingerprintFeatures, GridBaselineConfig, GridBaselines, GridShapeError, SigningSearch,
+        SigningSearchConfig, SpatialRequirements,
     },
     crypto::SignatureVerifier,
     enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
@@ -33,10 +33,12 @@ use crate::{
 };
 
 pub struct Engine {
+    // Immutable for this engine's lifetime; the clean cache needs no revision.
     source: GrayImage,
     frame: ArtifactFrame,
     output: PathBuf,
     next_id: u64,
+    analysis: AnalysisCache,
     prepared: Option<Prepared>,
     enrolled: Option<Enrolled>,
     data: LabData,
@@ -71,6 +73,59 @@ struct ArtifactFrame {
     png: Arc<[u8]>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum AnalysisSource {
+    Clean,
+    Altered(u64),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct AnalysisKey {
+    source: AnalysisSource,
+    selection: Option<Circle>,
+    extraction: ExtractionConfig,
+}
+
+struct CachedAnalysis {
+    key: AnalysisKey,
+    features: FingerprintFeatures,
+    offset: [f64; 2],
+}
+
+/// Retain only the most recent compact analysis, never pixels or diagnostic maps.
+#[derive(Default)]
+struct AnalysisCache {
+    entry: Option<CachedAnalysis>,
+}
+
+impl AnalysisCache {
+    fn get_or_analyze(
+        &mut self,
+        key: AnalysisKey,
+        analyze: impl FnOnce() -> Result<(FingerprintFeatures, [f64; 2])>,
+    ) -> Result<&CachedAnalysis> {
+        if !self.entry.as_ref().is_some_and(|entry| entry.key == key) {
+            let (features, offset) = analyze()?;
+            self.entry = Some(CachedAnalysis {
+                key,
+                features,
+                offset,
+            });
+        }
+        Ok(self.entry.as_ref().expect("successful analysis is cached"))
+    }
+
+    fn invalidate_altered(&mut self) {
+        if self
+            .entry
+            .as_ref()
+            .is_some_and(|entry| matches!(entry.key.source, AnalysisSource::Altered(_)))
+        {
+            self.entry = None;
+        }
+    }
+}
+
 impl Engine {
     pub fn new(source: GrayImage, output: PathBuf) -> Result<Self> {
         let frame = ArtifactFrame::new(source.clone(), 0, 0, artifact_seed(None)?, None)?;
@@ -83,6 +138,7 @@ impl Engine {
             frame,
             output,
             next_id: 1,
+            analysis: AnalysisCache::default(),
             prepared: None,
             enrolled: None,
             data,
@@ -129,6 +185,7 @@ impl Engine {
         let frame = ArtifactFrame::new(image, revision, request.level, seed, Some(unit_px))?;
         self.data.artifact = frame.view.clone();
         self.frame = frame;
+        self.analysis.invalidate_altered();
         if self
             .prepared
             .as_ref()
@@ -225,8 +282,22 @@ impl Engine {
         } else {
             &self.frame.image
         };
-        let selected = capture::select(source, request.selection)?;
-        let extracted = fingerprint::analyze(&selected.capture, &ExtractionConfig::default())?;
+        let extraction = ExtractionConfig::default();
+        let key = AnalysisKey {
+            source: if request.kind == "enrollment" {
+                AnalysisSource::Clean
+            } else {
+                AnalysisSource::Altered(self.frame.view.revision)
+            },
+            selection: request.selection,
+            extraction,
+        };
+        let analyzed = self.analysis.get_or_analyze(key, || {
+            let selected = capture::select(source, request.selection)?;
+            let features = fingerprint::analyze(&selected.capture, &extraction)?;
+            Ok((features, selected.offset))
+        })?;
+        let extracted = &analyzed.features;
         phase("Preparing regions and features");
         let id = self.next_id;
         self.next_id = self
@@ -264,15 +335,15 @@ impl Engine {
         let work = if request.kind == "enrollment" {
             let mut combination_config = request.config.combinations()?;
             combination_config.max_work = request.work_limit;
-            let combinations = fingerprint::generate_combinations(&extracted, &combination_config)?;
-            view.points = point_views(&combinations.points, selected.offset);
+            let combinations = fingerprint::generate_combinations(extracted, &combination_config)?;
+            view.points = point_views(&combinations.points, analyzed.offset);
             view.regions = combinations
                 .regions
                 .iter()
                 .map(|region| RegionView {
                     id: region.id,
-                    x: region.center.x() + selected.offset[0],
-                    y: region.center.y() + selected.offset[1],
+                    x: region.center.x() + analyzed.offset[0],
+                    y: region.center.y() + analyzed.offset[1],
                     initial_radius: region.initial_radius,
                     radius: region.radius,
                     pool: region.pool.clone(),
@@ -306,7 +377,7 @@ impl Engine {
             }
         } else {
             let search = fingerprint::prepare_signing_search(
-                &extracted,
+                extracted,
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
                     min_priority: request.config.min_priority,
@@ -321,14 +392,14 @@ impl Engine {
                     max_descriptor_bytes: nonzero(1024 * 1024)?,
                 },
             )?;
-            view.points = point_views(search.points(), selected.offset);
+            view.points = point_views(search.points(), analyzed.offset);
             view.regions = search
                 .regions()
                 .iter()
                 .map(|region| RegionView {
                     id: region.id,
-                    x: region.center.x() + selected.offset[0],
-                    y: region.center.y() + selected.offset[1],
+                    x: region.center.x() + analyzed.offset[0],
+                    y: region.center.y() + analyzed.offset[1],
                     initial_radius: region.initial_radius,
                     radius: region.radius,
                     pool: region.feature_ids.clone(),
@@ -817,6 +888,230 @@ fn error_detail(error: &(dyn StdError + 'static)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compact_features() -> FingerprintFeatures {
+        use gnorix::biometrics::{fingerprint::AnalyzedFeature, geometry::Point};
+
+        FingerprintFeatures {
+            width: 80,
+            height: 80,
+            unit_px: 4.0,
+            pattern_bounds: Some(fingerprint::RegionBounds {
+                min: Point::new(-0.5, -0.5).unwrap(),
+                max: Point::new(79.5, 79.5).unwrap(),
+            }),
+            features: [
+                (10.0, 10.0, Some(0.95)),
+                (70.0, 10.0, Some(0.85)),
+                (40.0, 70.0, Some(0.75)),
+                (40.0, 30.0, Some(0.55)),
+                (45.0, 35.0, Some(0.4)),
+                (40.0, 45.0, None),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (x, y, priority))| AnalyzedFeature {
+                id,
+                kind: FeatureKind::Ending,
+                position: Point::new(x, y).unwrap(),
+                priority,
+            })
+            .collect(),
+        }
+    }
+
+    fn clean_analysis_key() -> AnalysisKey {
+        AnalysisKey {
+            source: AnalysisSource::Clean,
+            selection: None,
+            extraction: ExtractionConfig::default(),
+        }
+    }
+
+    #[test]
+    fn analysis_cache_reuses_only_the_exact_capture_and_extraction_settings() {
+        let mut cache = AnalysisCache::default();
+        let calls = Cell::new(0);
+        let analyze = || {
+            calls.set(calls.get() + 1);
+            Ok((compact_features(), [3.0, 7.0]))
+        };
+        let original = clean_analysis_key();
+        let altered = AnalysisKey {
+            source: AnalysisSource::Altered(0),
+            ..original
+        };
+        let circle = Circle {
+            x: 30.0,
+            y: 40.0,
+            radius: 20.0,
+        };
+        let selected = AnalysisKey {
+            selection: Some(circle),
+            ..altered
+        };
+        let cases = [
+            original,
+            altered,
+            selected,
+            AnalysisKey {
+                selection: Some(Circle { x: 30.25, ..circle }),
+                ..selected
+            },
+            AnalysisKey {
+                selection: Some(Circle {
+                    radius: 20.25,
+                    ..circle
+                }),
+                ..selected
+            },
+            AnalysisKey {
+                source: AnalysisSource::Altered(1),
+                ..selected
+            },
+            AnalysisKey {
+                extraction: ExtractionConfig {
+                    min_coherence: 0.25,
+                    ..selected.extraction
+                },
+                ..selected
+            },
+            original,
+        ];
+        for (index, key) in cases.into_iter().enumerate() {
+            cache.get_or_analyze(key, analyze).unwrap();
+            assert_eq!(calls.get(), index + 1);
+            let retained = cache
+                .get_or_analyze(key, || panic!("unchanged capture must reuse its analysis"))
+                .unwrap();
+            assert_eq!(retained.offset, [3.0, 7.0]);
+            assert_eq!(retained.features.features[4].priority, Some(0.4));
+            assert_eq!(retained.features.features[5].priority, None);
+        }
+    }
+
+    #[test]
+    fn failed_analysis_never_becomes_a_reusable_cache_entry() {
+        let mut cache = AnalysisCache::default();
+        let original = clean_analysis_key();
+        cache
+            .get_or_analyze(original, || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        let changed = AnalysisKey {
+            source: AnalysisSource::Altered(1),
+            ..original
+        };
+        for _ in 0..2 {
+            assert!(
+                cache
+                    .get_or_analyze(changed, || Err("analysis failed".into()))
+                    .is_err()
+            );
+        }
+        cache
+            .get_or_analyze(original, || {
+                panic!("original successful entry remains valid")
+            })
+            .unwrap();
+        cache.invalidate_altered();
+        assert!(cache.entry.is_some());
+        cache
+            .get_or_analyze(changed, || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        cache.invalidate_altered();
+        assert!(cache.entry.is_none());
+    }
+
+    #[test]
+    fn cached_enrollment_reapplies_policy_and_drops_stale_preparations_on_failure() {
+        let mut engine = Engine::new(GrayImage::new(80, 80), PathBuf::new()).unwrap();
+        engine
+            .analysis
+            .get_or_analyze(clean_analysis_key(), || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        let request = |config, work_limit| PrepareRequest {
+            kind: "enrollment".into(),
+            config,
+            selection: None,
+            work_limit,
+            artifact_revision: None,
+            memory_budget_gib: DEFAULT_MEMORY_GIB,
+        };
+        // The blank source cannot be analyzed. Successful preparations therefore
+        // require the retained compact result rather than a second image pass.
+        engine
+            .prepare(request(LabConfig::default(), MAX_WORK), |_| {})
+            .unwrap();
+        let first = engine.data.prepared.clone().unwrap();
+        assert_eq!(first.points.len(), 4);
+        let changed = LabConfig {
+            min_priority: 0.35,
+            min_diameter_fraction: 0.25,
+            min_anchor_separation_fraction: 0.125,
+            ..LabConfig::default()
+        };
+        engine
+            .prepare(request(changed, MAX_WORK - 1), |_| {})
+            .unwrap();
+        let second = engine.data.prepared.as_ref().unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(second.config, changed);
+        assert_eq!(second.work_limit, MAX_WORK - 1);
+        assert_eq!(second.points.len(), 5);
+        assert_ne!(first.spatial, second.spatial);
+        assert!(engine.prepare(request(changed, 1), |_| {}).is_err());
+        assert!(engine.prepared.is_none());
+        assert!(engine.data.prepared.is_none());
+        assert!(engine.analysis.entry.is_some());
+    }
+
+    #[test]
+    fn cached_signing_analysis_starts_a_fresh_search_after_consumption() {
+        let mut engine = Engine::new(GrayImage::new(80, 80), PathBuf::new()).unwrap();
+        let enrolled = enrolled_engine();
+        engine.enrolled = enrolled.enrolled;
+        engine.data.enrollment = enrolled.data.enrollment;
+        let selection = Circle {
+            x: 40.0,
+            y: 40.0,
+            radius: 60.0,
+        };
+        let key = AnalysisKey {
+            source: AnalysisSource::Altered(0),
+            selection: Some(selection),
+            extraction: ExtractionConfig::default(),
+        };
+        engine
+            .analysis
+            .get_or_analyze(key, || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        let request = || PrepareRequest {
+            kind: "signing".into(),
+            config: LabConfig::default(),
+            selection: Some(selection),
+            work_limit: MAX_WORK,
+            artifact_revision: Some(0),
+            memory_budget_gib: DEFAULT_MEMORY_GIB,
+        };
+        engine.prepare(request(), |_| {}).unwrap();
+        let prepared = engine.prepared.as_mut().unwrap();
+        let first_id = prepared.view.id;
+        let PreparedWork::Signing(search) = &mut prepared.work else {
+            panic!("expected a signing search");
+        };
+        let first = search.next().unwrap().unwrap();
+        prepared.consumed = true;
+
+        engine.prepare(request(), |_| {}).unwrap();
+        let prepared = engine.prepared.as_mut().unwrap();
+        assert_ne!(prepared.view.id, first_id);
+        assert!(!prepared.consumed);
+        let PreparedWork::Signing(search) = &mut prepared.work else {
+            panic!("expected a signing search");
+        };
+        let repeated = search.next().unwrap().unwrap();
+        assert_eq!(first.as_bytes(), repeated.as_bytes());
+    }
 
     fn test_spatial_requirements(config: LabConfig) -> SpatialRequirements {
         SpatialRequirements {
