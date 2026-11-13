@@ -17,12 +17,13 @@ pub fn apply(source: &GrayImage, unit_px: f64, level: u8, seed: u64) -> Result<G
 
     let unit = unit_px.min((f64::from(source.width().min(source.height())) / 12.0).max(1.0));
     let strength = f64::from(level) / 100.0;
+    let intensity = strength * (0.3 + 0.7 * strength);
     let fields = CaptureFields::new(source, unit, seed);
-    let warped = warp(source, &fields, unit * 1.15 * strength);
-    let mild = image::imageops::blur(&warped, (unit * 0.14 * strength) as f32);
-    let strong = image::imageops::blur(&warped, (unit * 0.55 * strength) as f32);
+    let warped = warp(source, &fields, unit * 4.0 * intensity);
+    let mild = image::imageops::blur(&warped, (unit * 0.4 * intensity) as f32);
+    let strong = image::imageops::blur(&warped, (unit * 1.4 * intensity) as f32);
 
-    let mut output = render_capture(&warped, &mild, &strong, &fields, strength);
+    let mut output = render_capture(&warped, &mild, &strong, &fields, intensity);
     streaks::apply(&mut output, unit, strength, seed)?;
     Ok(output)
 }
@@ -150,12 +151,12 @@ fn render_capture(
         let softened = mix(
             f64::from(warped.get_pixel(x, y).0[0]),
             f64::from(mild.get_pixel(x, y).0[0]),
-            0.35 * strength,
+            0.55 * strength,
         );
         let blurred = mix(
             softened,
             f64::from(strong.get_pixel(x, y).0[0]),
-            0.85 * strength * broad_blur,
+            strength * (0.35 + 0.64 * broad_blur),
         );
         let exposure = fields.exposure.at(position[0], position[1]);
         let bright = smoothstep((exposure - 0.05) / 0.55);
@@ -276,6 +277,31 @@ mod tests {
                     "region ({column}, {row}) lost all structure"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn maximum_severity_strongly_changes_most_ridge_pixels() {
+        let source = ridges();
+        for seed in [19, 41, 73] {
+            let moderate = apply(&source, 6.0, 25, seed).unwrap();
+            let maximum = apply(&source, 6.0, 100, seed).unwrap();
+            let difference = |image: &GrayImage| {
+                image
+                    .as_raw()
+                    .iter()
+                    .zip(source.as_raw())
+                    .map(|(&actual, &original)| u64::from(actual.abs_diff(original)))
+                    .sum::<u64>()
+            };
+            let strongly_changed = maximum
+                .as_raw()
+                .iter()
+                .zip(source.as_raw())
+                .filter(|&(&actual, &original)| actual.abs_diff(original) >= 24)
+                .count();
+            assert!(difference(&maximum) > 2 * difference(&moderate));
+            assert!(strongly_changed * 100 >= source.as_raw().len() * 80);
         }
     }
 
