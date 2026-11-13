@@ -4,7 +4,10 @@ use std::{error::Error, path::Path};
 
 use image::{GrayImage, ImageReader};
 
-pub(super) fn read(path: &Path, max_pixels: usize) -> Result<GrayImage, Box<dyn Error>> {
+pub(super) fn read(
+    path: &Path,
+    max_pixels: usize,
+) -> Result<GrayImage, Box<dyn Error + Send + Sync>> {
     let mut reader = ImageReader::open(path)?.with_guessed_format()?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(4096);
@@ -17,7 +20,7 @@ pub(super) fn read(path: &Path, max_pixels: usize) -> Result<GrayImage, Box<dyn 
 fn opaque_grayscale(
     image: image::DynamicImage,
     max_pixels: usize,
-) -> Result<GrayImage, Box<dyn Error>> {
+) -> Result<GrayImage, Box<dyn Error + Send + Sync>> {
     if u64::from(image.width()) * u64::from(image.height()) > max_pixels as u64 {
         return Err("image exceeds the source-pixel budget".into());
     }

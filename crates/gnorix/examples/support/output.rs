@@ -1,4 +1,4 @@
-//! Exclusive package creation and bounded readback.
+//! Exclusive output creation and bounded input reads.
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -20,7 +20,7 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     drop(file);
     if let Err(error) = result {
         if let Err(cleanup) = fs::remove_file(path) {
-            return Err(format!("{error}; could not remove incomplete package: {cleanup}").into());
+            return Err(format!("{error}; could not remove incomplete output: {cleanup}").into());
         }
         return Err(error.into());
     }
@@ -30,11 +30,11 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
 pub(super) fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let count = u64::try_from(limit)?
         .checked_add(1)
-        .ok_or("package byte limit overflow")?;
+        .ok_or("input byte limit overflow")?;
     let mut bytes = Vec::new();
     File::open(path)?.take(count).read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err("package readback exceeds the byte limit".into());
+        return Err("input exceeds the byte limit".into());
     }
     Ok(bytes)
 }

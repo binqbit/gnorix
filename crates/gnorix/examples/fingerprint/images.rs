@@ -9,7 +9,7 @@ pub(super) fn save(
     root: &Path,
     source: &GrayImage,
     result: &Fingerprint,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     source.save(root.join("source.png"))?;
     save_palette(root, result)?;
     save_clarity(root, result)?;
@@ -63,7 +63,7 @@ pub(super) fn save(
     Ok(())
 }
 
-fn save_palette(root: &Path, result: &Fingerprint) -> Result<(), Box<dyn Error>> {
+fn save_palette(root: &Path, result: &Fingerprint) -> Result<(), Box<dyn Error + Send + Sync>> {
     for (filename, values) in [
         ("ridge-level.png", &result.palette.ridge_gray),
         ("valley-level.png", &result.palette.valley_gray),
@@ -92,7 +92,7 @@ fn save_values(
     filename: &str,
     result: &Fingerprint,
     values: impl Iterator<Item = u8>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let image = GrayImage::from_raw(
         result.binary.width() as u32,
         result.binary.height() as u32,
@@ -103,7 +103,11 @@ fn save_values(
     Ok(())
 }
 
-fn save_map(root: &Path, filename: &str, map: &RidgeMap) -> Result<(), Box<dyn Error>> {
+fn save_map(
+    root: &Path,
+    filename: &str,
+    map: &RidgeMap,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let values = map
         .ridges()
         .iter()
@@ -115,7 +119,7 @@ fn save_map(root: &Path, filename: &str, map: &RidgeMap) -> Result<(), Box<dyn E
     Ok(())
 }
 
-fn save_clarity(root: &Path, result: &Fingerprint) -> Result<(), Box<dyn Error>> {
+fn save_clarity(root: &Path, result: &Fingerprint) -> Result<(), Box<dyn Error + Send + Sync>> {
     let map = &result.clarity;
     for (filename, values) in [
         ("clarity.png", &map.values),

@@ -1,13 +1,17 @@
 //! Enroll every imported grid variant using an explicit example crypto suite.
 
+#[path = "support/enrollment_profile.rs"]
+mod enrollment_profile;
 #[path = "support/grid_config.rs"]
 mod grid_config;
 #[path = "feature_grid/input.rs"]
 mod input;
-#[path = "enroll_grid/output.rs"]
+#[path = "support/output.rs"]
 mod output;
-#[path = "enroll_grid/provider.rs"]
+#[path = "support/example_crypto.rs"]
 mod provider;
+#[path = "support/secret_input.rs"]
+mod secret_input;
 #[path = "enroll_grid/settings.rs"]
 mod settings;
 
@@ -60,7 +64,7 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
     let limits = settings::limits(&config)?;
     let package_limits = settings::package_limits(&config)?;
     let spec = settings::read_context(&mut File::open(context_path)?)?;
-    let secret = settings::read_secret(spec.secret_policy)?;
+    let secret = secret_input::read_secret(spec.secret_policy)?;
     let input = input::read(&mut File::open(input_path)?, MAX_JSON_BYTES)?;
     let context = EnrollmentContext {
         spec,

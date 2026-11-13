@@ -1,26 +1,22 @@
 //! Public enrollment input, resource bounds and the imported-grid profile.
 
 use std::{
-    env,
     io::Read,
     num::{NonZeroU64, NonZeroUsize},
 };
 
 use gnorix::{
     biometrics::fingerprint::{CombinationConfig, GridShapeConfig},
-    crypto::SecretInput,
     enrollment::{Domain, EnrollmentSpec},
     merkle::Hash,
     package::PackageLimits,
     policy::{Limits, SecretPolicy},
 };
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 
-use super::Result;
+use super::{Result, enrollment_profile};
 
 pub(super) const MAX_CONTEXT_JSON_BYTES: usize = 64 * 1024;
-pub(super) const MAX_SECRET_BYTES: usize = 4096;
 pub(super) const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 
 pub(super) fn limits(grid: &GridShapeConfig) -> Result<Limits> {
@@ -129,27 +125,6 @@ fn hex(text: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
-pub(super) fn read_secret(policy: SecretPolicy) -> Result<Option<SecretInput>> {
-    let secret = match env::var("GNORIX_ENROLL_SECRET") {
-        Ok(value) => {
-            let secret = SecretInput::new(value.into_bytes())?;
-            if secret.as_bytes().len() > MAX_SECRET_BYTES {
-                return Err("secret input exceeds the example byte limit".into());
-            }
-            Some(secret)
-        }
-        Err(env::VarError::NotPresent) => None,
-        Err(env::VarError::NotUnicode(_)) => return Err("secret input must be UTF-8".into()),
-    };
-    if !matches!(
-        (policy, &secret),
-        (SecretPolicy::Absent, None) | (SecretPolicy::Required, Some(_))
-    ) {
-        return Err(gnorix::Error::SecretPolicyMismatch.into());
-    }
-    Ok(secret)
-}
-
 /// Identify the imported-combination interpretation, not an entire capture engine.
 /// Sampling IDs, image scale and resource-only work limits do not enter this ID.
 pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) -> Result<Hash> {
@@ -179,23 +154,7 @@ pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) 
         combinations_per_region: integer(config, "combinations_per_region")?,
         max_work: integer(config, "max_work")?,
     };
-    controls.validate()?;
-    let mut hasher = Sha256::new();
-    for field in [
-        b"gnorix.example.imported-grid-profile.v1".as_slice(),
-        b"gnorix.feature-combinations.v1",
-        b"gnorix.grid-candidate.v1",
-        b"longest-hull-edge;top-right-origin;mean-ridge-spacing;fixed-padding;retained-collisions",
-        &(controls.min_points as u64).to_be_bytes(),
-        &(controls.pool_multiplier as u64).to_be_bytes(),
-        &controls.diameter_fraction.to_be_bytes(),
-        &(controls.combinations_per_region as u64).to_be_bytes(),
-        &grid.uncertainty_steps.to_be_bytes(),
-    ] {
-        hasher.update((field.len() as u64).to_be_bytes());
-        hasher.update(field);
-    }
-    Ok(hasher.finalize().into())
+    enrollment_profile::profile_id(&controls, grid.uncertainty_steps)
 }
 
 fn integer(fields: &Map<String, Value>, name: &str) -> Result<usize> {

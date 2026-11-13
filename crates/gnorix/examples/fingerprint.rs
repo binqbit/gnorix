@@ -29,7 +29,7 @@ use gnorix::biometrics::{
 };
 use image::GrayImage;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (input, output) = arguments()?;
     if output.exists() {
         return Err("output directory already exists".into());
@@ -79,7 +79,7 @@ fn print_summary(result: &Fingerprint, elapsed: Duration, output: &Path) {
     features::print_summary(&result.feature_strength);
 }
 
-fn arguments() -> Result<(PathBuf, PathBuf), Box<dyn Error>> {
+fn arguments() -> Result<(PathBuf, PathBuf), Box<dyn Error + Send + Sync>> {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
     if arguments.len() != 2 {
         return Err("usage: fingerprint <input.png> <new-output-directory>".into());
@@ -92,7 +92,7 @@ fn save_bundle(
     source: &GrayImage,
     result: &Fingerprint,
     config: &ExtractionConfig,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     images::save(root, source, result)?;
     let snapshot = snapshot::build(result, config)?;
     fs::write(

@@ -1,33 +1,29 @@
 //! Inspect bounded regional feature combinations from one opaque PNG capture.
 
+#[path = "support/combination_config.rs"]
+mod combination_config;
 #[path = "support/image_input.rs"]
 mod image_input;
 
 use std::{
-    collections::BTreeMap,
     env,
     error::Error,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
+use combination_config::read as configuration;
+#[cfg(test)]
+use combination_config::{ENVIRONMENT, parse_configuration};
 use gnorix::biometrics::{
     Capture,
     fingerprint::{self, CombinationConfig, ExtractionConfig, FeatureCombinations, FeatureKind},
 };
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
-const ENVIRONMENT: [&str; 5] = [
-    "GNORIX_COMBINATION_MIN_POINTS",
-    "GNORIX_COMBINATION_POOL_MULTIPLIER",
-    "GNORIX_COMBINATION_DIAMETER_FRACTION",
-    "GNORIX_COMBINATION_PER_REGION",
-    "GNORIX_COMBINATION_MAX_WORK",
-];
-
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (input, output) = arguments()?;
     if output.exists() {
         return Err("output file already exists".into());
@@ -65,52 +61,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn arguments() -> Result<(PathBuf, PathBuf), Box<dyn Error>> {
+fn arguments() -> Result<(PathBuf, PathBuf), Box<dyn Error + Send + Sync>> {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
     if arguments.len() != 2 {
         return Err("usage: feature_combinations <input.png> <new-output.json>".into());
     }
     Ok((PathBuf::from(&arguments[0]), PathBuf::from(&arguments[1])))
-}
-
-fn configuration() -> Result<CombinationConfig, Box<dyn Error>> {
-    let mut values = BTreeMap::new();
-    for name in ENVIRONMENT {
-        match env::var(name) {
-            Ok(value) => {
-                values.insert(name, value);
-            }
-            Err(env::VarError::NotPresent) => {}
-            Err(env::VarError::NotUnicode(_)) => {
-                return Err(format!("{name} must contain UTF-8 numeric text").into());
-            }
-        }
-    }
-    parse_configuration(|name| values.get(name).map(String::as_str))
-}
-
-fn parse_configuration<'a>(
-    value: impl Fn(&str) -> Option<&'a str>,
-) -> Result<CombinationConfig, Box<dyn Error>> {
-    // Small example settings exercise the mechanism; applications supply their own policy.
-    let config = CombinationConfig {
-        min_points: number(ENVIRONMENT[0], value(ENVIRONMENT[0]), 3)?,
-        pool_multiplier: number(ENVIRONMENT[1], value(ENVIRONMENT[1]), 2)?,
-        diameter_fraction: number(ENVIRONMENT[2], value(ENVIRONMENT[2]), 0.5)?,
-        combinations_per_region: number(ENVIRONMENT[3], value(ENVIRONMENT[3]), 12)?,
-        max_work: number(ENVIRONMENT[4], value(ENVIRONMENT[4]), 10_000_000)?,
-    };
-    config.validate()?;
-    Ok(config)
-}
-
-fn number<T: FromStr>(name: &str, value: Option<&str>, default: T) -> Result<T, Box<dyn Error>> {
-    match value {
-        None => Ok(default),
-        Some(raw) => raw
-            .parse()
-            .map_err(|_| format!("invalid numeric value for {name}").into()),
-    }
 }
 
 fn snapshot(
@@ -233,7 +189,7 @@ fn kind_name(kind: FeatureKind) -> &'static str {
     }
 }
 
-fn write_new(path: &Path, document: &Value) -> Result<(), Box<dyn Error>> {
+fn write_new(path: &Path, document: &Value) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut encoded = serde_json::to_vec_pretty(document)?;
     encoded.push(b'\n');
     if let Some(parent) = path
