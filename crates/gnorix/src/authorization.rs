@@ -4,7 +4,7 @@ use std::num::{NonZeroU64, NonZeroUsize};
 
 use crate::{
     Error, Result,
-    biometrics::{Capture, MeasurementEngine},
+    biometrics::{Candidates, Capture, MeasurementEngine},
     crypto::{
         CryptoProvider, DerivedKey, SecretInput, SignatureVerifier, derive_candidate,
         validate_public_key, validate_signature,
@@ -12,7 +12,8 @@ use crate::{
     encoding,
     enrollment::{Enrollment, EnrollmentCommitment},
     error::{Resource, Stage, algorithm},
-    merkle::{self, Hash, MerkleError, MerkleProof, leaf_hash},
+    merkle::{self, Hash, MerkleError, MerkleProof, MerkleTree, leaf_hash},
+    package::EnrollmentPackage,
     policy::{Limits, check_attempt},
 };
 
@@ -95,20 +96,55 @@ pub fn sign<M: MeasurementEngine, C: CryptoProvider>(
     secret: Option<&SecretInput>,
     limits: &Limits,
 ) -> Result<Authorization> {
-    validate_signing_context(measurement, crypto, enrollment, secret)?;
-    let message = signing_message(&enrollment.commitment, &action, limits)?;
-    let (key, proof) =
-        reconstruct_member(measurement, crypto, enrollment, capture, secret, limits)?;
-    let signature = sign_message(crypto, &key, &message, limits)?;
-
-    Ok(Authorization {
-        enrollment_id: enrollment.commitment.context.spec.id,
-        revision: enrollment.commitment.context.spec.revision,
+    validate_signing_context(
+        measurement.profile_id(),
+        crypto,
+        &enrollment.commitment,
+        secret,
+    )?;
+    sign_candidate_stream(
+        crypto,
+        &enrollment.commitment,
+        &enrollment.tree,
         action,
-        public_key: key.public,
-        proof,
-        signature,
-    })
+        secret,
+        limits,
+        || {
+            measurement
+                .reconstruct(capture, &enrollment.model, limits)
+                .map_err(|error| algorithm(Stage::Reconstruction, error))
+        },
+    )
+}
+
+/// Find the first enrolled candidate in an already generated stream and sign.
+///
+/// Call only after the application has approved `action`. `profile_id` identifies
+/// the caller's candidate interpretation and must match the retained enrollment.
+/// The suite, secret policy and action/context bounds are checked before reading
+/// candidates. Search stops at the first member; later candidates are not read.
+/// Natural exhaustion means no member was found, while resource and algorithm
+/// failures remain errors. The package must come from the intended enrollment;
+/// verification still requires the independently trusted commitment.
+pub fn sign_candidates<C: CryptoProvider>(
+    crypto: &C,
+    candidates: Candidates<'_>,
+    profile_id: Hash,
+    package: &EnrollmentPackage,
+    action: Action,
+    secret: Option<&SecretInput>,
+    limits: &Limits,
+) -> Result<Authorization> {
+    validate_signing_context(profile_id, crypto, package.commitment(), secret)?;
+    sign_candidate_stream(
+        crypto,
+        package.commitment(),
+        package.proof_material(),
+        action,
+        secret,
+        limits,
+        || Ok(candidates),
+    )
 }
 
 /// Verify against independently trusted registry state and the expected action.
@@ -141,15 +177,15 @@ pub fn verify<'a, C: SignatureVerifier>(
     })
 }
 
-fn validate_signing_context<M: MeasurementEngine, C: CryptoProvider>(
-    measurement: &M,
+fn validate_signing_context<C: CryptoProvider>(
+    profile_id: Hash,
     crypto: &C,
-    enrollment: &Enrollment<M::Model>,
+    commitment: &EnrollmentCommitment,
     secret: Option<&SecretInput>,
 ) -> Result<()> {
-    let context = &enrollment.commitment.context;
+    let context = &commitment.context;
 
-    if measurement.profile_id() != context.profile_id {
+    if profile_id != context.profile_id {
         return Err(Error::ProfileMismatch);
     }
     if crypto.suite_id() != context.suite_id {
@@ -159,27 +195,47 @@ fn validate_signing_context<M: MeasurementEngine, C: CryptoProvider>(
     context.spec.secret_policy.validate(secret)
 }
 
-fn reconstruct_member<M: MeasurementEngine, C: CryptoProvider>(
-    measurement: &M,
+fn sign_candidate_stream<'a, C: CryptoProvider>(
     crypto: &C,
-    enrollment: &Enrollment<M::Model>,
-    capture: &Capture,
+    commitment: &EnrollmentCommitment,
+    tree: &MerkleTree,
+    action: Action,
+    secret: Option<&SecretInput>,
+    limits: &Limits,
+    generate: impl FnOnce() -> Result<Candidates<'a>>,
+) -> Result<Authorization> {
+    let message = signing_message(commitment, &action, limits)?;
+    let context = commitment.context.encode(limits)?;
+    let candidates = generate()?;
+    let (key, proof) = find_member(crypto, candidates, tree, &context, secret, limits)?;
+    let signature = sign_message(crypto, &key, &message, limits)?;
+
+    Ok(Authorization {
+        enrollment_id: commitment.context.spec.id,
+        revision: commitment.context.spec.revision,
+        action,
+        public_key: key.public,
+        proof,
+        signature,
+    })
+}
+
+fn find_member<C: CryptoProvider>(
+    crypto: &C,
+    candidates: Candidates<'_>,
+    tree: &MerkleTree,
+    context: &[u8],
     secret: Option<&SecretInput>,
     limits: &Limits,
 ) -> Result<(DerivedKey<C>, MerkleProof)> {
-    let context = enrollment.commitment.context.encode(limits)?;
-    let candidates = measurement
-        .reconstruct(capture, &enrollment.model, limits)
-        .map_err(|error| algorithm(Stage::Reconstruction, error))?;
-
     for (attempt, candidate) in candidates.enumerate() {
         check_attempt(attempt, limits)?;
 
         let candidate = candidate.map_err(|error| algorithm(Stage::Reconstruction, error))?;
-        let key = derive_candidate(crypto, &candidate, &context, secret, limits)?;
-        let leaf = leaf_hash(&context, &key.public);
+        let key = derive_candidate(crypto, &candidate, context, secret, limits)?;
+        let leaf = leaf_hash(context, &key.public);
 
-        match enrollment.tree.proof_for(&leaf) {
+        match tree.proof_for(&leaf) {
             Ok(proof) => return Ok((key, proof)),
             Err(MerkleError::MissingLeaf) => continue,
             Err(error) => return Err(error.into()),

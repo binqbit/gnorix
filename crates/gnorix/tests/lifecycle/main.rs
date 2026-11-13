@@ -5,5 +5,6 @@
 mod candidates;
 mod enrollment;
 mod failures;
+mod signing_candidates;
 mod support;
 mod verification;

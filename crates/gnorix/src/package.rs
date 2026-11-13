@@ -86,6 +86,10 @@ impl EnrollmentPackage {
         &self.commitment
     }
 
+    pub(crate) fn proof_material(&self) -> &MerkleTree {
+        &self.tree
+    }
+
     /// Compute a leaf from a later public key and locate its membership path.
     /// A valid path proves membership only against a separately trusted root.
     pub fn proof_for(
