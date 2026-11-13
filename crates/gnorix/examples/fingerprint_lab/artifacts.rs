@@ -4,6 +4,9 @@ use image::{GrayImage, Luma};
 
 use crate::Result;
 
+#[path = "artifacts/streaks.rs"]
+mod streaks;
+
 /// Smooth displacement, blur and exposure fields cover the whole image.
 /// Their spatial scales come from clean ridge width; severity controls strength.
 pub fn apply(source: &GrayImage, unit_px: f64, level: u8, seed: u64) -> Result<GrayImage> {
@@ -19,7 +22,9 @@ pub fn apply(source: &GrayImage, unit_px: f64, level: u8, seed: u64) -> Result<G
     let mild = image::imageops::blur(&warped, (unit * 0.14 * strength) as f32);
     let strong = image::imageops::blur(&warped, (unit * 0.55 * strength) as f32);
 
-    Ok(render_capture(&warped, &mild, &strong, &fields, strength))
+    let mut output = render_capture(&warped, &mild, &strong, &fields, strength);
+    streaks::apply(&mut output, unit, strength, seed)?;
+    Ok(output)
 }
 
 fn validate(source: &GrayImage, unit_px: f64, level: u8) -> Result<()> {
@@ -197,13 +202,21 @@ fn sample(source: &GrayImage, x: f64, y: f64) -> f64 {
 struct ScenarioRandom(u64);
 
 impl ScenarioRandom {
-    fn unit(&mut self) -> f64 {
+    fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut value = self.0;
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         value ^= value >> 31;
-        (value >> 11) as f64 / ((1_u64 << 53) as f64)
+        value
+    }
+
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / ((1_u64 << 53) as f64)
+    }
+
+    fn between(&mut self, lower: f64, upper: f64) -> f64 {
+        lower + self.unit() * (upper - lower)
     }
 }
 
