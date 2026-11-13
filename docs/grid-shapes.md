@@ -29,6 +29,26 @@ For n points the complete Cartesian product contains `(1 + 3L(L + 1))^n` assignm
 
 `GridShapes::variants()` is a fallible iterator; it does not hold the product in memory. A checked total count rejects a request exceeding `max_variants` before traversal. Preparation and iteration share a work allowance. Exhausting it yields an error and stops, rather than reporting an incomplete traversal as successful.
 
+## Run on the existing combinations
+
+```sh
+cargo run -p gnorix --example feature_grid --release --locked -- \
+  reports/fingerprint/feature-combinations.json \
+  reports/fingerprint/feature-grid.json
+```
+
+The output file must not already exist. The adapter reads the combination export, including its measured R; it does not repeat image extraction. Its example controls are:
+
+| Environment variable | Example default | Meaning |
+|---|---:|---|
+| `GNORIX_GRID_UNCERTAINTY_STEPS` | 1 | Number of neighbor steps L. |
+| `GNORIX_GRID_MAX_VARIANTS` | 1000000 | Maximum complete assignment count across all combinations. |
+| `GNORIX_GRID_MAX_WORK` | 10000000 | Preparation and traversal work entries. |
+
+The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output.
+
+For the checked-in image's 108 selected subsets (61 triples, 38 quadruples, nine quintuples), level 1 traverses **263,424 assignments**. They are positional alternatives, not distinct keys.
+
 ## Interpretation
 
 This is per-subset geometric normalization, not registration of whole captures or a canonical key encoding. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.
