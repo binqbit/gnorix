@@ -110,14 +110,17 @@ fn canonical_descriptor(
 }
 
 fn checked_record_bytes(count: usize, max_bytes: NonZeroUsize) -> Result<usize> {
+    Ok(descriptor_size(count, max_bytes)? - DESCRIPTOR_OVERHEAD)
+}
+
+pub(super) fn descriptor_size(count: usize, max_bytes: NonZeroUsize) -> Result<usize> {
     let records = count
         .checked_mul(COORDINATE_BYTES)
         .ok_or(Error::LimitExceeded(Resource::CandidateBytes))?;
     records
         .checked_add(DESCRIPTOR_OVERHEAD)
         .filter(|&size| size <= max_bytes.get())
-        .ok_or(Error::LimitExceeded(Resource::CandidateBytes))?;
-    Ok(records)
+        .ok_or(Error::LimitExceeded(Resource::CandidateBytes))
 }
 
 #[cfg(test)]

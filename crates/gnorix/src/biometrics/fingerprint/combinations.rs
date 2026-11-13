@@ -3,10 +3,13 @@
 mod enumeration;
 mod projection;
 mod regions;
+mod search;
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use super::{FeatureKind, Fingerprint, FingerprintError, Point};
+
+pub use search::{SigningSearchConfig, signing_candidates};
 
 /// Selection controls. Applications choose these explicitly; they are not
 /// biometric matching tolerances or a cryptographic security estimate.

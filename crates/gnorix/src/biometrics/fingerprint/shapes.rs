@@ -216,6 +216,29 @@ pub fn prepare_grid_shapes(
     })
 }
 
+/// Reuses enrollment's canonical frame and padding for one observed subset.
+/// No positional-neighborhood count or variants are prepared during signing.
+/// The caller passes its remaining cumulative budget and debits the returned
+/// work; any failure terminates that candidate stream.
+pub(super) fn baseline_candidate(
+    positions: &[Point],
+    spacing: f64,
+    padding: u32,
+    max_work: usize,
+    max_descriptor_bytes: NonZeroUsize,
+) -> Result<(crate::biometrics::Candidate, usize), crate::error::AlgorithmError> {
+    let mut work = WorkBudget::new(max_work);
+    let descriptor_bytes = encoding::descriptor_size(positions.len(), max_descriptor_bytes)?;
+    let candidates = frame::candidate_frames(positions, spacing, &mut work)?;
+    let selected = grid::choose_frame(candidates.candidates, &mut work)?;
+
+    work.spend(positions.len())?;
+    let (baseline, phase) = grid::align_and_pad(&selected.snapped, padding)?;
+    work.spend(descriptor_bytes)?;
+    let candidate = grid_candidate(&baseline, phase, max_descriptor_bytes)?;
+    Ok((candidate, max_work - work.remaining))
+}
+
 fn index_points<'a>(
     points: &'a [CombinationPoint],
     work: &mut WorkBudget,

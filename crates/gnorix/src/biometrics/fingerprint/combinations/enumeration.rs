@@ -5,10 +5,77 @@ use std::collections::BinaryHeap;
 
 use super::{CombinationError, WorkBudget};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct RankedSubset {
     pub ranks: Vec<usize>,
     pub score: f64,
+}
+
+/// Lazy best-first traversal over an explicit subset-size range.
+///
+/// Priorities are borrowed only during each operation, so callers can own their
+/// point collection. Expanding the previous tuple is deferred until the next
+/// request; stopping after a match performs no work on its unused descendants.
+pub(super) struct RankedSubsets {
+    pending: BinaryHeap<Pending>,
+    deferred: Option<Pending>,
+    finished: bool,
+}
+
+impl RankedSubsets {
+    pub(super) fn new(
+        priorities: &[f64],
+        minimum: usize,
+        maximum: usize,
+        work: &mut WorkBudget,
+    ) -> Result<Self, CombinationError> {
+        if minimum == 0 || minimum > maximum || maximum > priorities.len() {
+            return Err(CombinationError::InvalidConfig(
+                "subset size range must fit the candidate pool",
+            ));
+        }
+        Ok(Self {
+            pending: search_roots(priorities, minimum, maximum, work)?,
+            deferred: None,
+            finished: false,
+        })
+    }
+
+    pub(super) fn next(
+        &mut self,
+        priorities: &[f64],
+        work: &mut WorkBudget,
+    ) -> Result<Option<RankedSubset>, CombinationError> {
+        if self.finished {
+            return Ok(None);
+        }
+        let result = self.advance(priorities, work);
+        if result.is_err() || matches!(result, Ok(None)) {
+            self.finished = true;
+            self.pending.clear();
+            self.deferred = None;
+        }
+        result
+    }
+
+    fn advance(
+        &mut self,
+        priorities: &[f64],
+        work: &mut WorkBudget,
+    ) -> Result<Option<RankedSubset>, CombinationError> {
+        if let Some(previous) = self.deferred.take() {
+            extend_frontier(&mut self.pending, &previous, priorities, work)?;
+        }
+        let Some(current) = self.pending.pop() else {
+            return Ok(None);
+        };
+        // The current parent remains available for deferred expansion. Charge
+        // the separate owned rank list returned to the consumer.
+        work.spend(current.subset.ranks.len())?;
+        let subset = current.subset.clone();
+        self.deferred = Some(current);
+        Ok(Some(subset))
+    }
 }
 
 /// Priorities are validated and sorted descending by the caller. Rank order
@@ -69,17 +136,13 @@ fn fill_by_score(
     budget: usize,
     work: &mut WorkBudget,
 ) -> Result<(), CombinationError> {
-    let mut pending = search_roots(priorities, minimum, work)?;
-    while let Some(current) = pending.pop() {
-        let already_selected = is_coverage_seed(&current.subset.ranks, minimum);
-        if !already_selected && selected.len() + 1 == budget {
-            selected.push(current.subset);
+    let mut ranked = RankedSubsets::new(priorities, minimum, priorities.len(), work)?;
+    while selected.len() < budget {
+        let Some(subset) = ranked.next(priorities, work)? else {
             break;
-        }
-
-        extend_frontier(&mut pending, &current, priorities, work)?;
-        if !already_selected {
-            selected.push(current.subset);
+        };
+        if !is_coverage_seed(&subset.ranks, minimum) {
+            selected.push(subset);
         }
     }
     Ok(())
@@ -88,10 +151,11 @@ fn fill_by_score(
 fn search_roots(
     priorities: &[f64],
     minimum: usize,
+    maximum: usize,
     work: &mut WorkBudget,
 ) -> Result<BinaryHeap<Pending>, CombinationError> {
     let mut pending = BinaryHeap::new();
-    for size in minimum..=priorities.len() {
+    for size in minimum..=maximum {
         work.spend(size)?;
         pending.push(Pending {
             subset: ranked_subset(priorities, (0..size).collect()),
@@ -284,6 +348,71 @@ mod tests {
     }
 
     #[test]
+    fn lazy_size_ranges_match_exhaustive_order_without_duplicates() {
+        for size in 1..=7 {
+            for priorities in [
+                vec![0.0; size],
+                vec![1.0; size],
+                (0..size)
+                    .map(|rank| (size - rank) as f64 / size as f64)
+                    .collect(),
+            ] {
+                for minimum in 1..=size {
+                    for maximum in minimum..=size {
+                        let mut expected: Vec<_> = (1usize..1usize << size)
+                            .filter(|mask| {
+                                (minimum..=maximum).contains(&(mask.count_ones() as usize))
+                            })
+                            .map(|mask| {
+                                ranked_subset(
+                                    &priorities,
+                                    (0..size).filter(|rank| mask & (1 << rank) != 0).collect(),
+                                )
+                            })
+                            .collect();
+                        expected.sort_by(compare_subsets);
+                        let mut work = WorkBudget::new(100_000);
+                        let mut cursor =
+                            RankedSubsets::new(&priorities, minimum, maximum, &mut work).unwrap();
+                        let mut actual = Vec::new();
+                        while let Some(subset) = cursor.next(&priorities, &mut work).unwrap() {
+                            actual.push(subset);
+                        }
+                        assert_eq!(actual, expected);
+                        let distinct: BTreeSet<_> = actual.iter().map(|item| &item.ranks).collect();
+                        assert_eq!(distinct.len(), actual.len());
+                        assert!(cursor.next(&priorities, &mut work).unwrap().is_none());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lazy_expansion_waits_for_another_request_and_failure_terminates_search() {
+        let priorities = [1.0, 0.8, 0.6, 0.4];
+        // Two entries construct the first root and two copy its yielded ranks.
+        // No budget remains for the unused children until another request.
+        let mut work = WorkBudget::new(4);
+        let mut cursor = RankedSubsets::new(&priorities, 2, 2, &mut work).unwrap();
+        assert_eq!(
+            cursor.next(&priorities, &mut work).unwrap().unwrap().ranks,
+            [0, 1]
+        );
+        assert!(matches!(
+            cursor.next(&priorities, &mut work),
+            Err(CombinationError::WorkLimit)
+        ));
+        assert!(cursor.next(&priorities, &mut work).unwrap().is_none());
+        for (minimum, maximum) in [(0, 2), (3, 2), (1, 5)] {
+            assert!(
+                RankedSubsets::new(&priorities, minimum, maximum, &mut WorkBudget::new(100))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn scores_mean_weights_and_returns_canonical_ties() {
         let result = enumerate(&[1.0, 0.5, 0.0], 2, 4, &mut WorkBudget::new(1_000)).unwrap();
         assert_eq!(
@@ -336,9 +465,9 @@ mod tests {
         let priorities: Vec<_> = (0..40).map(|rank| (40 - rank) as f64 / 40.0).collect();
         let minimum = 20;
         let budget = 256;
-        // At most seeds + roots + two children per popped tuple, charging at
+        // At most seeds + roots + two children and one owned result per tuple, charging at
         // most n rank entries each. The full space contains > 2^39 subsets.
-        let bound = 40 * (2 * (40 - minimum + 1) + 2 * budget);
+        let bound = 40 * (2 * (40 - minimum + 1) + 3 * budget);
         let result = enumerate(&priorities, minimum, budget, &mut WorkBudget::new(bound)).unwrap();
         assert_eq!(result.len(), budget);
         assert_incidence(&result, priorities.len());
