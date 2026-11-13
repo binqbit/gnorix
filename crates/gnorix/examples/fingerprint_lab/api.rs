@@ -20,20 +20,20 @@ use serde_json::json;
 use super::{
     Result,
     engine::Engine,
+    gallery::{Gallery, ImageView},
     model::{
-        ArtifactRequest, LabConfig, LabData, PrepareRequest, PreparedId, SignRequest, TestRequest,
-        VerifyRequest,
+        ArtifactRequest, ImageRequest, LabConfig, LabData, PrepareRequest, PreparedId, SignRequest,
+        TestRequest, VerifyRequest,
     },
     resources::{DEFAULT_MEMORY_GIB, MAX_MEMORY_GIB, MIN_MEMORY_GIB},
 };
-
-const SOURCE: &[u8] = include_bytes!("../../tests/assets/test-fingerprint.png");
 
 #[derive(Clone)]
 struct App {
     token: Arc<String>,
     authority: Arc<String>,
     engine: Arc<Mutex<Engine>>,
+    gallery: Arc<Gallery>,
     snapshot: Arc<Mutex<Snapshot>>,
     sequence: Arc<AtomicU64>,
 }
@@ -49,7 +49,8 @@ struct Job {
 #[derive(Clone, Serialize)]
 struct Snapshot {
     token: String,
-    image: Image,
+    image: ImageView,
+    gallery: Vec<ImageView>,
     defaults: LabConfig,
     enrollment_memory: EnrollmentMemory,
     #[serde(flatten)]
@@ -68,14 +69,8 @@ struct EnrollmentMemory {
     max_gib: u8,
 }
 
-#[derive(Clone, Serialize)]
-struct Image {
-    url: &'static str,
-    width: u32,
-    height: u32,
-}
-
 enum Command {
+    Image(ImageRequest),
     Artifacts(ArtifactRequest),
     Prepare(PrepareRequest),
     Enroll(PreparedId),
@@ -84,8 +79,14 @@ enum Command {
     Test(TestRequest),
 }
 
-pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
-    let (width, height) = engine.dimensions();
+fn application(engine: Engine, gallery: Gallery, port: u16) -> Result<App> {
+    let image = gallery
+        .get(engine.source_id())
+        .ok_or("engine source is absent from gallery")?;
+    if engine.dimensions() != (image.view.width, image.view.height) {
+        return Err("engine source dimensions differ from gallery".into());
+    }
+    let image = image.view.clone();
     let (preview_revision, preview) = engine.preview();
     let mut bytes = [0; 32];
     getrandom::fill(&mut bytes)?;
@@ -95,11 +96,8 @@ pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
         authority: Arc::new(format!("127.0.0.1:{port}")),
         snapshot: Arc::new(Mutex::new(Snapshot {
             token,
-            image: Image {
-                url: "/fingerprint.png",
-                width,
-                height,
-            },
+            image,
+            gallery: gallery.views(),
             defaults: LabConfig::default(),
             enrollment_memory: EnrollmentMemory {
                 default_gib: DEFAULT_MEMORY_GIB,
@@ -112,14 +110,21 @@ pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
             preview_revision,
         })),
         engine: Arc::new(Mutex::new(engine)),
+        gallery: Arc::new(gallery),
         sequence: Arc::new(AtomicU64::new(1)),
     };
+    Ok(app)
+}
+
+pub(super) fn router(engine: Engine, gallery: Gallery, port: u16) -> Result<Router> {
+    let app = application(engine, gallery, port)?;
     Ok(Router::new()
         .route("/", get(index))
         .route("/app.css", get(css))
         .route("/app.js", get(javascript))
         .route("/logo.svg", get(logo))
-        .route("/fingerprint.png", get(source))
+        .route("/api/images/{id}", get(source))
+        .route("/api/image", post(select_image))
         .route("/api/scan/{revision}", get(scan))
         .route("/api/state", get(state))
         .route("/api/prepare", post(prepare))
@@ -182,6 +187,17 @@ fn payload<T>(
     input
         .map(|Json(value)| value)
         .map_err(|error| (error.status(), error.body_text()))
+}
+
+async fn select_image(
+    State(app): State<App>,
+    input: std::result::Result<Json<ImageRequest>, JsonRejection>,
+) -> Response {
+    match payload(input) {
+        Ok(value) if app.gallery.get(&value.id).is_some() => launch(app, Command::Image(value)),
+        Ok(_) => failure(StatusCode::NOT_FOUND, "Unknown fingerprint image"),
+        Err((status, message)) => failure(status, &message),
+    }
 }
 
 async fn prepare(
@@ -273,6 +289,11 @@ fn launch(app: App, command: Command) -> Response {
                 }
             };
             let result = match command {
+                Command::Image(request) => {
+                    phase("Loading fingerprint image");
+                    let image = worker.gallery.get(&request.id).ok_or("Image unavailable")?;
+                    engine.replace_source(&request.id, image.image.clone())
+                }
                 Command::Artifacts(request) => engine.change_artifacts(request, phase),
                 Command::Prepare(request) => engine.prepare(request, phase),
                 Command::Enroll(request) => engine.enroll(request, phase),
@@ -283,13 +304,20 @@ fn launch(app: App, command: Command) -> Response {
             Ok::<_, String>((
                 engine.view(),
                 engine.preview(),
+                worker
+                    .gallery
+                    .get(engine.source_id())
+                    .ok_or("Image unavailable")?
+                    .view
+                    .clone(),
                 result.map_err(|error| error.to_string()),
             ))
         })
         .await;
         if let Ok(mut snapshot) = app.snapshot.lock() {
             let error = match outcome {
-                Ok(Ok((view, (revision, preview), result))) => {
+                Ok(Ok((view, (revision, preview), image, result))) => {
+                    snapshot.image = image;
                     snapshot.data = view;
                     snapshot.preview_revision = revision;
                     snapshot.preview = preview;
@@ -327,8 +355,15 @@ async fn javascript() -> Response {
 async fn logo() -> Response {
     asset("image/svg+xml", include_bytes!("web/logo.svg"))
 }
-async fn source() -> Response {
-    asset("image/png", SOURCE)
+async fn source(State(app): State<App>, Path(id): Path<String>) -> Response {
+    match app.gallery.get(&id) {
+        Some(image) => (
+            [(header::CONTENT_TYPE, "image/png")],
+            image.png.as_ref().to_vec(),
+        )
+            .into_response(),
+        None => failure(StatusCode::NOT_FOUND, "Unknown fingerprint image"),
+    }
 }
 
 async fn scan(State(app): State<App>, Path(revision): Path<String>) -> Response {
@@ -363,6 +398,7 @@ mod tests {
         let image = image::GrayImage::new(2, 2);
         router(
             Engine::new(image, std::env::temp_dir().join("gnorix-unused-lab-test")).unwrap(),
+            Gallery::test_catalog(),
             8765,
         )
         .unwrap()
@@ -427,7 +463,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let bytes = to_bytes(response.into_body(), 10_000).await.unwrap();
         assert!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["error"].is_string());
-        for path in ["/", "/app.js", "/app.css", "/logo.svg", "/fingerprint.png"] {
+        for path in ["/", "/app.js", "/app.css", "/logo.svg", "/api/images/test"] {
             let response = app
                 .clone()
                 .oneshot(
@@ -478,5 +514,148 @@ mod tests {
             app.oneshot(bad_host).await.unwrap().status(),
             StatusCode::FORBIDDEN
         );
+    }
+
+    async fn state_json(app: &Router) -> serde_json::Value {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/api/state")
+                    .header("Host", "127.0.0.1:8765")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap()
+    }
+
+    fn image_request(id: &str, token: &str) -> Request<Body> {
+        Request::post("/api/image")
+            .header("Host", "127.0.0.1:8765")
+            .header("X-Gnorix-Token", token)
+            .header("Content-Type", "application/json")
+            .body(Body::from(serde_json::to_vec(&json!({"id": id})).unwrap()))
+            .unwrap()
+    }
+
+    async fn completed_state(app: &Router) -> serde_json::Value {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let state = state_json(app).await;
+            if state["job"]["state"] != "running" {
+                assert_eq!(state["job"]["state"], "complete", "{state}");
+                return state;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "image job did not complete"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_selection_updates_image_and_preview_atomically_without_reusing_revisions() {
+        let app = test_router();
+        let initial = state_json(&app).await;
+        assert_eq!(initial["image"]["id"], "test");
+        assert_eq!(initial["gallery"].as_array().unwrap().len(), 2);
+        let token = initial["token"].as_str().unwrap();
+        for (id, revision, value) in [("other", 1, 200), ("test", 2, 0)] {
+            let response = app.clone().oneshot(image_request(id, token)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+            let state = completed_state(&app).await;
+            assert_eq!(state["image"]["id"], id);
+            assert_eq!(state["image"]["url"], format!("/api/images/{id}"));
+            assert_eq!(state["artifact"]["revision"], revision);
+            assert_eq!(state["artifact"]["level"], 0);
+            for field in ["enrollment", "prepared", "result"] {
+                assert!(state[field].is_null());
+            }
+            for path in [
+                format!("/api/images/{id}"),
+                format!("/api/scan/{revision}.png"),
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::get(path)
+                            .header("Host", "127.0.0.1:8765")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let bytes = to_bytes(response.into_body(), 1_000_000).await.unwrap();
+                assert_eq!(
+                    image::load_from_memory(&bytes)
+                        .unwrap()
+                        .into_luma8()
+                        .as_raw(),
+                    &[value; 4]
+                );
+            }
+            let stale = format!("/api/scan/{}.png", revision - 1);
+            assert_eq!(
+                app.clone()
+                    .oneshot(
+                        Request::get(stale)
+                            .header("Host", "127.0.0.1:8765")
+                            .body(Body::empty())
+                            .unwrap()
+                    )
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
+        }
+        let before = state_json(&app).await;
+        assert_eq!(
+            app.clone()
+                .oneshot(image_request("missing", token))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(before, state_json(&app).await);
+        assert_eq!(
+            app.clone()
+                .oneshot(image_request("other", "wrong-token"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(before, state_json(&app).await);
+    }
+
+    #[tokio::test]
+    async fn source_selection_cannot_overlap_an_existing_job() {
+        let gallery = Gallery::test_catalog();
+        let engine = Engine::new(
+            gallery.default_image().image.clone(),
+            std::path::PathBuf::new(),
+        )
+        .unwrap();
+        let app = application(engine, gallery, 8765).unwrap();
+        app.snapshot.lock().unwrap().job = Some(Job {
+            id: 7,
+            state: "running",
+            phase: "Analyzing fingerprint".into(),
+            error: None,
+        });
+        let response = select_image(
+            State(app.clone()),
+            Ok(Json(ImageRequest { id: "other".into() })),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(app.snapshot.lock().unwrap().image.id, "test");
+        assert_eq!(app.snapshot.lock().unwrap().job.as_ref().unwrap().id, 7);
+        assert_eq!(app.engine.lock().unwrap().source_id(), "test");
     }
 }

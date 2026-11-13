@@ -2,6 +2,8 @@
 
 [SOCOFing on Kaggle](https://www.kaggle.com/datasets/ruizgara/socofing) is an approved external input for local research on ridge clarity, illumination normalization and feature extraction. Keep the dataset and converted captures outside tracked project files. Normal builds and tests must not require a Kaggle download.
 
+For interactive demonstrations, the [Fingerprint Lab gallery](fingerprint-lab.md#choose-an-image) imports five pinned originals into an ignored local directory. Its visually curated examples are separate from the stratified comparison set described below. The manifest records source and decoded-pixel hashes; neither importing nor viewing resizes the analysis input.
+
 ## Provenance and use
 
 Shehu, Ruiz-Garcia, Palade and James published SOCOFing in 2018: 6,000 originals from 600 adults, with ten fingers per subject. Images carry subject, gender-label, hand and finger labels. STRANGE-generated obliteration (`Obl`), central rotation (`CR`) and `Zcut` variants have Easy, Medium and Hard settings. The paper identifies Hamster plus HSDU03PTM and SecuGen SDU03PTM scanners. See the [dataset publication](https://arxiv.org/abs/1807.10609).

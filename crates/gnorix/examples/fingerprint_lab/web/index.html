@@ -67,6 +67,22 @@
                         </div>
                         <span id="image-size" class="tag">PNG</span>
                     </div>
+                    <div class="source-picker">
+                        <div class="source-picker-heading">
+                            <span class="eyebrow">IMAGE LIBRARY</span>
+                            <span id="gallery-count">Loading scans…</span>
+                        </div>
+                        <div
+                            id="source-gallery"
+                            class="source-gallery"
+                            role="group"
+                            aria-label="Choose a fingerprint image"
+                        ></div>
+                        <p id="source-description" class="source-description"></p>
+                        <p class="source-reset-note">
+                            Choosing another image starts a new test session.
+                        </p>
+                    </div>
                     <div class="viewer-tools">
                         <div
                             class="segmented"
@@ -114,7 +130,6 @@
                                 id="source-image"
                                 width="1086"
                                 height="1448"
-                                href="/fingerprint.png"
                             />
                             <g id="regions-layer"></g>
                             <g id="points-layer"></g>
@@ -644,7 +659,7 @@ Gnorix fingerprint test</textarea
         <footer>
             <span>GNORIX <b>LAB</b></span>
             <p>
-                Synthetic test fingerprint · computed on this device · no
+                Local fingerprint research · computed on this device · no
                 external services
             </p>
         </footer>

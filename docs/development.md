@@ -87,6 +87,8 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
+The Lab's `gallery.rs` owns its fixed image catalog and bounded, pixel-verified loading of optional local PNGs. `gallery.json` pins the five SOCOFing sources; `tools/fingerprint-gallery/import_socofing.py` prepares them without changing observed pixels. Source selection is serialized with the other jobs and clears all capture-dependent state. Normal tests use local synthetic inputs and require no dataset download.
+
 ## Connecting algorithms
 
 The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance. Separate fingerprint components select subsets, normalize them to the grid and encode candidates; registration of whole captures and calibrated biometric tolerances remain separate work.

@@ -36,6 +36,7 @@ const state = {
     imageLoadingKey: null,
     imageAbort: null,
     imageRequest: 0,
+    galleryKey: null,
 };
 const colors = [
     "#b8ff73",
@@ -131,8 +132,12 @@ function payloadMatches(authorization) {
     return encoded === authorization.action.payload;
 }
 
+function sourceImageKey() {
+    return `original:${state.server.image.id}`;
+}
+
 function artifactImageKey(artifact) {
-    return `artifact:${artifact.revision}`;
+    return `artifact:${state.server.image.id}:${artifact.revision}`;
 }
 
 function artifactReady() {
@@ -150,7 +155,7 @@ function artifactReady() {
 function desiredImage() {
     if (!state.server) return null;
     if (state.mode === "enrollment") {
-        return { key: "original", url: state.server.image.url };
+        return { key: sourceImageKey(), url: state.server.image.url };
     }
     const artifact = state.server.artifact;
     if (
@@ -301,7 +306,7 @@ function currentPrepared() {
     )
         return null;
     if (prepared.work_limit !== Number($("work-limit").value)) return null;
-    if (state.mode === "enrollment" && state.imageKey !== "original")
+    if (state.mode === "enrollment" && state.imageKey !== sourceImageKey())
         return null;
     if (
         state.mode === "enrollment" &&
@@ -359,9 +364,16 @@ function priorityOpacity(priority) {
     return 0.4 + 0.5 * Math.sqrt(Math.max(0, Math.min(1, priority)));
 }
 
+// Keep markers readable when scanner images have different source dimensions.
+function markerUnit() {
+    return 1 / ($("fingerprint").getScreenCTM()?.a || 1);
+}
+
 function featureMarker(point, attributes, title) {
     const { x, y, kind } = point;
-    const size = 7;
+    const unit = markerUnit();
+    const size = 4 * unit;
+    const arm = 1.4 * unit;
     switch (kind) {
         case "ending":
             return svgElement(
@@ -403,7 +415,7 @@ function featureMarker(point, attributes, title) {
             return svgElement(
                 "path",
                 {
-                    d: `M${x - 2.5},${y - size}H${x + 2.5}V${y - 2.5}H${x + size}V${y + 2.5}H${x + 2.5}V${y + size}H${x - 2.5}V${y + 2.5}H${x - size}V${y - 2.5}H${x - 2.5}Z`,
+                    d: `M${x - arm},${y - size}H${x + arm}V${y - arm}H${x + size}V${y + arm}H${x + arm}V${y + size}H${x - arm}V${y + arm}H${x - size}V${y - arm}H${x - arm}Z`,
                     ...attributes,
                 },
                 title,
@@ -424,6 +436,8 @@ function drawSelection() {
         $(id).setAttribute("cy", y);
         $(id).setAttribute("r", radius);
     }
+    $("selection-center").setAttribute("r", 3 * markerUnit());
+    $("radius-handle").setAttribute("r", 6 * markerUnit());
     $("selection-center").setAttribute("cx", x);
     $("selection-center").setAttribute("cy", y);
     $("radius-handle").setAttribute("cx", x + radius);
@@ -504,6 +518,7 @@ function drawEvidence(prepared) {
             );
     }
     const points = prepared.points ?? [];
+    const unit = markerUnit();
     for (const point of points) {
         const included = pool.has(point.id);
         const isMatched = matched.has(point.id);
@@ -531,7 +546,7 @@ function drawEvidence(prepared) {
         if (included) {
             diagnosticsLayer.append(
                 svgElement("path", {
-                    d: `M${point.x - 4},${point.y + 10}H${point.x + 4}`,
+                    d: `M${point.x - 2 * unit},${point.y + 6 * unit}H${point.x + 2 * unit}`,
                     fill: "none",
                     stroke: "#a8b9b0",
                     "stroke-width": 0.8,
@@ -547,7 +562,7 @@ function drawEvidence(prepared) {
                 svgElement("circle", {
                     cx: point.x,
                     cy: point.y,
-                    r: 14,
+                    r: 8 * unit,
                     fill: "none",
                     stroke: "#ffffff",
                     "stroke-width": 1.5,
@@ -640,6 +655,77 @@ function renderResult(prepared) {
     }
 }
 
+function renderGallery() {
+    const { gallery, image } = state.server;
+    const key = JSON.stringify(gallery);
+    if (state.galleryKey !== key) {
+        const cards = gallery.map((item, index) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "source-choice";
+            button.dataset.sourceId = item.id;
+            button.setAttribute("aria-label", `Select ${item.title}`);
+            button.title = `${item.title} — ${item.description}`;
+            const thumbnail = document.createElement("img");
+            thumbnail.src = item.url;
+            thumbnail.alt = "";
+            thumbnail.draggable = false;
+            const label = document.createElement("span");
+            label.textContent = item.id === "test" ? "Default" : `Scan ${String(index).padStart(2, "0")}`;
+            button.append(thumbnail, label);
+            return button;
+        });
+        $("source-gallery").replaceChildren(...cards);
+        state.galleryKey = key;
+    }
+    for (const button of $("source-gallery").querySelectorAll("button")) {
+        const active = button.dataset.sourceId === image.id;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+        button.disabled = state.busy;
+    }
+    const count = gallery.filter((item) => item.id !== "test").length;
+    $("gallery-count").textContent = count ? `Default + ${count} scans` : "Default only";
+    $("viewer-title").textContent = image.title;
+    $("source-description").textContent = count
+        ? image.description
+        : `${image.description} SOCOFing gallery images are not installed on this server.`;
+}
+
+function resetSourceView(image) {
+    clearTimeout(artifactTimer);
+    state.imageAbort?.abort();
+    state.imageRequest += 1;
+    state.imageLoadingKey = null;
+    state.imageKey = null;
+    if (state.imageObjectUrl) URL.revokeObjectURL(state.imageObjectUrl);
+    state.imageObjectUrl = null;
+    $("source-image").removeAttribute("href");
+    state.mode = "enrollment";
+    state.region = null;
+    stopDrag();
+    state.artifactLevel = state.server.artifact.level;
+    state.artifactRandomizeQueued = false;
+    state.artifactRequest = null;
+    state.artifactError = null;
+    $("artifact-level").value = state.artifactLevel;
+    const { width, height } = image;
+    $("fingerprint").setAttribute("viewBox", `0 0 ${width} ${height}`);
+    for (const id of ["source-image", "outside-shade", "mask-background"]) {
+        $(id).setAttribute("width", width);
+        $(id).setAttribute("height", height);
+    }
+    $("image-size").textContent = `${width} × ${height} px`;
+    $("circle-x").max = width - 1;
+    $("circle-y").max = height - 1;
+    $("circle-radius").max = Math.ceil(Math.hypot(width, height));
+    state.circle = {
+        x: Math.round(width / 2),
+        y: Math.round(height / 2),
+        radius: Math.round(Math.min(width, height) * 0.34),
+    };
+}
+
 function render() {
     if (!state.server) return;
     const { enrollment, job } = state.server;
@@ -650,6 +736,7 @@ function render() {
         state.polling ||
         Boolean(state.artifactRequest) ||
         job?.state === "running";
+    renderGallery();
     $("mode-enrollment").classList.toggle(
         "active",
         state.mode === "enrollment",
@@ -686,7 +773,7 @@ function render() {
             : "This exact preview is used for extraction. Change severity or select Randomize for a new variation.";
     const displayReady =
         state.mode === "enrollment"
-            ? state.imageKey === "original"
+            ? state.imageKey === sourceImageKey()
             : artifactReady();
     $("image-stage").classList.toggle("preview-pending", !displayReady);
     $("action-title").textContent =
@@ -816,7 +903,9 @@ async function refresh() {
         if (!response.ok) throw new Error(`Server returned ${response.status}`);
         const next = await response.json();
         if (sequence !== refreshSequence) return;
+        const sourceChanged = state.server && state.server.image.id !== next.image.id;
         state.server = next;
+        if (sourceChanged) resetSourceView(next.image);
         if (!state.initialized) {
             const { image } = state.server;
             const defaults =
@@ -830,26 +919,7 @@ async function refresh() {
             $("memory-budget").max = memory.max_gib;
             $("memory-budget").value =
                 state.server.prepared?.memory_budget_gib ?? memory.default_gib;
-            const { width, height } = image;
-            $("fingerprint").setAttribute("viewBox", `0 0 ${width} ${height}`);
-            for (const id of [
-                "source-image",
-                "outside-shade",
-                "mask-background",
-            ]) {
-                $(id).setAttribute("width", width);
-                $(id).setAttribute("height", height);
-            }
-            $("source-image").setAttribute("href", image.url);
-            $("image-size").textContent = `${width} × ${height} px`;
-            $("circle-x").max = width - 1;
-            $("circle-y").max = height - 1;
-            $("circle-radius").max = Math.ceil(Math.hypot(width, height));
-            state.circle = {
-                x: Math.round(width / 2),
-                y: Math.round(height / 2),
-                radius: Math.round(Math.min(width, height) * 0.34),
-            };
+            resetSourceView(image);
             state.artifactLevel = state.server.artifact?.level ?? 0;
             $("artifact-level").value = state.artifactLevel;
             if (state.server.prepared) {
@@ -885,6 +955,8 @@ async function refresh() {
         $("execute").disabled = true;
         $("verify").disabled = true;
         $("test-altered-scan").disabled = true;
+        for (const button of $("source-gallery").querySelectorAll("button"))
+            button.disabled = true;
     }
     clearTimeout(pollTimer);
     pollTimer = setTimeout(
@@ -939,6 +1011,11 @@ function setMode(mode) {
     syncImage();
     if (mode === "signing") scheduleArtifacts(0);
 }
+$("source-gallery").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-source-id]");
+    if (!button || state.busy || button.dataset.sourceId === state.server.image.id) return;
+    submit("/api/image", { id: button.dataset.sourceId });
+});
 $("mode-enrollment").addEventListener("click", () => setMode("enrollment"));
 $("mode-signing").addEventListener("click", () => setMode("signing"));
 $("prepare").addEventListener("click", () =>
@@ -1152,3 +1229,7 @@ document
         ),
     );
 refresh();
+
+new ResizeObserver(() => {
+    if (state.server) render();
+}).observe($("fingerprint"));

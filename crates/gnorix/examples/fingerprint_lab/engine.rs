@@ -33,8 +33,9 @@ use crate::{
 };
 
 pub struct Engine {
-    // Immutable for this engine's lifetime; the clean cache needs no revision.
+    // Replacing the clean source clears every cached analysis and enrollment.
     source: GrayImage,
+    source_id: String,
     frame: ArtifactFrame,
     output: PathBuf,
     next_id: u64,
@@ -135,6 +136,7 @@ impl Engine {
         };
         Ok(Self {
             source,
+            source_id: "test".into(),
             frame,
             output,
             next_id: 1,
@@ -155,6 +157,39 @@ impl Engine {
 
     pub fn dimensions(&self) -> (u32, u32) {
         (self.source.width(), self.source.height())
+    }
+
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Install a catalog image only after its complete clean preview is ready.
+    /// IDs and revisions keep increasing so previous preparation/scan requests
+    /// cannot accidentally refer to a new capture after a source switch.
+    pub fn replace_source(&mut self, id: &str, source: GrayImage) -> Result<()> {
+        if id == self.source_id {
+            return Ok(());
+        }
+        let revision = self
+            .frame
+            .view
+            .revision
+            .checked_add(1)
+            .ok_or("scan revision overflow")?;
+        let frame = ArtifactFrame::new(source.clone(), revision, 0, artifact_seed(None)?, None)?;
+        let data = LabData {
+            artifact: frame.view.clone(),
+            ..LabData::default()
+        };
+
+        self.source = source;
+        self.source_id = id.into();
+        self.frame = frame;
+        self.analysis = AnalysisCache::default();
+        self.prepared = None;
+        self.enrolled = None;
+        self.data = data;
+        Ok(())
     }
 
     pub fn change_artifacts(
@@ -441,7 +476,7 @@ impl Engine {
         phase("Deriving keys and building the Merkle tree");
         let limits = limits(usize::try_from(budget.candidate_limit())?)?;
         let package_limits = budget.package_limits()?;
-        let context = enrollment_context(parameters)?;
+        let context = enrollment_context(parameters, &self.source_id)?;
         let enrolled = enrollment::enroll_candidates(
             &ExampleCrypto,
             grid.candidates(nonzero(1024 * 1024)?),
@@ -801,14 +836,17 @@ fn random_bytes<const N: usize>() -> Result<[u8; N]> {
     Ok(value)
 }
 
-fn enrollment_context(parameters: &ProfileParameters) -> Result<EnrollmentContext> {
+fn enrollment_context(
+    parameters: &ProfileParameters,
+    source_id: &str,
+) -> Result<EnrollmentContext> {
     Ok(EnrollmentContext {
         spec: EnrollmentSpec {
             domain: Domain {
                 network: "local".into(),
                 verifier: "gnorix-fingerprint-lab".into(),
             },
-            subject: "synthetic-test-fingerprint".into(),
+            subject: format!("fingerprint-lab:{source_id}"),
             id: random_bytes()?,
             revision: NonZeroU64::new(1).expect("nonzero revision"),
             public_salt: random_bytes::<32>()?.to_vec(),
@@ -926,6 +964,98 @@ mod tests {
             selection: None,
             extraction: ExtractionConfig::default(),
         }
+    }
+
+    #[test]
+    fn changing_source_clears_all_capture_state_and_keeps_preparation_ids_monotonic() {
+        let mut engine = Engine::new(GrayImage::new(80, 80), PathBuf::new()).unwrap();
+        engine
+            .analysis
+            .get_or_analyze(clean_analysis_key(), || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        let request = || PrepareRequest {
+            kind: "enrollment".into(),
+            config: LabConfig::default(),
+            selection: None,
+            work_limit: MAX_WORK,
+            artifact_revision: None,
+            memory_budget_gib: DEFAULT_MEMORY_GIB,
+        };
+        engine.prepare(request(), |_| {}).unwrap();
+        let old_id = engine.data.prepared.as_ref().unwrap().id;
+        let enrolled = enrolled_engine();
+        engine.enrolled = enrolled.enrolled;
+        engine.data.enrollment = enrolled.data.enrollment;
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 10,
+                    randomize: false,
+                },
+                |_| {},
+            )
+            .unwrap();
+        engine.data.result = Some(RunResult {
+            status: "matched".into(),
+            message: "Old result".into(),
+            attempts: 1,
+            feature_ids: vec![0],
+            authorization: None,
+            verified: true,
+        });
+        let previous_revision = engine.frame.view.revision;
+        let new_source = GrayImage::from_pixel(80, 80, image::Luma([150]));
+        engine.replace_source("other", new_source.clone()).unwrap();
+        assert_eq!(engine.source_id(), "other");
+        assert_eq!(engine.frame.view.revision, previous_revision + 1);
+        assert_eq!(engine.frame.view.level, 0);
+        assert_eq!(engine.frame.image, new_source);
+        assert_eq!(engine.source, new_source);
+        assert!(engine.frame.view.ridge_width_px.is_none());
+        assert!(engine.analysis.entry.is_none());
+        assert!(engine.prepared.is_none());
+        assert!(engine.enrolled.is_none());
+        assert!(engine.data.prepared.is_none());
+        assert!(engine.data.enrollment.is_none());
+        assert!(engine.data.result.is_none());
+
+        engine
+            .analysis
+            .get_or_analyze(clean_analysis_key(), || Ok((compact_features(), [0.0; 2])))
+            .unwrap();
+        engine.prepare(request(), |_| {}).unwrap();
+        assert!(engine.data.prepared.as_ref().unwrap().id > old_id);
+        assert!(
+            engine
+                .enroll(
+                    PreparedId {
+                        prepared_id: old_id
+                    },
+                    |_| {}
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("stale")
+        );
+    }
+
+    #[test]
+    fn same_source_is_a_noop_and_failed_switch_does_not_mutate_state() {
+        let mut engine = enrolled_engine();
+        let source = engine.source.clone();
+        let root = engine.data.enrollment.as_ref().unwrap().root.clone();
+        engine.replace_source("test", GrayImage::new(2, 2)).unwrap();
+        assert_eq!(engine.source, source);
+        assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
+        engine.frame.view.revision = u64::MAX;
+        assert!(
+            engine
+                .replace_source("other", GrayImage::new(2, 2))
+                .is_err()
+        );
+        assert_eq!(engine.source, source);
+        assert_eq!(engine.source_id(), "test");
+        assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
     }
 
     #[test]
@@ -1231,7 +1361,7 @@ mod tests {
         let enrollment = enrollment::enroll_candidates(
             &ExampleCrypto,
             candidates,
-            enrollment_context(&parameters).unwrap(),
+            enrollment_context(&parameters, "test").unwrap(),
             None,
             &limits,
         )

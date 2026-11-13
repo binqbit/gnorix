@@ -102,6 +102,12 @@ pub struct PrepareRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ImageRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ArtifactRequest {
     pub level: u8,
     #[serde(default)]
