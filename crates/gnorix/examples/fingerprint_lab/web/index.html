@@ -163,7 +163,6 @@
                         >
                             <span>Weak</span><i class="legend-gradient"></i
                             ><span>Strong</span> </span
-                        ><span id="feature-filter"></span
                         ><span
                             ><svg
                                 class="legend-indicator"
@@ -398,6 +397,16 @@
                                     value="3"
                             /></label>
                             <label
+                                >Minimum priority, 0–1<input
+                                    id="min-priority"
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                    value="0.5"
+                                    required
+                            /></label>
+                            <label
                                 >Pool size, ×n<input
                                     id="pool-multiplier"
                                     type="number"
@@ -444,8 +453,9 @@
                             /></label>
                         </div>
                         <p id="config-help" class="microcopy">
-                            R is the measured mean dark-ridge width. Adjust
-                            these settings before creating the set.
+                            Only features at or above the minimum priority
+                            enter key combinations. Adjust these settings
+                            before creating the set.
                         </p>
                         <details class="advanced">
                             <summary>Computation limits</summary>

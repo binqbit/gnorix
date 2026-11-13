@@ -4,11 +4,11 @@
 
 ## Regions and point pools
 
-1. Keep source feature identities whose assessed type and degree survive cleanup and reconstruction. Count repeated identities once. Unknown priorities are excluded; measured zero remains eligible. The previous 30% illustration cutoff does not apply.
+1. Keep source feature identities whose assessed type and degree survive cleanup and reconstruction and whose final `priority >= min_priority`. Count repeated identities once. Unknown priorities are excluded; equality is included. Apply this cutoff before building regions or selecting pools. The examples and test stand use 0.5. The stand displays these eligible points without another cutoff; the 30% documentation illustration remains a separate static example.
 2. Bound the confirmed three-ridge pattern mask with a rectangle, extending it to include retained eligible point centers where needed. Cover it with a regular grid of overlapping circles; use the fewest cells whose half diagonal fits the configured radius. A small fragment needs one circle, while larger captures use more. Nine is neither mandatory nor a maximum. This is a frame for the visible capture, not an estimate of an anatomical full finger.
 3. Start each circle with radius `radius_units × R`, where R is the measured mean dark-ridge width. The example uses 30R. Re-measure R on each capture; cropping the image does not directly shrink the configured radius.
 4. The target pool size is `min_points × pool_multiplier`. If necessary, enlarge the circle to the distance of the target-th nearest eligible point. Boundary points are included. From all points inside the final circle, take the highest priorities, breaking ties by original ID.
-5. If the whole capture has fewer points than the target but at least `min_points`, use all available points. Fewer than `min_points` produces an explicit error.
+5. If the whole capture has fewer eligible points than the target but at least `min_points`, use all eligible points. Fewer than `min_points` produces an explicit error. Never refill a pool with points below `min_priority`.
 
 ## Bounded weighted selection
 
@@ -38,14 +38,17 @@ Choose an output file that does not already exist. The adapter reads environment
 | Environment variable | Example default | Meaning |
 |---|---:|---|
 | `GNORIX_COMBINATION_MIN_POINTS` | 3 | Minimum subset size m. |
+| `GNORIX_COMBINATION_MIN_PRIORITY` | 0.5 | Inclusive minimum final priority for every selected point. |
 | `GNORIX_COMBINATION_POOL_MULTIPLIER` | 2 | Target pool size as a multiple of m. |
 | `GNORIX_COMBINATION_RADIUS_UNITS` | 30 | Initial radius in measured dark-ridge widths R. |
 | `GNORIX_COMBINATION_PER_REGION` | 12 | Maximum selected distinct subsets per region. |
 | `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative mask, topology, point-selection and subset-index work entries. |
 
-These small defaults belong to the example. The library requires positive explicit controls and sufficient subset budget to cover the configured pool. Exhausting the possible distinct subsets returns fewer than the budget. Exhausting the work allowance fails the operation instead of returning a partial successful result.
+These small defaults belong to the example. The library requires an explicit finite `min_priority` in `[0, 1]`, positive size/work controls and sufficient subset budget to cover the configured pool. Enrollment and signing use the same priority cutoff. It is part of the measurement profile: changing it requires a new enrollment. The weighting curve ranks only points that passed the cutoff; it cannot restore rejected points. Exhausting the possible distinct subsets returns fewer than the budget. Exhausting the work allowance fails the operation instead of returning a partial successful result.
 
-The JSON contains the effective configuration, bounds, eligible point IDs/coordinates/priorities, all adaptive pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The number of regions follows the observed extent and R; it is exported with their centers, initial/effective radii and selected pools. At 30R the checked-in fixture yields **299 scored features, four pools of six and 48 unique combinations**. A freshly extracted 512×512 central crop needs one circle.
+The `gnorix.feature-combinations.v3` JSON contains the effective configuration including `min_priority`, bounds, eligible point IDs/coordinates/priorities, all adaptive pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The number of regions follows the observed extent and R; it is exported with their centers, initial/effective radii and selected pools.
+
+At 30R and the current **`min_priority = 0.5`** default, the checked-in fixture yields **30 eligible features, four regions and 48 unique combinations**.
 
 ## Scale and coverage
 

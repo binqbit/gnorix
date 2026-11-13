@@ -13,14 +13,14 @@ Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic o
 1. In **Enrollment**, adjust the parameters and select **Prepare features**. Inspect the actual detected points and algorithm regions. Region buttons highlight each selected pool. Preparation checks the baseline candidate count against the enrollment memory budget.
 2. Select **Create Merkle set**. The stand derives one key from each selected subset's rounded baseline, creates the package, checks its readback and displays its Merkle root and leaf count. It does not expand positional uncertainty during enrollment.
 3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Adjust **Artifact severity** to test spatially varying capture defects, or leave it at zero for the original pixels. Select **Prepare features** to extract the circular capture again and inspect its regions and points.
-4. Select **Sign message**. For each ranked subset, the stand checks its baseline and then its positional uncertainty variants one at a time. It stops at the first enrolled member. On success, white rings identify every feature in the matching combination, including those below the display threshold. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
+4. Select **Sign message**. For each ranked subset, the stand checks its baseline and then its positional uncertainty variants one at a time. It stops at the first enrolled member. On success, white rings identify every feature in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
 5. **Verify signature** checks the authorization against the retained enrollment and current message. Changing the message makes verification fail. A consumed search needs another preparation before retrying.
 
 The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves the selected scan's grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
 
 Feature markers use the same style as the static fingerprint reports: red → orange → yellow → green on the fixed 0–1 priority scale, with opacity `0.4 + 0.5 × sqrt(priority)` (40–90%). Endings are circles, bifurcations are triangles, junctions are diamonds, isolated nodes are squares, and isolated cycles are plus signs. The marker size stays fixed for each kind. A small neutral underline identifies the selected pool; a concentric white ring identifies a matching feature. These separate indicators preserve the marker’s priority color and opacity.
 
-The viewer hides features with priority below **0.25** unless they belong to the matching signature combination. Matched features always appear with their original priority color and opacity, plus a concentric white ring. The visible/total count includes these revealed matches. This is a display filter only: all extracted features remain available to combination generation, signing and result records. The palette still uses the full 0–1 scale.
+The viewer shows every feature that meets the shared **Minimum priority** setting, which defaults to **0.5** for both enrollment and signing. There is no additional display threshold. Matched features retain their original priority color and opacity, plus a concentric white ring. The counter reports all eligible features; the palette still uses the full 0–1 scale.
 
 ## Test capture artifacts
 
@@ -34,7 +34,7 @@ Public test records include the artifact level, seed, clean ridge-width scale, g
 
 ## Parameters and outcomes
 
-The stand exposes minimum subset size, enrollment pool multiplier, search radius in R, selected combinations per region, grid uncertainty steps, enrollment memory budget, attempt limit and search-work limit. It uses the same library mechanisms as the command-line examples. The weight curve remains `0.1 + 0.9 × priority²`.
+The stand exposes minimum subset size, minimum feature priority, enrollment pool multiplier, search radius in R, selected combinations per region, grid uncertainty steps, enrollment memory budget, attempt limit and search-work limit. It uses the same library mechanisms as the command-line examples. Each point must have final `priority >= min_priority` in both enrollment and signing; equality is included. Filtering happens before region and pool selection, and low-priority points never refill a pool. Fewer than the minimum eligible points is an explicit insufficient-data error. The weight curve remains `0.1 + 0.9 × priority²` for eligible points.
 
 **Enrollment memory budget** defaults to **2 GiB** and accepts **1–10 GiB** under Computation limits. Preparation uses a conservative peak-memory estimate with reserved headroom to derive consistent limits for baseline candidates, retained leaves and package size. It shows the estimated peak and supported candidate limit before key generation. If the complete requested baseline set exceeds these limits, preparation fails; it never silently truncates the set. This is an estimate, not an operating-system memory cap: actual process memory may vary.
 
@@ -42,14 +42,14 @@ The estimate reserves 512 MiB for working data, then adds 512 bytes per planned 
 
 The attempt limit defaults to **1,000,000,000 candidate keys** and accepts values from 1 through that maximum. Every tested positional variant consumes a key attempt. Search remains lazy: this capacity does not allocate or generate a billion candidates upfront. The separate work budget counts preparation, subset enumeration, deduplication, geometry and positional traversal, so it can stop a search before the key-attempt limit is reached. Both limits retain the **incomplete** outcome; neither means that all possible candidates were tested.
 
-Changing enrollment parameters requires a newly prepared and registered set. Changing only the enrollment memory budget invalidates an enrollment preparation, but does not change the key profile or invalidate an existing registered set. Changing the search-work limit requires preparing the fragment again; the attempt limit can change before signing. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
+Changing enrollment parameters, including minimum feature priority, requires a newly prepared and registered set. The cutoff is part of the key profile, not a display setting. Changing only the enrollment memory budget invalidates an enrollment preparation, but does not change the key profile or invalidate an existing registered set. Changing the search-work limit requires preparing the fragment again; the attempt limit can change before signing. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
 
 - **Matched:** a member key was found, and both signature and Merkle proof were verified.
 - **No match:** the configured regional search was exhausted without a member.
 - **Incomplete:** an attempt or search-work limit stopped signing. This is not a completed no-match result. Enrollment baseline counts that exceed the memory-derived limits are rejected during preparation, before a package is created.
 - **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
 
-The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The baseline-enrollment/lazy-uncertainty flow uses profile v3; recreate earlier test enrollments rather than mixing the two interpretations.
+The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The shared priority cutoff uses profile v4; recreate earlier test enrollments rather than mixing the interpretations.
 
 ## Local data
 
@@ -59,6 +59,13 @@ The stand binds to loopback and requires its session token for mutations. It acc
 
 ## Checked example
 
-On the bundled fixture with the defaults, the full preparation selects four regions and 48 combinations, producing 48 baseline candidate keys and 48 unique leaves. A complete level-1 diagnostic expansion would contain 111,132 assignments, which are not stored by enrollment. A circular capture centered at `(543, 724)` with radius `369 px` contains 29 scored features in two search regions. The checked run found an enrolled key after 706,623 candidate attempts, and its signature and Merkle proof passed verification. Attempts include positional variants; the matching combination used feature IDs `11, 33, 38, 42` from this capture.
+With **`min_priority = 0.5`**, the bundled fixture supplies 30 eligible features, four regions and 48 combinations, producing 48 baseline candidate keys and 48 unique leaves. Two circular captures centered at `(543, 724)` gave these results:
+
+| Radius | Eligible points | Regions | Key attempts | Result |
+|---|---:|---:|---:|---|
+| 369 px | 5 | 2 | 32,242 | Regional search exhausted with no match. |
+| 500 px | 11 | 4 | 8 | Matched; signature and Merkle proof verified. |
+
+The smaller fragment's previous unfiltered match depended on a point with priority below 0.5; the shared policy now excludes that point. Its no-match result is complete, not a resource-limit failure. The larger capture matched using feature IDs `30, 101, 110`. Changing the signed message failed verification; restoring it passed.
 
 Inspect the local [stand preview](../reports/fingerprint-lab/preview.png) and current run records. These are observations on the synthetic fixture, not acceptance rates across captures.

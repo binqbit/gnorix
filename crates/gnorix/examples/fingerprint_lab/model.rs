@@ -24,6 +24,7 @@ pub struct Circle {
 #[serde(deny_unknown_fields)]
 pub struct LabConfig {
     pub min_points: usize,
+    pub min_priority: f64,
     pub pool_multiplier: usize,
     pub radius_units: f64,
     pub combinations_per_region: usize,
@@ -34,6 +35,7 @@ impl Default for LabConfig {
     fn default() -> Self {
         Self {
             min_points: 3,
+            min_priority: 0.5,
             pool_multiplier: 2,
             radius_units: 30.0,
             combinations_per_region: 12,
@@ -45,6 +47,8 @@ impl Default for LabConfig {
 impl LabConfig {
     pub fn validate(&self) -> Result<()> {
         if !(1..=8).contains(&self.min_points)
+            || !self.min_priority.is_finite()
+            || !(0.0..=1.0).contains(&self.min_priority)
             || !(1..=4).contains(&self.pool_multiplier)
             || !(1..=256).contains(&self.combinations_per_region)
             || !self.radius_units.is_finite()
@@ -60,6 +64,7 @@ impl LabConfig {
     pub fn combinations(&self) -> Result<CombinationConfig> {
         Ok(CombinationConfig {
             min_points: self.min_points,
+            min_priority: self.min_priority,
             pool_multiplier: self.pool_multiplier,
             radius_units: self.radius_units,
             combinations_per_region: self.combinations_per_region,
@@ -210,6 +215,18 @@ mod tests {
                 ..LabConfig::default()
             },
             LabConfig {
+                min_priority: f64::NAN,
+                ..LabConfig::default()
+            },
+            LabConfig {
+                min_priority: -0.01,
+                ..LabConfig::default()
+            },
+            LabConfig {
+                min_priority: 1.01,
+                ..LabConfig::default()
+            },
+            LabConfig {
                 radius_units: f64::NAN,
                 ..LabConfig::default()
             },
@@ -235,6 +252,15 @@ mod tests {
     #[test]
     fn preparation_defaults_to_two_gib_without_changing_biometric_config() {
         let config = LabConfig::default();
+        assert_eq!(config.min_priority, 0.5);
+        for min_priority in [0.0, 1.0] {
+            LabConfig {
+                min_priority,
+                ..config
+            }
+            .validate()
+            .unwrap();
+        }
         let value =
             serde_json::json!({ "kind": "enrollment", "config": config, "selection": null });
         let request: PrepareRequest = serde_json::from_value(value).unwrap();

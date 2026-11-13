@@ -4,8 +4,8 @@
 
 ## Candidate search
 
-1. Extract the new image and measure its own mean ridge width R. Keep scored feature identities whose type and degree survive cleanup; measured zero priority remains eligible, while unknown priority does not.
-2. Use the same adaptive circle geometry and initial `radius_units × R` as enrollment. If needed, expand a circle to include up to 2n available points. Search all scored points inside each effective circle, without enrollment’s top-pool truncation. Subsets contain `n..=min(2n, regional_points)` points. There is no global fallback.
+1. Extract the new image and measure its own mean ridge width R. Keep feature identities whose type and degree survive cleanup and whose final `priority >= min_priority`, using the same cutoff as enrollment. Unknown priorities are excluded. Apply this filter before building regions; fewer than n eligible points is an explicit insufficient-data error.
+2. Use the same adaptive circle geometry and initial `radius_units × R` as enrollment. If needed, expand a circle to include up to 2n eligible points. Search all eligible points inside each effective circle, without enrollment’s top-pool truncation. Never refill from below the cutoff. Subsets contain `n..=min(2n, regional_points)` points. There is no global fallback.
 3. Merge the regional subset streams lazily by descending mean weight, deduplicating identical source-point subsets from overlaps before hashing or counting key attempts, using `weight = 0.1 + 0.9 × priority²`. Ties follow point rank, with source IDs breaking equal-priority ties. These are deterministic ranking weights, not random probabilities. A subset can omit the strongest point; limited searches may stop before reaching weaker subsets.
 4. Apply the same hull orientation, nearest-grid snapping, phase and fixed L-step padding used at enrollment. For the current subset, try its rounded baseline first, then stream the full Cartesian product of the L-step neighborhoods of its points. Keep that frame fixed; do not rotate or recenter individual variants.
 5. For **each yielded assignment**, hash the canonical integer coordinates, derive the key under the retained context and secret policy, and immediately test its context-bound public-key hash for membership. Stop at the first match and return its public key, Merkle proof and signature. The highest-priority subset and all its variants are searched before any lower-priority subset; the schedule is deterministic.
@@ -14,7 +14,7 @@ Both the library iterator and signing pipeline have explicit bounds. Natural exh
 
 Each region contributes `Σ C(N, k)` subsets for `k = n..min(2n, N)` before overlap deduplication. Each k-point subset has up to `(1 + 3L(L + 1))^k` positional assignments. The search neither collects them in advance nor requires their full product to fit a count limit. It holds the current traversal state and produces the next assignment on demand. A small search space is exhausted completely if both limits permit it; larger searches stop at the first member or explicitly reach a limit.
 
-This flow uses combination JSON v2 and example profile v3: enrollment commits only baseline keys, while signing searches positional uncertainty. Earlier profiles require a new enrollment for this reconstruction flow. Already issued authorizations can still be verified against their trusted original package. The `.grx` container and coordinate-hash format are unchanged.
+This flow uses combination JSON v3 and example profile v4: enrollment commits only baseline keys, while signing searches positional uncertainty, and both stages enforce the same minimum final priority. Earlier profiles require a new enrollment for this reconstruction flow. Already issued authorizations can still be verified against their trusted original package. The `.grx` container and coordinate-hash format are unchanged.
 
 ## Run the example
 
@@ -38,7 +38,7 @@ Replace the image path with a new capture or crop to run fresh extraction. The o
 
 The action JSON contains exactly `operation` (nonempty text), `payload` (lowercase hexadecimal bytes), `nonce` (32 bytes in lowercase hexadecimal) and `expires_at` (unsigned Unix seconds in this example). The included action is a local fixture with a fixed nonce; applications create their own approved actions and manage nonce reuse.
 
-Use the same `GNORIX_COMBINATION_MIN_POINTS`, `GNORIX_COMBINATION_POOL_MULTIPLIER`, `GNORIX_COMBINATION_RADIUS_UNITS`, `GNORIX_COMBINATION_PER_REGION` and `GNORIX_GRID_UNCERTAINTY_STEPS` values as enrollment. They identify the example profile, with radius measured in R for both stages. Defaults are 3, 2, 30, 12 and 1 respectively. Required-secret enrollments also need the same `GNORIX_ENROLL_SECRET`. The shared example provider remains HKDF-SHA256/Ed25519; the library accepts the caller's `CryptoProvider`.
+Use the same `GNORIX_COMBINATION_MIN_POINTS`, `GNORIX_COMBINATION_MIN_PRIORITY`, `GNORIX_COMBINATION_POOL_MULTIPLIER`, `GNORIX_COMBINATION_RADIUS_UNITS`, `GNORIX_COMBINATION_PER_REGION` and `GNORIX_GRID_UNCERTAINTY_STEPS` values as enrollment. They identify the example profile, with radius measured in R for both stages. Defaults are 3, 0.5, 2, 30, 12 and 1 respectively. Changing the cutoff requires a new enrollment; it is not a search-only control. Required-secret enrollments also need the same `GNORIX_ENROLL_SECRET`. The shared example provider remains HKDF-SHA256/Ed25519; the library accepts the caller's `CryptoProvider`.
 
 | Search control | Example default | Meaning |
 |---|---:|---|
@@ -55,15 +55,15 @@ Verification uses the independently trusted enrollment commitment, expected acti
 
 ## Checked local example
 
-Fresh extraction and signing were run against the baseline enrollment on the full 1086×1448 image, three unscaled 760×1014 crops and one 512×512 crop. The package contains 48 unique baseline leaves and occupies 1,886 bytes. The radius multiplier is 30R in every case. Crop boxes use `(left, top, right, bottom)` with exclusive right/bottom coordinates. Candidate attempts include the baseline and searched positional variants.
+This **profile v4, `min_priority = 0.5`** run used the full 1086×1448 image, three unscaled 760×1014 crops and one 512×512 crop. The package contains 48 unique baseline leaves and occupies 1,886 bytes. The radius multiplier is 30R in every case. Crop boxes use `(left, top, right, bottom)` with exclusive right/bottom coordinates. Candidate attempts include the baseline and searched positional variants.
 
-| Input | Crop box | Measured R, px | Regions | Key attempts until match |
-|---|---|---:|---:|---:|
-| Full fixture | `(0, 0, 1086, 1448)` | 16.820793 | 4 | 1 |
-| Top left | `(0, 0, 760, 1014)` | 16.743084 | 2 | 1 |
-| Center | `(163, 217, 923, 1231)` | 16.195271 | 2 | 14 |
-| Bottom right | `(326, 434, 1086, 1448)` | 16.353278 | 2 | 351 |
-| Small center | `(287, 468, 799, 980)` | 16.331495 | 1 | 92 |
+| Input | Crop box | Measured R, px | Eligible points | Regions | Key attempts until match |
+|---|---|---:|---:|---:|---:|
+| Full fixture | `(0, 0, 1086, 1448)` | 16.820793 | 30 | 4 | 1 |
+| Top left | `(0, 0, 760, 1014)` | 16.743084 | 12 | 2 | 1 |
+| Center | `(163, 217, 923, 1231)` | 16.195271 | 13 | 2 | 14 |
+| Bottom right | `(326, 434, 1086, 1448)` | 16.353278 | 16 | 2 | 351 |
+| Small center | `(287, 468, 799, 980)` | 16.331495 | 4 | 1 | 92 |
 
 All five runs produced a signature and Merkle proof that passed separate verification. The [PNG overview](../reports/enrollment/signing/crop-signing.png), authorizations and [run record](../reports/enrollment/signing/results.json) are kept under `reports/enrollment/signing/`, separately from fingerprint report refreshes. The [verification record](../reports/enrollment/signing/verification.json) also covers changed signed data/key/proof/signature, expiration, incompatible profiles and an incomplete one-attempt search.
 

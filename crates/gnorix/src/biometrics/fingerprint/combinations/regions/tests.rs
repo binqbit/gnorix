@@ -46,6 +46,7 @@ fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
     ];
     let config = CombinationConfig {
         min_points: 1,
+        min_priority: 0.0,
         pool_multiplier: 2,
         radius_units: 5.0,
         combinations_per_region: 2,

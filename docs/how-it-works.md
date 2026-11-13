@@ -18,7 +18,7 @@ If alignment or coverage is inadequate, the process requests another capture or 
 
 ## 3. Define the accepted variation
 
-Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. The same interpretation must apply when the person signs later.
+Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. Each point must meet the same inclusive minimum final priority in both stages; insufficient eligible points require another capture or a new enrollment policy, not refilling with weaker points. The same interpretation must apply when the person signs later.
 
 The goal is not to flatten all measurements into a trivial common value. It is to preserve useful distinctions while accounting for expected variability. Greater tolerance can improve acceptance of genuine recaptures but can also expand the space accepted by the enrollment. The policy must balance these effects.
 

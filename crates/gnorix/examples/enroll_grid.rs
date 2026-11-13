@@ -66,7 +66,7 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
     let input = input::read(&mut File::open(input_path)?, MAX_JSON_BYTES)?;
     let context = EnrollmentContext {
         spec,
-        profile_id: settings::profile_id(&input.metadata, &config)?,
+        profile_id: settings::profile_id(&input, &config)?,
         suite_id: ExampleCrypto.suite_id().to_owned(),
     };
     context.encode(&limits)?;

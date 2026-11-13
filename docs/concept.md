@@ -16,7 +16,7 @@ There is also a disclosure problem. A person may want to sign data or authorize 
 
 ## Core principle: accept an enrolled set rather than one exact reading
 
-Gnorix's enrollment model accounts for a defined range of measurement variation. Instead of requiring every later capture to recover one identical representative, it enrolls keys from multiple selected feature combinations. Each combination contributes its normalized, rounded baseline positions; enrollment does not expand their positional uncertainty.
+Gnorix's enrollment model accounts for a defined range of measurement variation. Instead of requiring every later capture to recover one identical representative, it enrolls keys from multiple selected feature combinations. The same minimum final priority determines point eligibility during enrollment and later signing. Each combination contributes its normalized, rounded baseline positions; enrollment does not expand their positional uncertainty.
 
 Each candidate has a private signing key and a corresponding public verification key. The allowed public keys are collected into a Merkle tree, a structure that combines their hashes into one compact commitment called the root. The root represents the enrolled set without requiring the verifier to store or search every key individually.
 

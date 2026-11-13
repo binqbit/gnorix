@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     write_new(&output, &document)?;
     println!(
-        "{} scored features; {} regions; {} unique combinations; {} unscored features\n{}",
+        "{} eligible features; {} regions; {} unique combinations; {} unscored features\n{}",
         result.points.len(),
         result.regions.len(),
         result.combinations.len(),
@@ -131,17 +131,19 @@ fn snapshot(
         .collect();
 
     json!({
-        "schema": "gnorix.feature-combinations.v2",
+        "schema": "gnorix.feature-combinations.v3",
         "source": {"image": input.to_string_lossy(), "width": width, "height": height},
         "unit_px": unit_px,
         "config": {
             "min_points": config.min_points,
+            "min_priority": config.min_priority,
             "pool_multiplier": config.pool_multiplier,
             "radius_units": config.radius_units,
             "combinations_per_region": config.combinations_per_region,
             "max_work": config.max_work,
         },
         "policy": {
+            "point_eligibility": "known final priority >= min_priority",
             "region_layout": "adaptive row-major cell centers covering confirmed-pattern and eligible-point bounds",
             "region_coverage": "minimum cell count whose half-diagonals fit the initial radius; closest-to-square cells break ties",
             "initial_radius": "radius_units * measured mean ridge width R",
@@ -217,6 +219,7 @@ mod tests {
     fn test_settings_are_explicit_and_can_be_overridden_without_global_environment() {
         let defaults = parse_configuration(|_| None).unwrap();
         assert_eq!(defaults.min_points, 3);
+        assert_eq!(defaults.min_priority, 0.5);
         assert_eq!(defaults.pool_multiplier, 2);
         assert_eq!(defaults.radius_units, 30.0);
         assert_eq!(defaults.combinations_per_region, 12);
@@ -228,13 +231,42 @@ mod tests {
             (ENVIRONMENT[2], "24.5"),
             (ENVIRONMENT[3], "20"),
             (ENVIRONMENT[4], "1000"),
+            (ENVIRONMENT[5], "0.35"),
         ]);
         let config = parse_configuration(|name| settings.get(name).copied()).unwrap();
         assert_eq!(config.min_points, 2);
+        assert_eq!(config.min_priority, 0.35);
         assert_eq!(config.pool_multiplier, 3);
         assert_eq!(config.radius_units, 24.5);
         assert_eq!(config.combinations_per_region, 20);
         assert_eq!(config.max_work, 1000);
+        for value in ["0", "-0", "1"] {
+            assert!(parse_configuration(|name| (name == ENVIRONMENT[5]).then_some(value)).is_ok());
+        }
+    }
+
+    #[test]
+    fn export_records_the_required_eligibility_policy() {
+        let config = parse_configuration(|_| None).unwrap();
+        let origin = gnorix::biometrics::geometry::Point::new(0.0, 0.0).unwrap();
+        let result = FeatureCombinations {
+            bounds: fingerprint::RegionBounds {
+                min: origin,
+                max: origin,
+            },
+            points: Vec::new(),
+            unscored_features: 0,
+            regions: Vec::new(),
+            combinations: Vec::new(),
+            work_used: 0,
+        };
+        let document = snapshot(Path::new("capture.png"), 1, 1, 4.0, &config, &result);
+        assert_eq!(document["schema"], "gnorix.feature-combinations.v3");
+        assert_eq!(document["config"]["min_priority"], 0.5);
+        assert_eq!(
+            document["policy"]["point_eligibility"],
+            "known final priority >= min_priority"
+        );
     }
 
     #[test]
@@ -251,6 +283,10 @@ mod tests {
             (ENVIRONMENT[2], "0"),
             (ENVIRONMENT[3], "0"),
             (ENVIRONMENT[4], "0"),
+            (ENVIRONMENT[5], "NaN"),
+            (ENVIRONMENT[5], "inf"),
+            (ENVIRONMENT[5], "-0.01"),
+            (ENVIRONMENT[5], "1.01"),
         ] {
             assert!(
                 parse_configuration(|key| (key == name).then_some(invalid)).is_err(),

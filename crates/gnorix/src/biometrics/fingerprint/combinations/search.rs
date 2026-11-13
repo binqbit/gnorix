@@ -8,7 +8,7 @@ use std::{
 
 use super::{
     CombinationError, CombinationPoint, Point, RegionBounds, WorkBudget, collect_points,
-    enumeration::RankedSubsets, regions,
+    enumeration::RankedSubsets, regions, validate_min_priority,
 };
 use crate::{
     biometrics::{
@@ -18,11 +18,13 @@ use crate::{
     error::AlgorithmError,
 };
 
-/// Signing searches every retained, scored point inside each adaptive circle.
+/// Signing searches every retained point meeting the priority cutoff in each circle.
 /// Applications supply the enrolled minimum, circle radius and uncertainty.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningSearchConfig {
     pub min_points: usize,
+    /// Inclusive minimum final feature priority, between zero and one.
+    pub min_priority: f64,
     /// Initial circle radius measured in the fresh capture's mean ridge width R.
     pub radius_units: f64,
     /// Hex-neighbor steps per point; also the fixed padding used at enrollment.
@@ -35,6 +37,7 @@ pub struct SigningSearchConfig {
 
 impl SigningSearchConfig {
     pub fn validate(&self) -> Result<(), CombinationError> {
+        validate_min_priority(self.min_priority)?;
         if self.min_points == 0 || self.min_points.checked_mul(2).is_none() {
             return Err(CombinationError::InvalidConfig(
                 "signing subset size must be nonzero and its double must fit usize",
@@ -63,11 +66,12 @@ impl SigningSearchConfig {
 /// `min_points..=min(2 * min_points, points_in_region)`.
 ///
 /// Adaptive circles cover the confirmed pattern and grow to include twice the
-/// minimum, or all available points when fewer exist. Every scored point inside
-/// a circle remains eligible. Overlapping circles never repeat the same subset.
+/// minimum, or all eligible points when fewer exist. Every point meeting the
+/// priority minimum inside a circle remains eligible. Overlapping circles never
+/// repeat the same subset.
 /// Subsets are merged by mean `0.1 + 0.9 * priority²`, then global point rank;
-/// equal point priorities use ascending source IDs. Known zero scores remain
-/// eligible, while unknown scores do not. There is no global-search fallback.
+/// equal point priorities use ascending source IDs. Only known priorities at or
+/// above the configured minimum are eligible. There is no global-search fallback.
 /// Every ranked subset yields its rounded baseline first, then its complete
 /// Cartesian neighborhood before the next lower-ranked subset is requested.
 /// There is no upfront Cartesian count. The observed
@@ -100,7 +104,13 @@ pub fn prepare_signing_search(
         ));
     }
     let mut work = WorkBudget::new(config.max_work);
-    let (points, _) = collect_points(fingerprint, &mut work)?;
+    let (points, _) = collect_points(fingerprint, config.min_priority, &mut work)?;
+    if points.len() < config.min_points {
+        return Err(CombinationError::InsufficientPoints {
+            required: config.min_points,
+            available: points.len(),
+        });
+    }
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
     SigningSearch::new(points, bounds, spacing, *config, work)
 }
@@ -414,6 +424,7 @@ mod tests {
     fn config(min_points: usize, uncertainty_steps: u32) -> SigningSearchConfig {
         SigningSearchConfig {
             min_points,
+            min_priority: 0.0,
             radius_units: 100_000.0,
             uncertainty_steps,
             max_work: 1_000_000,

@@ -281,6 +281,7 @@ impl Engine {
                 &extracted,
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
+                    min_priority: request.config.min_priority,
                     radius_units: request.config.radius_units,
                     uncertainty_steps: request.config.uncertainty_steps,
                     max_work: request.work_limit,
@@ -1081,6 +1082,16 @@ mod tests {
                     radius_units: 31.0,
                     ..LabConfig::default()
                 }
+            )
+            .is_err()
+        );
+        assert!(
+            require_config(
+                LabConfig::default(),
+                LabConfig {
+                    min_priority: 0.6,
+                    ..LabConfig::default()
+                },
             )
             .is_err()
         );

@@ -18,6 +18,8 @@ pub use search::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CombinationConfig {
     pub min_points: usize,
+    /// Inclusive minimum final feature priority, between zero and one.
+    pub min_priority: f64,
     pub pool_multiplier: usize,
     /// Initial circle radius in measured mean dark-ridge widths R.
     pub radius_units: f64,
@@ -29,6 +31,7 @@ pub struct CombinationConfig {
 
 impl CombinationConfig {
     pub fn validate(&self) -> Result<(), CombinationError> {
+        validate_min_priority(self.min_priority)?;
         if self.min_points == 0 || self.pool_multiplier == 0 {
             return Err(CombinationError::InvalidConfig(
                 "point counts must be nonzero",
@@ -80,7 +83,7 @@ pub struct CombinationRegion {
     pub center: Point,
     pub initial_radius: f64,
     pub radius: f64,
-    /// Scored features within the final inclusive circle, before pool ranking.
+    /// Eligible features within the final inclusive circle, before pool ranking.
     pub available_points: usize,
     /// Original feature IDs ordered by descending priority, then ascending ID.
     pub pool: Vec<usize>,
@@ -100,7 +103,7 @@ pub struct FeatureCombination {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeatureCombinations {
     pub bounds: RegionBounds,
-    /// All surviving candidates with known priority, including measured zero.
+    /// Surviving candidates whose known priority meets the configured minimum.
     pub points: Vec<CombinationPoint>,
     /// Type/degree-preserved source identities whose priority is unavailable.
     pub unscored_features: usize,
@@ -131,7 +134,7 @@ impl fmt::Display for CombinationError {
             } => {
                 write!(
                     f,
-                    "need at least {required} scored features; only {available} available"
+                    "need at least {required} eligible features; only {available} available"
                 )
             }
             Self::WorkLimit => f.write_str("feature combination work limit exceeded"),
@@ -150,9 +153,9 @@ impl Error for CombinationError {
 
 /// Selects bounded, quality-ranked subsets in adaptive ridge-scale circles.
 ///
-/// Unknown scores are excluded; known zero remains eligible. Every selected
-/// pool point occurs in at least one subset. Stronger pool points occur no less
-/// often than weaker ones within that region. Regions can overlap; their union
+/// Unknown scores and priorities below the configured minimum are excluded.
+/// Every selected pool point occurs in at least one subset. Stronger pool points
+/// occur no less often than weaker ones within that region. Regions can overlap; their union
 /// does not imply this incidence ordering globally. Identical input and controls
 /// reproduce the result; registration and stable candidate encoding are separate.
 /// Exceeding work limits returns an error, never a partial successful result.
@@ -162,7 +165,7 @@ pub fn generate_combinations(
 ) -> Result<FeatureCombinations, CombinationError> {
     config.validate()?;
     let mut work = WorkBudget::new(config.max_work);
-    let (points, unscored_features) = collect_points(fingerprint, &mut work)?;
+    let (points, unscored_features) = collect_points(fingerprint, config.min_priority, &mut work)?;
     if points.len() < config.min_points {
         return Err(CombinationError::InsufficientPoints {
             required: config.min_points,
@@ -191,6 +194,7 @@ pub fn generate_combinations(
 
 fn collect_points(
     fingerprint: &Fingerprint,
+    min_priority: f64,
     work: &mut WorkBudget,
 ) -> Result<(Vec<CombinationPoint>, usize), CombinationError> {
     charge_projection(fingerprint, work)?;
@@ -220,6 +224,9 @@ fn collect_points(
                 FingerprintError::InvalidTopology("feature lies outside the source image"),
             ));
         }
+        if priority < min_priority {
+            continue;
+        }
         points.push(CombinationPoint {
             id: feature.id,
             kind: feature.kind,
@@ -228,6 +235,15 @@ fn collect_points(
         });
     }
     Ok((points, unscored))
+}
+
+fn validate_min_priority(min_priority: f64) -> Result<(), CombinationError> {
+    if !min_priority.is_finite() || !(0.0..=1.0).contains(&min_priority) {
+        return Err(CombinationError::InvalidConfig(
+            "minimum feature priority must be finite and in [0, 1]",
+        ));
+    }
+    Ok(())
 }
 
 fn charge_projection(
@@ -323,6 +339,179 @@ impl WorkBudget {
 mod tests {
     use super::*;
 
+    fn threshold_fingerprint() -> (Fingerprint, Vec<usize>) {
+        let size = 96;
+        let pixels = (0..size * size)
+            .map(|index| if (index % size) % 12 < 6 { 25 } else { 225 })
+            .collect();
+        let capture =
+            super::super::Capture::new(size as u32, size as u32, pixels, None, None).unwrap();
+        let mut fingerprint =
+            super::super::extract(&capture, &super::super::ExtractionConfig::default()).unwrap();
+        let ids: Vec<_> = projection::retained_candidates(&fingerprint)
+            .unwrap()
+            .iter()
+            .take(5)
+            .map(|feature| feature.id)
+            .collect();
+        assert_eq!(ids.len(), 5);
+        for feature in &mut fingerprint.feature_strength.candidates {
+            feature.priority = None;
+        }
+        for (&id, priority) in ids.iter().zip([0.0, 0.49, 0.5, 0.75, 1.0]) {
+            fingerprint.feature_strength.candidates[id].priority = Some(priority);
+        }
+        (fingerprint, ids)
+    }
+
+    fn threshold_config(min_priority: f64) -> CombinationConfig {
+        CombinationConfig {
+            min_points: 1,
+            min_priority,
+            pool_multiplier: 2,
+            radius_units: 1000.0,
+            combinations_per_region: 12,
+            max_work: 1_000_000,
+        }
+    }
+
+    fn signing_config(controls: CombinationConfig) -> SigningSearchConfig {
+        SigningSearchConfig {
+            min_points: controls.min_points,
+            min_priority: controls.min_priority,
+            radius_units: controls.radius_units,
+            uncertainty_steps: 0,
+            max_work: controls.max_work,
+            max_descriptor_bytes: std::num::NonZeroUsize::new(4096).unwrap(),
+        }
+    }
+
+    #[test]
+    fn priority_cutoff_is_inclusive_for_enrollment_and_signing() {
+        let (fingerprint, ids) = threshold_fingerprint();
+        let mut unscored = None;
+        for (minimum, expected) in [(0.0, &ids[..]), (0.5, &ids[2..]), (1.0, &ids[4..])] {
+            let controls = threshold_config(minimum);
+            let selected = generate_combinations(&fingerprint, &controls).unwrap();
+            assert_eq!(
+                selected
+                    .points
+                    .iter()
+                    .map(|point| point.id)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                *unscored.get_or_insert(selected.unscored_features),
+                selected.unscored_features
+            );
+            assert!(selected.combinations.iter().all(|combination| {
+                combination
+                    .feature_ids
+                    .iter()
+                    .all(|id| expected.contains(id))
+            }));
+            let search = prepare_signing_search(&fingerprint, &signing_config(controls)).unwrap();
+            let mut eligible = search
+                .points()
+                .iter()
+                .map(|point| point.id)
+                .collect::<Vec<_>>();
+            eligible.sort_unstable();
+            assert_eq!(eligible, expected);
+            assert!(
+                search
+                    .regions()
+                    .iter()
+                    .all(|region| { region.feature_ids.iter().all(|id| expected.contains(id)) })
+            );
+        }
+    }
+
+    #[test]
+    fn thresholded_regions_never_refill_with_weaker_points_and_keep_quality_order() {
+        let (mut fingerprint, ids) = threshold_fingerprint();
+        let mut controls = threshold_config(0.5);
+        controls.min_points = 2;
+        controls.radius_units = 1.0;
+        let selected = generate_combinations(&fingerprint, &controls).unwrap();
+        let eligible = &ids[2..];
+        assert!(
+            selected
+                .regions
+                .iter()
+                .any(|region| region.radius > region.initial_radius)
+        );
+        assert!(selected.regions.iter().all(|region| {
+            region.available_points == eligible.len()
+                && region.pool.len() == eligible.len()
+                && region.pool.iter().all(|id| eligible.contains(id))
+        }));
+        let mut search = prepare_signing_search(&fingerprint, &signing_config(controls)).unwrap();
+        for combination in &selected.combinations {
+            search.next().unwrap().unwrap();
+            assert_eq!(search.last_feature_ids(), combination.feature_ids);
+        }
+        assert!(search.next().is_none());
+
+        controls.min_priority = 1.0;
+        let expected = CombinationError::InsufficientPoints {
+            required: 2,
+            available: 1,
+        };
+        assert_eq!(
+            generate_combinations(&fingerprint, &controls).unwrap_err(),
+            expected
+        );
+        assert!(matches!(
+            prepare_signing_search(&fingerprint, &signing_config(controls)),
+            Err(error) if error == expected
+        ));
+
+        for feature in &mut fingerprint.feature_strength.candidates {
+            feature.priority = Some(0.0);
+        }
+        fingerprint.scale.pattern_support.fill(false);
+        // Insufficient eligible data is known before any attempt to lay out
+        // circles, even when the capture also lacks usable pattern bounds.
+        assert!(matches!(
+            prepare_signing_search(&fingerprint, &signing_config(controls)),
+            Err(CombinationError::InsufficientPoints {
+                required: 2,
+                available: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn invalid_thresholds_and_invalid_low_priority_data_are_rejected() {
+        for minimum in [-0.01, 1.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let controls = threshold_config(minimum);
+            assert!(matches!(
+                controls.validate(),
+                Err(CombinationError::InvalidConfig(_))
+            ));
+            assert!(matches!(
+                signing_config(controls).validate(),
+                Err(CombinationError::InvalidConfig(_))
+            ));
+        }
+        let (mut fingerprint, ids) = threshold_fingerprint();
+        let controls = threshold_config(1.0);
+        let original = fingerprint.feature_strength.candidates[ids[0]].position;
+        fingerprint.feature_strength.candidates[ids[0]].position = Point::new(-1.0, 0.0).unwrap();
+        assert!(matches!(
+            generate_combinations(&fingerprint, &controls),
+            Err(CombinationError::InvalidFingerprint(_))
+        ));
+        fingerprint.feature_strength.candidates[ids[0]].position = original;
+        fingerprint.feature_strength.candidates[ids[0]].priority = Some(f64::NAN);
+        assert!(matches!(
+            prepare_signing_search(&fingerprint, &signing_config(controls)),
+            Err(CombinationError::InvalidFingerprint(_))
+        ));
+    }
+
     #[test]
     fn smaller_global_pool_uses_every_available_point_and_exhausts_subsets() {
         let points: Vec<_> = (0..4)
@@ -339,6 +528,7 @@ mod tests {
         };
         let config = CombinationConfig {
             min_points: 3,
+            min_priority: 0.0,
             pool_multiplier: 2,
             radius_units: 1.0,
             combinations_per_region: 12,

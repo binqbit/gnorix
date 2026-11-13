@@ -21,6 +21,7 @@ pub(super) fn read() -> Result<Controls> {
     let profile_id = enrollment_profile::profile_id(&combination, uncertainty_steps)?;
     let search = SigningSearchConfig {
         min_points: combination.min_points,
+        min_priority: combination.min_priority,
         radius_units: combination.radius_units,
         uncertainty_steps,
         max_work: work,

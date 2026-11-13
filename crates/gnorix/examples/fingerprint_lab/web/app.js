@@ -1,8 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
-const MIN_VISIBLE_PRIORITY = 0.25;
 const configFields = {
     min_points: "min-points",
+    min_priority: "min-priority",
     pool_multiplier: "pool-multiplier",
     radius_units: "radius-units",
     combinations_per_region: "per-region",
@@ -437,8 +437,6 @@ function drawEvidence(prepared) {
     diagnosticsLayer.replaceChildren();
     const regionList = $("region-list");
     regionList.replaceChildren();
-    $("feature-filter").textContent =
-        `Priority ≥ ${MIN_VISIBLE_PRIORITY} or matched · display only`;
     if (!prepared) {
         $("scale-value").textContent = "R — not measured yet";
         return;
@@ -500,10 +498,7 @@ function drawEvidence(prepared) {
             );
     }
     const points = prepared.points ?? [];
-    const visiblePoints = points.filter(
-        (point) => point.priority >= MIN_VISIBLE_PRIORITY || matched.has(point.id),
-    );
-    for (const point of visiblePoints) {
+    for (const point of points) {
         const included = pool.has(point.id);
         const isMatched = matched.has(point.id);
         const color = priorityColor(point.priority);
@@ -578,7 +573,7 @@ function drawEvidence(prepared) {
         regionList.append(button);
     }
     $("scale-value").textContent =
-        `R = ${format.format(prepared.unit_px)} px · ${visiblePoints.length}/${countLabel(points.length, "feature")} shown`;
+        `R = ${format.format(prepared.unit_px)} px · ${countLabel(points.length, "eligible feature")}`;
 }
 
 function renderResult(prepared) {
@@ -745,7 +740,7 @@ function render() {
         ? "Cover the pool: combinations / region ≥ n × (multiplier − 1) + 1. Check the value limits too."
         : enrollment && !registered
           ? "These settings differ from the enrolled set. Prepare and create a new set, or restore the previous settings."
-          : "R is the measured mean dark-ridge width. Changing these settings requires a new Merkle set.";
+          : "Only features at or above the minimum priority enter key combinations. R is the mean dark-ridge width. Changing these settings requires a new Merkle set.";
     $("merkle-root").textContent = enrollment?.root ?? "No set created yet";
     $("leaf-count").textContent = enrollment
         ? countLabel(enrollment.leaf_count, "key")

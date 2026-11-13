@@ -212,6 +212,7 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
 fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     let config = fingerprint::CombinationConfig {
         min_points: 3,
+        min_priority: 0.0,
         pool_multiplier: 2,
         radius_units: 30.0,
         combinations_per_region: 12,

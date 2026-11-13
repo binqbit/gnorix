@@ -51,7 +51,7 @@ The output file must not already exist. The adapter reads the combination export
 
 The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
-For the checked-in image's 48 selected subsets at radius 30R (30 triples, 14 quadruples, four quintuples), a level-1 diagnostic export traverses **111,132 assignments**. Enrollment uses only the **48 baselines**, before duplicate-key removal. The larger number describes positional alternatives searched later, not the number of registered keys.
+With **`min_priority = 0.5`**, the checked-in image supplies 48 selected subsets at radius 30R (30 triples, 14 quadruples, four quintuples). The checked level-1 diagnostic export traverses **111,132 assignments**, while enrollment uses only the **48 baselines**, before duplicate-key removal. The larger number describes positional alternatives searched later, not the number of registered keys.
 
 ## Interpretation
 
