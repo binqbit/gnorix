@@ -15,6 +15,8 @@ mod provider;
 
 #[path = "fingerprint_lab/api.rs"]
 mod api;
+#[path = "fingerprint_lab/artifacts.rs"]
+mod artifacts;
 #[path = "fingerprint_lab/capture.rs"]
 mod capture;
 #[path = "fingerprint_lab/engine.rs"]
@@ -30,7 +32,7 @@ async fn main() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let image =
         image::load_from_memory(include_bytes!("../tests/assets/test-fingerprint.png"))?.to_luma8();
-    let engine = engine::Engine::new(image, root.join("reports/fingerprint-lab"));
+    let engine = engine::Engine::new(image, root.join("reports/fingerprint-lab"))?;
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let address = listener.local_addr()?;
     let app = api::router(engine, address.port())?;

@@ -12,11 +12,21 @@ Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic o
 
 1. In **Enrollment**, adjust the parameters and select **Prepare features**. Inspect the actual detected points and algorithm regions. Region buttons highlight each selected pool. Preparation also checks the complete grid-variant count before enrollment.
 2. Select **Create Merkle set**. The stand derives the enrolled keys, creates the package, checks its readback and displays its Merkle root and leaf count.
-3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Select **Prepare features** to extract the circular capture again and inspect its regions and points.
+3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Adjust **Artifact severity** to test local capture defects, or leave it at zero for the original pixels. Select **Prepare features** to extract the circular capture again and inspect its regions and points.
 4. Select **Sign message**. The stand searches the prepared candidate stream and stops at the first enrolled member. On success, white rings mark the exact features in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
 5. **Verify signature** checks the authorization against the retained enrollment and current message. Changing the message makes verification fail. A consumed search needs another preparation before retrying.
 
-The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves original grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
+The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves the selected scan's grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
+
+## Test capture artifacts
+
+Enrollment always uses the clean source. In signing mode, **Artifact severity** controls local ridge bending and blurring, bright dropouts and dark smudges that can merge adjacent ridges. Zero restores the original pixels exactly. Higher levels increase the strength of the same local defects; 100 does not mean the entire image is affected or a 100% error probability. Patch sizes and displacement use the clean enrollment's measured ridge width R.
+
+The random pattern stays fixed while the slider moves. **Randomize** selects a new pattern at the current severity. Each preview is generated from the original image, so changes never accumulate. The server applies these defects before selecting the circular capture, and feature extraction uses the exact pixels shown in the preview. Changing the preview invalidates old signing preparations and overlays while retaining the enrolled Merkle set.
+
+**Test altered scan** prepares the currently displayed fragment, searches its candidate keys and verifies any resulting signature in one operation. The manual **Prepare features** → **Sign message** flow remains available to inspect points before searching. **Verify signature** checks an existing authorization against the message; it does not extract a new fingerprint.
+
+Public test records include the artifact level, seed, clean ridge-width scale, generator version and grayscale-image SHA-256 for reproduction. Preview revisions bind preparations to a specific image; stale preparations are rejected.
 
 ## Parameters and outcomes
 

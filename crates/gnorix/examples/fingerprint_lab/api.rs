@@ -8,7 +8,7 @@ use std::sync::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
     http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -20,7 +20,10 @@ use serde_json::json;
 use super::{
     Result,
     engine::Engine,
-    model::{LabConfig, LabData, PrepareRequest, PreparedId, SignRequest, VerifyRequest},
+    model::{
+        ArtifactRequest, LabConfig, LabData, PrepareRequest, PreparedId, SignRequest, TestRequest,
+        VerifyRequest,
+    },
 };
 
 const SOURCE: &[u8] = include_bytes!("../../tests/assets/test-fingerprint.png");
@@ -50,6 +53,10 @@ struct Snapshot {
     #[serde(flatten)]
     data: LabData,
     job: Option<Job>,
+    #[serde(skip)]
+    preview: Arc<[u8]>,
+    #[serde(skip)]
+    preview_revision: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -60,13 +67,17 @@ struct Image {
 }
 
 enum Command {
+    Artifacts(ArtifactRequest),
     Prepare(PrepareRequest),
     Enroll(PreparedId),
     Sign(SignRequest),
     Verify(VerifyRequest),
+    Test(TestRequest),
 }
 
 pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
+    let (width, height) = engine.dimensions();
+    let (preview_revision, preview) = engine.preview();
     let mut bytes = [0; 32];
     getrandom::fill(&mut bytes)?;
     let token: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -77,12 +88,14 @@ pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
             token,
             image: Image {
                 url: "/fingerprint.png",
-                width: 1086,
-                height: 1448,
+                width,
+                height,
             },
             defaults: LabConfig::default(),
             data: engine.view(),
             job: None,
+            preview,
+            preview_revision,
         })),
         engine: Arc::new(Mutex::new(engine)),
         sequence: Arc::new(AtomicU64::new(1)),
@@ -93,11 +106,14 @@ pub(super) fn router(engine: Engine, port: u16) -> Result<Router> {
         .route("/app.js", get(javascript))
         .route("/logo.svg", get(logo))
         .route("/fingerprint.png", get(source))
+        .route("/api/scan/{revision}", get(scan))
         .route("/api/state", get(state))
         .route("/api/prepare", post(prepare))
         .route("/api/enroll", post(enroll))
         .route("/api/sign", post(sign))
         .route("/api/verify", post(verify))
+        .route("/api/artifacts", post(artifact_preview))
+        .route("/api/test", post(test_scan))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app))
@@ -191,6 +207,26 @@ async fn verify(
     }
 }
 
+async fn artifact_preview(
+    State(app): State<App>,
+    input: std::result::Result<Json<ArtifactRequest>, JsonRejection>,
+) -> Response {
+    match payload(input) {
+        Ok(value) => launch(app, Command::Artifacts(value)),
+        Err((status, message)) => failure(status, &message),
+    }
+}
+
+async fn test_scan(
+    State(app): State<App>,
+    input: std::result::Result<Json<TestRequest>, JsonRejection>,
+) -> Response {
+    match payload(input) {
+        Ok(value) => launch(app, Command::Test(value)),
+        Err((status, message)) => failure(status, &message),
+    }
+}
+
 fn launch(app: App, command: Command) -> Response {
     let id = app.sequence.fetch_add(1, Ordering::Relaxed);
     {
@@ -223,18 +259,26 @@ fn launch(app: App, command: Command) -> Response {
                 }
             };
             let result = match command {
+                Command::Artifacts(request) => engine.change_artifacts(request, phase),
                 Command::Prepare(request) => engine.prepare(request, phase),
                 Command::Enroll(request) => engine.enroll(request, phase),
                 Command::Sign(request) => engine.sign(request, phase),
                 Command::Verify(request) => engine.verify(request),
+                Command::Test(request) => engine.test(request, phase),
             };
-            Ok::<_, String>((engine.view(), result.map_err(|error| error.to_string())))
+            Ok::<_, String>((
+                engine.view(),
+                engine.preview(),
+                result.map_err(|error| error.to_string()),
+            ))
         })
         .await;
         if let Ok(mut snapshot) = app.snapshot.lock() {
             let error = match outcome {
-                Ok(Ok((view, result))) => {
+                Ok(Ok((view, (revision, preview), result))) => {
                     snapshot.data = view;
+                    snapshot.preview_revision = revision;
+                    snapshot.preview = preview;
                     result.err()
                 }
                 Ok(Err(error)) => Some(error),
@@ -272,6 +316,25 @@ async fn logo() -> Response {
 async fn source() -> Response {
     asset("image/png", SOURCE)
 }
+
+async fn scan(State(app): State<App>, Path(revision): Path<String>) -> Response {
+    let Some(revision) = revision
+        .strip_suffix(".png")
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        return failure(StatusCode::NOT_FOUND, "Unknown scan revision");
+    };
+    let preview = match app.snapshot.lock() {
+        Ok(snapshot) if snapshot.preview_revision == revision => Arc::clone(&snapshot.preview),
+        Ok(_) => return failure(StatusCode::NOT_FOUND, "Scan revision is no longer current"),
+        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "State unavailable"),
+    };
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        preview.as_ref().to_vec(),
+    )
+        .into_response()
+}
 fn asset(content_type: &'static str, bytes: &'static [u8]) -> Response {
     ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
@@ -285,7 +348,7 @@ mod tests {
     fn test_router() -> Router {
         let image = image::GrayImage::new(2, 2);
         router(
-            Engine::new(image, std::env::temp_dir().join("gnorix-unused-lab-test")),
+            Engine::new(image, std::env::temp_dir().join("gnorix-unused-lab-test")).unwrap(),
             8765,
         )
         .unwrap()
@@ -360,5 +423,42 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK, "{path}");
             assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         }
+    }
+
+    #[tokio::test]
+    async fn preview_png_is_revision_bound_and_matches_original_pixels_at_zero() {
+        let app = test_router();
+        let request = |path: &str| {
+            Request::get(path)
+                .header("Host", "127.0.0.1:8765")
+                .body(Body::empty())
+                .unwrap()
+        };
+        let response = app
+            .clone()
+            .oneshot(request("/api/scan/0.png"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+        let bytes = to_bytes(response.into_body(), 1_000_000).await.unwrap();
+        assert_eq!(
+            image::load_from_memory(&bytes).unwrap().to_luma8(),
+            image::GrayImage::new(2, 2)
+        );
+        for path in ["/api/scan/1.png", "/api/scan/no.png", "/api/scan/0"] {
+            assert_eq!(
+                app.clone().oneshot(request(path)).await.unwrap().status(),
+                StatusCode::NOT_FOUND
+            );
+        }
+        let mut bad_host = request("/api/scan/0.png");
+        bad_host
+            .headers_mut()
+            .insert(header::HOST, HeaderValue::from_static("attacker.invalid"));
+        assert_eq!(
+            app.oneshot(bad_host).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
     }
 }

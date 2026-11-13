@@ -22,6 +22,15 @@ const state = {
     busy: false,
     drag: null,
     polling: false,
+    artifactLevel: 0,
+    artifactRandomizeQueued: false,
+    artifactRequest: null,
+    artifactError: null,
+    imageKey: null,
+    imageObjectUrl: null,
+    imageLoadingKey: null,
+    imageAbort: null,
+    imageRequest: 0,
 };
 const colors = [
     "#b8ff73",
@@ -34,6 +43,7 @@ const colors = [
 const format = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 let pollTimer;
 let refreshSequence = 0;
+let artifactTimer;
 
 function countLabel(count, singular, plural = `${singular}s`) {
     return `${format.format(count)} ${count === 1 ? singular : plural}`;
@@ -103,6 +113,167 @@ function payloadMatches(authorization) {
     return encoded === authorization.action.payload;
 }
 
+function artifactImageKey(artifact) {
+    return `artifact:${artifact.revision}`;
+}
+
+function artifactReady() {
+    const artifact = state.server?.artifact;
+    return Boolean(
+        artifact &&
+            artifact.level === state.artifactLevel &&
+            !state.artifactRandomizeQueued &&
+            !state.artifactRequest &&
+            !state.artifactError &&
+            state.imageKey === artifactImageKey(artifact),
+    );
+}
+
+function desiredImage() {
+    if (!state.server) return null;
+    if (state.mode === "enrollment") {
+        return { key: "original", url: state.server.image.url };
+    }
+    const artifact = state.server.artifact;
+    if (
+        !artifact ||
+        artifact.level !== state.artifactLevel ||
+        state.artifactRandomizeQueued ||
+        state.artifactRequest
+    )
+        return null;
+    return { key: artifactImageKey(artifact), url: artifact.image_url };
+}
+
+async function syncImage() {
+    const desired = desiredImage();
+    if (
+        !desired ||
+        desired.key === state.imageKey ||
+        desired.key === state.imageLoadingKey
+    )
+        return;
+    state.imageAbort?.abort();
+    const controller = new AbortController();
+    state.imageAbort = controller;
+    state.imageLoadingKey = desired.key;
+    const request = ++state.imageRequest;
+    let objectUrl;
+    try {
+        const response = await fetch(desired.url, {
+            cache: "no-store",
+            signal: controller.signal,
+        });
+        if (!response.ok)
+            throw new Error("The scan preview could not be loaded.");
+        objectUrl = URL.createObjectURL(await response.blob());
+        const image = new Image();
+        image.src = objectUrl;
+        await image.decode();
+        if (
+            request !== state.imageRequest ||
+            desiredImage()?.key !== desired.key
+        ) {
+            URL.revokeObjectURL(objectUrl);
+            return;
+        }
+        const previous = state.imageObjectUrl;
+        $("source-image").setAttribute("href", objectUrl);
+        state.imageObjectUrl = objectUrl;
+        state.imageKey = desired.key;
+        if (previous) URL.revokeObjectURL(previous);
+    } catch (error) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        if (error.name !== "AbortError" && request === state.imageRequest)
+            feedback(error.message);
+    } finally {
+        if (request === state.imageRequest) {
+            state.imageLoadingKey = null;
+            render();
+        }
+    }
+}
+
+function artifactJobFinished() {
+    const request = state.artifactRequest;
+    const job = state.server?.job;
+    if (!request?.jobId || job?.id !== request.jobId || job.state === "running")
+        return;
+    state.artifactRequest = null;
+    if (job.state === "error") {
+        state.artifactError = job.error || "Artifact generation failed.";
+        feedback(state.artifactError);
+        return;
+    }
+    scheduleArtifacts(0);
+}
+
+function scheduleArtifacts(delay = 200) {
+    clearTimeout(artifactTimer);
+    artifactTimer = setTimeout(updateArtifacts, delay);
+}
+
+async function updateArtifacts() {
+    if (
+        !state.server ||
+        state.mode !== "signing" ||
+        !enrollmentCurrent() ||
+        state.artifactRequest ||
+        state.polling ||
+        state.server.job?.state === "running"
+    )
+        return;
+    if (
+        state.server.artifact.level === state.artifactLevel &&
+        !state.artifactRandomizeQueued
+    ) {
+        syncImage();
+        return;
+    }
+    const request = {
+        level: state.artifactLevel,
+        randomize: state.artifactRandomizeQueued,
+        jobId: null,
+    };
+    state.artifactRequest = request;
+    state.artifactRandomizeQueued = false;
+    state.artifactError = null;
+    render();
+    try {
+        const response = await fetch("/api/artifacts", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Gnorix-Token": state.server.token,
+            },
+            body: JSON.stringify({
+                level: request.level,
+                randomize: request.randomize,
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok)
+            throw new Error(result.error || "Artifact generation failed.");
+        request.jobId = result.job_id;
+        await refresh();
+    } catch (error) {
+        state.artifactRequest = null;
+        state.artifactError = error.message;
+        feedback(error.message);
+        render();
+    }
+}
+
+function editArtifacts(randomize = false) {
+    state.artifactLevel = Number($("artifact-level").value);
+    state.artifactRandomizeQueued ||= randomize;
+    state.artifactError = null;
+    state.region = null;
+    feedback("");
+    render();
+    scheduleArtifacts();
+}
+
 function currentPrepared() {
     const prepared = state.server?.prepared;
     if (
@@ -112,9 +283,13 @@ function currentPrepared() {
     )
         return null;
     if (prepared.work_limit !== Number($("work-limit").value)) return null;
+    if (state.mode === "enrollment" && state.imageKey !== "original")
+        return null;
     if (
         state.mode === "signing" &&
-        !sameCircle(prepared.selection, state.circle)
+        (!sameCircle(prepared.selection, state.circle) ||
+            !artifactReady() ||
+            prepared.artifact_revision !== state.server.artifact.revision)
     )
         return null;
     return prepared;
@@ -361,7 +536,10 @@ function render() {
     const prepared = currentPrepared(),
         registered = enrollmentCurrent(),
         valid = validConfig();
-    state.busy = state.polling || job?.state === "running";
+    state.busy =
+        state.polling ||
+        Boolean(state.artifactRequest) ||
+        job?.state === "running";
     $("mode-enrollment").classList.toggle(
         "active",
         state.mode === "enrollment",
@@ -369,6 +547,30 @@ function render() {
     $("mode-signing").classList.toggle("active", state.mode === "signing");
     $("circle-settings").hidden = state.mode !== "signing";
     $("reset-circle").hidden = state.mode !== "signing";
+    $("artifact-settings").hidden = state.mode !== "signing";
+    $("artifact-test-actions").hidden = state.mode !== "signing";
+    $("artifact-value").textContent =
+        state.artifactLevel === 0
+            ? "Original · 0"
+            : `${state.artifactLevel} / 100`;
+    $("artifact-seed").textContent =
+        `Pattern seed ${state.server.artifact?.seed ?? "—"}`;
+    const artifactControlsLocked =
+        !registered || (state.busy && !state.artifactRequest);
+    $("artifact-level").disabled = artifactControlsLocked;
+    $("artifact-randomize").disabled = artifactControlsLocked;
+    $("artifact-status").textContent = !registered
+        ? "Create a clean Merkle set before altering a scan."
+        : state.artifactError
+          ? state.artifactError
+          : !artifactReady()
+            ? "Updating the exact scan preview. Previous feature markers are hidden."
+            : "This preview is the scan used for extraction. The pattern stays fixed until Randomize.";
+    const displayReady =
+        state.mode === "enrollment"
+            ? state.imageKey === "original"
+            : artifactReady();
+    $("image-stage").classList.toggle("preview-pending", !displayReady);
     $("action-title").textContent =
         state.mode === "enrollment"
             ? "Prepare a Merkle set"
@@ -379,7 +581,11 @@ function render() {
             : "Choose a circle, prepare its features, then search for a key in the enrolled set.";
     $("execute").textContent =
         state.mode === "enrollment" ? "Create Merkle set" : "Sign message";
-    const signingReady = registered && validSearchControls() && validPayload();
+    const signingReady =
+        registered &&
+        validSearchControls() &&
+        validPayload() &&
+        artifactReady();
     const consumed =
         prepared && state.mode === "signing" && state.server.result;
     if (consumed)
@@ -390,7 +596,11 @@ function render() {
         consumed ||
         (state.mode === "signing" && !signingReady);
     $("prepare").disabled =
-        state.busy || !valid || (state.mode === "signing" && !signingReady);
+        state.busy ||
+        !displayReady ||
+        !valid ||
+        (state.mode === "signing" && !signingReady);
+    $("test-altered-scan").disabled = state.busy || !valid || !signingReady;
     for (const id of [
         "mode-enrollment",
         "mode-signing",
@@ -447,12 +657,18 @@ function render() {
                 : state.server.result?.status === "matched"
                   ? `White markers show ${countLabel(state.server.result.feature_ids.length, "feature")} used to reconstruct the key`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;
+    if (state.mode === "signing" && registered && !artifactReady())
+        notice = "Updating scan preview · prepare or test when ready";
+    if (state.mode === "enrollment" && !displayReady)
+        notice = "Loading the original scan…";
     $("viewer-notice").textContent = notice;
     const status = $("job-status");
     status.classList.toggle("busy", state.busy);
     status.classList.toggle("error", job?.state === "error");
     status.lastElementChild.textContent = state.busy
-        ? job?.phase || "Starting computation…"
+        ? state.artifactRequest
+            ? "Updating altered scan…"
+            : job?.phase || "Starting computation…"
         : job?.state === "error"
           ? job.error || "Computation failed"
           : prepared
@@ -504,6 +720,8 @@ async function refresh() {
                 y: Math.round(height / 2),
                 radius: Math.round(Math.min(width, height) * 0.34),
             };
+            state.artifactLevel = state.server.artifact?.level ?? 0;
+            $("artifact-level").value = state.artifactLevel;
             if (state.server.prepared) {
                 state.mode = state.server.prepared.kind;
                 $("work-limit").value = state.server.prepared.work_limit;
@@ -525,7 +743,9 @@ async function refresh() {
         }
         $("connection").textContent = "● Local server";
         $("connection").classList.remove("offline");
+        artifactJobFinished();
         render();
+        syncImage();
     } catch (error) {
         if (sequence !== refreshSequence) return;
         $("connection").textContent = "Server unavailable";
@@ -534,6 +754,7 @@ async function refresh() {
         $("prepare").disabled = true;
         $("execute").disabled = true;
         $("verify").disabled = true;
+        $("test-altered-scan").disabled = true;
     }
     clearTimeout(pollTimer);
     pollTimer = setTimeout(
@@ -544,7 +765,12 @@ async function refresh() {
 
 async function submit(path, body) {
     if (state.busy) return;
-    if ((path === "/api/sign" || path === "/api/verify") && !validPayload()) {
+    if (
+        (path === "/api/sign" ||
+            path === "/api/verify" ||
+            path === "/api/test") &&
+        !validPayload()
+    ) {
         feedback("The UTF-8 message exceeds 16 KiB. Shorten the text.");
         return;
     }
@@ -580,6 +806,8 @@ function setMode(mode) {
     state.region = null;
     feedback("");
     render();
+    syncImage();
+    if (mode === "signing") scheduleArtifacts(0);
 }
 $("mode-enrollment").addEventListener("click", () => setMode("enrollment"));
 $("mode-signing").addEventListener("click", () => setMode("signing"));
@@ -588,6 +816,8 @@ $("prepare").addEventListener("click", () =>
         kind: state.mode,
         config: readConfig(),
         selection: state.mode === "signing" ? state.circle : null,
+        artifact_revision:
+            state.mode === "signing" ? state.server.artifact.revision : null,
         work_limit: Number($("work-limit").value),
     }),
 );
@@ -607,6 +837,19 @@ $("execute").addEventListener("click", () => {
 $("verify").addEventListener("click", () =>
     submit("/api/verify", { payload: $("payload").value }),
 );
+$("artifact-level").addEventListener("input", () => editArtifacts());
+$("artifact-randomize").addEventListener("click", () => editArtifacts(true));
+$("test-altered-scan").addEventListener("click", () => {
+    if (!artifactReady()) return;
+    submit("/api/test", {
+        config: readConfig(),
+        selection: state.circle,
+        artifact_revision: state.server.artifact.revision,
+        payload: $("payload").value,
+        attempt_limit: Number($("attempt-limit").value),
+        work_limit: Number($("work-limit").value),
+    });
+});
 for (const id of [
     ...Object.values(configFields),
     "work-limit",

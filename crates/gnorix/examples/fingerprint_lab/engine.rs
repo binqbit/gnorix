@@ -3,6 +3,7 @@ use std::{
     error::Error as StdError,
     num::{NonZeroU64, NonZeroUsize},
     path::PathBuf,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -17,13 +18,15 @@ use gnorix::{
     package::{EnrollmentPackage, PackageLimits},
     policy::{Limits, SecretPolicy},
 };
-use image::GrayImage;
+use image::{GrayImage, ImageEncoder};
+use sha2::{Digest, Sha256};
 
-use super::{capture, model::*};
+use super::{artifacts, capture, model::*};
 use crate::{Result, authorization_json, enrollment_profile, output, provider::ExampleCrypto};
 
 pub struct Engine {
     source: GrayImage,
+    frame: ArtifactFrame,
     output: PathBuf,
     next_id: u64,
     prepared: Option<Prepared>,
@@ -46,22 +49,131 @@ struct Enrolled {
     package: EnrollmentPackage,
     config: LabConfig,
     authorization: Option<Authorization>,
+    unit_px: f64,
+}
+
+struct ArtifactFrame {
+    view: ArtifactView,
+    image: GrayImage,
+    png: Arc<[u8]>,
 }
 
 impl Engine {
-    pub fn new(source: GrayImage, output: PathBuf) -> Self {
-        Self {
+    pub fn new(source: GrayImage, output: PathBuf) -> Result<Self> {
+        let frame = ArtifactFrame::new(
+            source.clone(),
+            0,
+            0,
+            u32::from_le_bytes(random_bytes()?),
+            None,
+        )?;
+        let data = LabData {
+            artifact: frame.view.clone(),
+            ..LabData::default()
+        };
+        Ok(Self {
             source,
+            frame,
             output,
             next_id: 1,
             prepared: None,
             enrolled: None,
-            data: LabData::default(),
-        }
+            data,
+        })
     }
 
     pub fn view(&self) -> LabData {
         self.data.clone()
+    }
+
+    pub fn preview(&self) -> (u64, Arc<[u8]>) {
+        (self.frame.view.revision, Arc::clone(&self.frame.png))
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.source.width(), self.source.height())
+    }
+
+    pub fn change_artifacts(
+        &mut self,
+        request: ArtifactRequest,
+        phase: impl Fn(&str),
+    ) -> Result<()> {
+        if request.level > 100 {
+            return Err("artifact level must be between 0 and 100".into());
+        }
+        let unit_px = self
+            .enrolled
+            .as_ref()
+            .ok_or("create a clean enrollment before adding artifacts")?
+            .unit_px;
+        if request.level == self.frame.view.level && !request.randomize {
+            return Ok(());
+        }
+        let seed = if request.randomize {
+            let candidate = u32::from_le_bytes(random_bytes()?);
+            if candidate == self.frame.view.seed {
+                candidate.wrapping_add(1)
+            } else {
+                candidate
+            }
+        } else {
+            self.frame.view.seed
+        };
+        let revision = self
+            .frame
+            .view
+            .revision
+            .checked_add(1)
+            .ok_or("artifact revision overflow")?;
+        phase("Rendering scan artifacts");
+        let image = artifacts::apply(&self.source, unit_px, request.level, u64::from(seed))?;
+        let frame = ArtifactFrame::new(image, revision, request.level, seed, Some(unit_px))?;
+        self.data.artifact = frame.view.clone();
+        self.frame = frame;
+        if self
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| matches!(prepared.work, PreparedWork::Signing(_)))
+        {
+            self.prepared = None;
+            self.data.prepared = None;
+        }
+        self.data.result = None;
+        if let Some(enrolled) = self.enrolled.as_mut() {
+            enrolled.authorization = None;
+        }
+        Ok(())
+    }
+
+    pub fn test(&mut self, request: TestRequest, phase: impl Fn(&str)) -> Result<()> {
+        validate_payload(&request.payload)?;
+        validate_attempts(request.attempt_limit)?;
+        self.prepare(
+            PrepareRequest {
+                kind: "signing".into(),
+                config: request.config,
+                selection: Some(request.selection),
+                work_limit: request.work_limit,
+                artifact_revision: Some(request.artifact_revision),
+            },
+            &phase,
+        )?;
+        let prepared_id = self
+            .prepared
+            .as_ref()
+            .ok_or("test preparation missing")?
+            .view
+            .id;
+        self.sign(
+            SignRequest {
+                prepared_id,
+                payload: request.payload,
+                attempt_limit: request.attempt_limit,
+                work_limit: request.work_limit,
+            },
+            phase,
+        )
     }
 
     pub fn prepare(&mut self, request: PrepareRequest, phase: impl Fn(&str)) -> Result<()> {
@@ -73,10 +185,14 @@ impl Engine {
         if request.kind == "enrollment" && request.selection.is_some() {
             return Err("enrollment preparation uses the full source image".into());
         }
+        if request.kind == "enrollment" && request.artifact_revision.is_some() {
+            return Err("clean enrollment must not select an altered scan revision".into());
+        }
         if request.kind == "signing" && request.selection.is_none() {
             return Err("signing preparation requires a selected circle".into());
         }
         if request.kind == "signing" {
+            self.require_artifact_revision(request.artifact_revision)?;
             let enrolled = self
                 .enrolled
                 .as_ref()
@@ -96,7 +212,12 @@ impl Engine {
             self.data.enrollment = None;
         }
         phase("Analyzing fingerprint");
-        let selected = capture::select(&self.source, request.selection)?;
+        let source = if request.kind == "enrollment" {
+            &self.source
+        } else {
+            &self.frame.image
+        };
+        let selected = capture::select(source, request.selection)?;
         let extracted = fingerprint::extract(&selected.capture, &ExtractionConfig::default())?;
         phase("Preparing regions and features");
         let id = self.next_id;
@@ -110,6 +231,7 @@ impl Engine {
             config: request.config,
             selection: request.selection,
             work_limit: request.work_limit,
+            artifact_revision: request.artifact_revision,
             unit_px: extracted.scale.unit_px,
             points: Vec::new(),
             regions: Vec::new(),
@@ -229,6 +351,7 @@ impl Engine {
             package: restored,
             config: prepared.view.config,
             authorization: None,
+            unit_px: prepared.view.unit_px,
         });
         Ok(())
     }
@@ -237,6 +360,13 @@ impl Engine {
         validate_payload(&request.payload)?;
         validate_work(request.work_limit)?;
         validate_attempts(request.attempt_limit)?;
+        let artifact_revision = self
+            .prepared
+            .as_ref()
+            .ok_or("prepare the selected fragment first")?
+            .view
+            .artifact_revision;
+        self.require_artifact_revision(artifact_revision)?;
         let prepared = self
             .prepared
             .as_mut()
@@ -332,7 +462,7 @@ impl Engine {
         persist_json(
             &self.output,
             "signing",
-            &serde_json::json!({"prepared": prepared.view, "root": hex(&enrolled.package.commitment().root.0), "result": result}),
+            &serde_json::json!({"prepared": prepared.view, "artifact": self.frame.view, "root": hex(&enrolled.package.commitment().root.0), "result": result}),
         )?;
         self.data.result = Some(result);
         Ok(())
@@ -371,6 +501,45 @@ impl Engine {
             Err(error) => format!("Verification failed: {error}"),
         };
         Ok(())
+    }
+
+    fn require_artifact_revision(&self, revision: Option<u64>) -> Result<()> {
+        if revision != Some(self.frame.view.revision) {
+            return Err("scan revision changed; load the current preview and prepare again".into());
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactFrame {
+    fn new(
+        image: GrayImage,
+        revision: u64,
+        level: u8,
+        seed: u32,
+        ridge_width_px: Option<f64>,
+    ) -> Result<Self> {
+        let image_sha256 = hex(&Sha256::digest(image.as_raw()));
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png).write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::L8,
+        )?;
+        Ok(Self {
+            view: ArtifactView {
+                revision,
+                level,
+                seed,
+                image_url: format!("/api/scan/{revision}.png"),
+                generator_version: ARTIFACT_GENERATOR.into(),
+                image_sha256,
+                ridge_width_px,
+            },
+            image,
+            png: png.into(),
+        })
     }
 }
 
@@ -547,6 +716,191 @@ fn error_detail(error: &(dyn StdError + 'static)) -> String {
 mod tests {
     use super::*;
 
+    fn enrolled_engine() -> Engine {
+        let source =
+            GrayImage::from_fn(64, 80, |x, y| image::Luma([((x * 7 + y * 13) % 256) as u8]));
+        let mut engine = Engine::new(source, PathBuf::new()).unwrap();
+        let config = LabConfig::default();
+        let limits = limits(1).unwrap();
+        let candidate = gnorix::biometrics::Candidate::new(vec![7; 32]).unwrap();
+        let candidates = Box::new(std::iter::once(Ok(candidate)));
+        let enrollment = enrollment::enroll_candidates(
+            &ExampleCrypto,
+            candidates,
+            enrollment_context(config).unwrap(),
+            None,
+            &limits,
+        )
+        .unwrap();
+        let package = EnrollmentPackage::from_enrollment(&enrollment, &limits).unwrap();
+        engine.data.enrollment = Some(EnrollmentView {
+            root: hex(&package.commitment().root.0),
+            leaf_count: package.commitment().leaf_count,
+            config,
+        });
+        engine.enrolled = Some(Enrolled {
+            package,
+            config,
+            authorization: None,
+            unit_px: 5.0,
+        });
+        engine
+    }
+
+    #[test]
+    fn altered_preview_uses_exact_pixels_and_preserves_clean_enrollment() {
+        let mut engine = enrolled_engine();
+        assert_eq!(engine.data.artifact.ridge_width_px, None);
+        let source = engine.source.clone();
+        let root = engine.data.enrollment.as_ref().unwrap().root.clone();
+        let seed = engine.data.artifact.seed;
+        for level in [35, 80, 0] {
+            engine
+                .change_artifacts(
+                    ArtifactRequest {
+                        level,
+                        randomize: false,
+                    },
+                    |_| {},
+                )
+                .unwrap();
+            let decoded = image::load_from_memory(&engine.preview().1)
+                .unwrap()
+                .to_luma8();
+            assert_eq!(decoded, engine.frame.image);
+            assert_eq!(engine.source, source);
+            assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
+            assert_eq!(engine.data.artifact.seed, seed);
+            assert_eq!(engine.data.artifact.level, level);
+            assert_eq!(engine.data.artifact.ridge_width_px, Some(5.0));
+            let metadata = serde_json::to_value(&engine.data.artifact).unwrap();
+            assert_eq!(metadata["ridge_width_px"], 5.0);
+            let reproduced = artifacts::apply(
+                &source,
+                metadata["ridge_width_px"].as_f64().unwrap(),
+                metadata["level"].as_u64().unwrap() as u8,
+                metadata["seed"].as_u64().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(reproduced, decoded);
+            assert_eq!(
+                engine.data.artifact.image_sha256,
+                hex(&Sha256::digest(decoded.as_raw()))
+            );
+            if level == 0 {
+                assert_eq!(decoded, source);
+            }
+        }
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 0,
+                    randomize: true,
+                },
+                |_| {},
+            )
+            .unwrap();
+        assert_ne!(engine.data.artifact.seed, seed);
+        assert_eq!(engine.frame.image, source);
+        assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
+    }
+
+    #[test]
+    fn stale_scan_revision_is_rejected_before_extraction() {
+        let mut engine = enrolled_engine();
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 20,
+                    randomize: false,
+                },
+                |_| {},
+            )
+            .unwrap();
+        let mut request = PrepareRequest {
+            kind: "signing".into(),
+            config: LabConfig::default(),
+            selection: Some(Circle {
+                x: 30.0,
+                y: 40.0,
+                radius: 20.0,
+            }),
+            work_limit: MAX_WORK,
+            artifact_revision: Some(0),
+        };
+        assert!(
+            engine
+                .prepare(request, |_| {})
+                .unwrap_err()
+                .to_string()
+                .contains("scan revision changed")
+        );
+        request = PrepareRequest {
+            kind: "enrollment".into(),
+            config: LabConfig::default(),
+            selection: None,
+            work_limit: MAX_WORK,
+            artifact_revision: Some(engine.data.artifact.revision),
+        };
+        assert!(
+            engine
+                .prepare(request, |_| {})
+                .unwrap_err()
+                .to_string()
+                .contains("clean enrollment")
+        );
+    }
+
+    #[test]
+    fn unchanged_artifacts_preserve_the_current_result_and_revision() {
+        let mut engine = enrolled_engine();
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 30,
+                    randomize: false,
+                },
+                |_| {},
+            )
+            .unwrap();
+        let revision = engine.data.artifact.revision;
+        let bytes = Arc::clone(&engine.frame.png);
+        engine.data.result = Some(RunResult {
+            status: "incomplete".into(),
+            message: "retained result".into(),
+            attempts: 1,
+            feature_ids: Vec::new(),
+            authorization: None,
+            verified: false,
+        });
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 30,
+                    randomize: false,
+                },
+                |_| panic!("must not render unchanged settings"),
+            )
+            .unwrap();
+        assert_eq!(engine.data.artifact.revision, revision);
+        assert!(Arc::ptr_eq(&engine.frame.png, &bytes));
+        assert_eq!(
+            engine.data.result.as_ref().unwrap().message,
+            "retained result"
+        );
+        engine
+            .change_artifacts(
+                ArtifactRequest {
+                    level: 31,
+                    randomize: false,
+                },
+                |_| {},
+            )
+            .unwrap();
+        assert!(engine.data.result.is_none());
+        assert_eq!(engine.data.artifact.revision, revision + 1);
+    }
+
     #[test]
     fn distinguishes_exhaustion_limits_and_actual_failures() {
         assert_eq!(
@@ -608,7 +962,7 @@ mod tests {
 
     #[test]
     fn rejected_verification_does_not_leave_a_previous_success_visible() {
-        let mut engine = Engine::new(GrayImage::new(1, 1), PathBuf::new());
+        let mut engine = Engine::new(GrayImage::new(1, 1), PathBuf::new()).unwrap();
         engine.data.result = Some(RunResult {
             status: "matched".into(),
             message: "Previously verified".into(),

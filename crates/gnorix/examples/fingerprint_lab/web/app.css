@@ -400,7 +400,7 @@ h3 {
     user-select: none;
 }
 #source-image {
-    filter: contrast(1.04);
+    filter: none;
 }
 #selection-circle {
     cursor: grab;
@@ -711,6 +711,46 @@ input[type="range"] {
 .circle-settings .microcopy {
     font-size: 9px;
     margin-top: 12px;
+}
+.artifact-settings {
+    margin-bottom: 21px;
+    padding: 16px;
+    border: 1px solid #286f58;
+    border-radius: 9px;
+    background: #040e0a;
+}
+.artifact-settings input[type="range"] {
+    margin-bottom: 12px;
+}
+.artifact-pattern {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.artifact-pattern > span {
+    color: #89bea2;
+    font: 10px var(--mono);
+    overflow-wrap: anywhere;
+}
+.artifact-status {
+    margin: 11px 0 0;
+    color: #afd0bd;
+    font-size: 10px;
+    line-height: 1.6;
+}
+.artifact-test-actions {
+    border-top: 1px solid #245c40;
+    margin-top: 20px;
+    padding-top: 18px;
+}
+.artifact-test-actions .button {
+    width: 100%;
+    border-color: #55d8a3;
+    color: #b0f8d8;
+}
+.image-stage.preview-pending #source-image {
+    opacity: 0.55;
 }
 .root-card {
     grid-column: 1 / -1;

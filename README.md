@@ -16,7 +16,7 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
 - [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
 - [Fingerprint signing](docs/fingerprint-signing.md) covers regional point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
-- [Fingerprint test stand](docs/fingerprint-lab.md) provides a local Rust web interface for preparing regions, selecting circular captures and inspecting real signatures and matching feature points.
+- [Fingerprint test stand](docs/fingerprint-lab.md) provides a local Rust web interface for preparing regions, selecting circular captures, testing local capture artifacts and inspecting real signatures and matching feature points.
 
 ## Development
 

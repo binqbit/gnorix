@@ -7,6 +7,7 @@ use crate::Result;
 pub const MAX_WORK: usize = 1_000_000_000;
 pub const MAX_ATTEMPTS: usize = 1_000_000_000;
 pub const MAX_VARIANTS: u64 = 1_000_000;
+pub const ARTIFACT_GENERATOR: &str = "gnorix.test-artifacts.v1";
 
 pub fn default_work_limit() -> usize {
     MAX_WORK
@@ -84,6 +85,39 @@ pub struct PrepareRequest {
     pub selection: Option<Circle>,
     #[serde(default = "default_work_limit")]
     pub work_limit: usize,
+    #[serde(default)]
+    pub artifact_revision: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactRequest {
+    pub level: u8,
+    #[serde(default)]
+    pub randomize: bool,
+}
+
+#[derive(Clone, Default, Serialize)]
+pub struct ArtifactView {
+    pub revision: u64,
+    pub level: u8,
+    pub seed: u32,
+    pub image_url: String,
+    pub generator_version: String,
+    pub image_sha256: String,
+    /// Clean enrollment ridge width used to generate this frame.
+    pub ridge_width_px: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestRequest {
+    pub config: LabConfig,
+    pub selection: Circle,
+    pub artifact_revision: u64,
+    pub payload: String,
+    pub attempt_limit: usize,
+    pub work_limit: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +143,7 @@ pub struct VerifyRequest {
 
 #[derive(Clone, Default, Serialize)]
 pub struct LabData {
+    pub artifact: ArtifactView,
     pub prepared: Option<PreparedView>,
     pub enrollment: Option<EnrollmentView>,
     pub result: Option<RunResult>,
@@ -121,6 +156,7 @@ pub struct PreparedView {
     pub config: LabConfig,
     pub selection: Option<Circle>,
     pub work_limit: usize,
+    pub artifact_revision: Option<u64>,
     pub unit_px: f64,
     pub points: Vec<PointView>,
     pub regions: Vec<RegionView>,

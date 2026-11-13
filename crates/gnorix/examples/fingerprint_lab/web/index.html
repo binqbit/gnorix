@@ -223,6 +223,52 @@
                                 keys move the center; + / − change the radius.
                             </p>
                         </div>
+                        <section
+                            id="artifact-settings"
+                            class="artifact-settings"
+                            hidden
+                            aria-labelledby="artifact-title"
+                        >
+                            <div class="field-line">
+                                <label id="artifact-title" for="artifact-level"
+                                    >Artifact severity</label
+                                >
+                                <output id="artifact-value">Original</output>
+                            </div>
+                            <input
+                                id="artifact-level"
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value="0"
+                            />
+                            <div class="artifact-pattern">
+                                <span id="artifact-seed">Fixed pattern</span>
+                                <button
+                                    id="artifact-randomize"
+                                    class="text-button"
+                                    type="button"
+                                >
+                                    Randomize
+                                </button>
+                            </div>
+                            <p class="microcopy">
+                                0 keeps the original scan. Higher values
+                                strengthen local bends, merged ridges and gaps.
+                                The level is severity, not the percentage of
+                                affected pixels.
+                            </p>
+                            <p
+                                id="artifact-status"
+                                class="artifact-status"
+                                role="status"
+                                aria-live="polite"
+                            >
+                                The same pattern is kept as severity changes.
+                                Enrollment always uses the clean original.
+                            </p>
+                        </section>
                         <div class="primary-actions">
                             <button
                                 id="prepare"
@@ -238,6 +284,25 @@
                             >
                                 Create Merkle set
                             </button>
+                        </div>
+                        <div
+                            id="artifact-test-actions"
+                            class="artifact-test-actions"
+                            hidden
+                        >
+                            <button
+                                id="test-altered-scan"
+                                class="button secondary"
+                                type="button"
+                                disabled
+                            >
+                                Test altered scan
+                            </button>
+                            <p class="microcopy">
+                                Freshly extract this scan and search for its key
+                                in one step. Use Prepare features above to
+                                inspect it first.
+                            </p>
                         </div>
                         <div
                             id="job-status"
