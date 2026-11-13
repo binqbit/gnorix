@@ -1,6 +1,6 @@
 # Signing from a fresh fingerprint image
 
-`fingerprint::signing_candidates(&fingerprint, &config)` searches the observed features of a newly extracted image. `authorization::sign_candidates(...)` derives each candidate key, looks it up in the retained [`.grx` package](grx-packages.md), and signs the exact approved action with the first member found. The enrollment and its accepted key set remain unchanged.
+`fingerprint::analyze(&capture, &extraction_config)` returns compact `FingerprintFeatures`; `fingerprint::signing_candidates(&features, &config)` searches those observed features without generating report-only maps or curve descriptors. `authorization::sign_candidates(...)` derives each candidate key, looks it up in the retained [`.grx` package](grx-packages.md), and signs the exact approved action with the first member found. The enrollment and its accepted key set remain unchanged.
 
 ## Candidate search
 

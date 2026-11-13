@@ -13,8 +13,7 @@ use support::RegionRaster;
 
 use super::{
     BootstrapScale, Capture, ExtractionConfig, FingerprintError, RidgeMap, RidgeSpan, ScaleProfile,
-    enhancement::{self, MeasurementInput},
-    graph, photometry, scale, thinning,
+    enhancement::MeasurementInput, graph, photometry, scale, thinning,
 };
 use crate::biometrics::geometry::Point;
 
@@ -73,12 +72,12 @@ pub(super) fn measure(
     capture: &Capture,
     config: &ExtractionConfig,
     bootstrap: &BootstrapScale,
+    input: MeasurementInput,
 ) -> Result<FullScale, FingerprintError> {
     config.validate()?;
     if capture.pixels().len() > config.max_pixels {
         return Err(FingerprintError::WorkLimit);
     }
-    let input = enhancement::measurement_input(capture, config, bootstrap.ridge_period_px)?;
     let count = capture.pixels().len();
     if input.map.width() != capture.width() as usize
         || input.map.height() != capture.height() as usize

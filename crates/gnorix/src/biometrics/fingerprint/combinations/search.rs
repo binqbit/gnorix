@@ -13,7 +13,7 @@ use super::{
 use crate::{
     biometrics::{
         Candidate, Candidates,
-        fingerprint::{Fingerprint, FingerprintError, shapes},
+        fingerprint::{FingerprintError, FingerprintFeatures, shapes},
     },
     error::AlgorithmError,
 };
@@ -93,7 +93,7 @@ impl SigningSearchConfig {
 /// Natural exhaustion covers only the configured regional space. Work or
 /// geometry errors are yielded once, then the stream is exhausted.
 pub fn signing_candidates(
-    fingerprint: &Fingerprint,
+    fingerprint: &FingerprintFeatures,
     config: &SigningSearchConfig,
 ) -> Result<Candidates<'static>, CombinationError> {
     Ok(Box::new(prepare_signing_search(fingerprint, config)?))
@@ -103,11 +103,11 @@ pub fn signing_candidates(
 /// points, actual circles and most recently yielded feature identities.
 /// Diagnostics do not change selection, ranking, geometry or candidate bytes.
 pub fn prepare_signing_search(
-    fingerprint: &Fingerprint,
+    fingerprint: &FingerprintFeatures,
     config: &SigningSearchConfig,
 ) -> Result<SigningSearch, CombinationError> {
     config.validate()?;
-    let spacing = fingerprint.scale.unit_px;
+    let spacing = fingerprint.unit_px;
     if !spacing.is_finite() || spacing <= 0.0 {
         return Err(CombinationError::InvalidFingerprint(
             FingerprintError::ScaleUnavailable("ridge width must be finite and positive"),

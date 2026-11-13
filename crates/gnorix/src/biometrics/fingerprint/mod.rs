@@ -5,6 +5,7 @@
 //! use source-image pixels; measured ridge spacing is not an inferred DPI.
 //! Final grid figures and positional variants use integer node indices.
 
+mod analysis;
 mod clarity;
 mod cleanup;
 mod combinations;
@@ -28,6 +29,7 @@ use std::{error::Error, fmt};
 
 use super::{Capture, geometry::Point};
 
+pub use analysis::{AnalyzedFeature, FingerprintFeatures};
 pub use clarity::ClarityMap;
 pub use cleanup::{
     CleanupOrigin, JunctionRoute, LoopAssessment, LoopEvidence, RidgeCleanup, SourceDecision,
@@ -48,7 +50,7 @@ pub use features::{
 pub use full_scale::{FullScale, MeasurementCoverage, RidgeObservation};
 pub use graph::{NodeKind, RidgeCycle, RidgeEdge, RidgeGraph, RidgeNode};
 pub use map::RidgeMap;
-pub use pipeline::{ContourReconstruction, Fingerprint, estimate_scale, extract};
+pub use pipeline::{ContourReconstruction, Fingerprint, analyze, estimate_scale, extract};
 pub use quality::WidthConsistency;
 pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
 pub use scale::{BootstrapScale, RidgeSpan, ScaleProfile};

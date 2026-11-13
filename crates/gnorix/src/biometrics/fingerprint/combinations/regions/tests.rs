@@ -245,10 +245,10 @@ fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
 
 #[test]
 fn preserves_confirmed_pixel_edges_and_extends_only_to_uncovered_feature_centers() {
-    let mut mask = vec![false; 100];
-    mask[22] = true;
-    mask[77] = true;
-    let measured = support_bounds(&mask, 10, &mut WorkBudget::new(100)).unwrap();
+    let measured = RegionBounds {
+        min: Point::new(1.5, 1.5).unwrap(),
+        max: Point::new(7.5, 7.5).unwrap(),
+    };
     assert_eq!(measured.min, Point::new(1.5, 1.5).unwrap());
     assert_eq!(measured.max, Point::new(7.5, 7.5).unwrap());
     let extended = cover_points(
@@ -390,12 +390,17 @@ fn scaled_inputs_and_ridge_width_preserve_regions_and_membership() {
 
 #[test]
 fn missing_pattern_invalid_units_and_resource_exhaustion_are_explicit() {
+    let features = FingerprintFeatures::new(2, 2, 1.0, None, vec![]).unwrap();
     assert_eq!(
-        support_bounds(&[false; 4], 2, &mut WorkBudget::new(4)),
+        pattern_bounds(&features, &[], &mut WorkBudget::new(4)),
         Err(CombinationError::PatternUnavailable)
     );
     assert_eq!(
-        support_bounds(&[true; 4], 2, &mut WorkBudget::new(3)),
+        cover_points(
+            bounds(2.0, 2.0),
+            &[point(1, 1.0, 1.0, 0.5)],
+            &mut WorkBudget::new(0)
+        ),
         Err(CombinationError::WorkLimit)
     );
     let points = [point(1, 0.0, 0.0, 1.0)];

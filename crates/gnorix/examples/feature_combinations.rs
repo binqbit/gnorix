@@ -31,24 +31,12 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = configuration()?;
     let extraction = ExtractionConfig::default();
     let source = image_input::read(&input, extraction.max_pixels)?;
-    let capture = Capture::new(
-        source.width(),
-        source.height(),
-        source.as_raw().clone(),
-        None,
-        None,
-    )?;
+    let (width, height) = source.dimensions();
+    let capture = Capture::new(width, height, source.into_raw(), None, None)?;
 
-    let fingerprint = fingerprint::extract(&capture, &extraction)?;
+    let fingerprint = fingerprint::analyze(&capture, &extraction)?;
     let result = fingerprint::generate_combinations(&fingerprint, &config)?;
-    let document = snapshot(
-        &input,
-        source.width(),
-        source.height(),
-        fingerprint.scale.unit_px,
-        &config,
-        &result,
-    );
+    let document = snapshot(&input, width, height, fingerprint.unit_px, &config, &result);
     write_new(&output, &document)?;
     println!(
         "{} eligible features; {} regions; {} unique combinations; {} unscored features\n{}",

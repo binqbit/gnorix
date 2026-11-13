@@ -223,10 +223,11 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
         combinations_per_region: 12,
         max_work: 10_000_000,
     };
-    let selected = fingerprint::generate_combinations(result, &config).unwrap();
+    let selected =
+        fingerprint::generate_combinations(&result.features().unwrap(), &config).unwrap();
     assert_eq!(
         selected,
-        fingerprint::generate_combinations(result, &config).unwrap()
+        fingerprint::generate_combinations(&result.features().unwrap(), &config).unwrap()
     );
     assert!(selected.work_used > 0 && selected.work_used <= config.max_work);
     assert_eq!(selected.regions.len(), 4);
@@ -261,7 +262,8 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
 
     // Source IDs, rather than incidental storage order, define the output.
     result.feature_strength.candidates.reverse();
-    let reordered = fingerprint::generate_combinations(result, &config).unwrap();
+    let reordered =
+        fingerprint::generate_combinations(&result.features().unwrap(), &config).unwrap();
     result.feature_strength.candidates.reverse();
     assert_eq!(selected, reordered);
 }
@@ -271,7 +273,7 @@ fn assert_single_region_selection(
     config: fingerprint::CombinationConfig,
 ) {
     let selected = fingerprint::generate_combinations(
-        result,
+        &result.features().unwrap(),
         &fingerprint::CombinationConfig {
             radius_units: 1000.0,
             ..config
@@ -381,7 +383,7 @@ fn assert_combination_failures(
 
     assert!(matches!(
         generate_combinations(
-            result,
+            &result.features().unwrap(),
             &CombinationConfig {
                 min_points: 0,
                 ..config
@@ -391,14 +393,17 @@ fn assert_combination_failures(
     ));
     for max_work in [1, selected.work_used - 1] {
         assert_eq!(
-            generate_combinations(result, &CombinationConfig { max_work, ..config }),
+            generate_combinations(
+                &result.features().unwrap(),
+                &CombinationConfig { max_work, ..config }
+            ),
             Err(CombinationError::WorkLimit)
         );
     }
     let required = selected.points.len() + 1;
     assert_eq!(
         generate_combinations(
-            result,
+            &result.features().unwrap(),
             &CombinationConfig {
                 min_points: required,
                 pool_multiplier: 1,

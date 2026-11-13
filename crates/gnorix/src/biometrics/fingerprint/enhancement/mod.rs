@@ -38,25 +38,41 @@ pub(super) struct MeasurementInput {
     pub(super) normal_usable: Vec<bool>,
 }
 
-pub(super) fn measurement_input(
+/// Source references shared by raw width measurement and directional enhancement.
+/// Both consumers use exactly the same provisional period and extraction controls.
+pub(super) struct SourcePreparation {
+    palette: LocalPalette,
+    tensor: orientation::Orientation,
+}
+
+pub(super) fn prepare_source(
     capture: &Capture,
     config: &ExtractionConfig,
-    bootstrap_period: f64,
-) -> Result<MeasurementInput, FingerprintError> {
+    period: f64,
+) -> Result<SourcePreparation, FingerprintError> {
     config.validate()?;
     if capture.pixels().len() > config.max_pixels {
         return Err(FingerprintError::WorkLimit);
     }
-    if !bootstrap_period.is_finite() || !(4.0..=128.0).contains(&bootstrap_period) {
+    if !period.is_finite() || !(4.0..=128.0).contains(&period) {
         return Err(FingerprintError::ScaleUnavailable(
             "bootstrap period exceeds measurement support",
         ));
     }
     let (width, height) = (capture.width() as usize, capture.height() as usize);
-    let radius = (bootstrap_period / 2.0).ceil() as usize;
+    let radius = (period / 2.0).ceil() as usize;
     let standardized = normalization::standardize(capture, radius, config.min_contrast)?;
     let tensor = orientation(&standardized, width, height, radius, config.min_coherence)?;
     let palette = normalization::estimate_palette(capture, &standardized, radius)?;
+    Ok(SourcePreparation { palette, tensor })
+}
+
+pub(super) fn measurement_input(
+    capture: &Capture,
+    source: &SourcePreparation,
+) -> Result<MeasurementInput, FingerprintError> {
+    let (width, height) = (capture.width() as usize, capture.height() as usize);
+    let palette = &source.palette;
     let ridges = capture
         .pixels()
         .iter()
@@ -68,47 +84,28 @@ pub(super) fn measurement_input(
                         / 2.0
         })
         .collect();
-    let map = RidgeMap::new(width, height, ridges, palette.usable)?;
-    let normal_angles = tensor
+    let map = RidgeMap::new(width, height, ridges, palette.usable.clone())?;
+    let normal_angles = source
+        .tensor
         .angles
-        .into_iter()
-        .map(|angle| (f64::from(angle) + FRAC_PI_2).rem_euclid(PI) as f32)
+        .iter()
+        .map(|&angle| (f64::from(angle) + FRAC_PI_2).rem_euclid(PI) as f32)
         .collect();
     Ok(MeasurementInput {
         map,
         normal_angles,
-        normal_usable: tensor.usable,
+        normal_usable: source.tensor.usable.clone(),
     })
 }
 
-pub(super) fn preprocess(
+pub(super) fn enhance(
     capture: &Capture,
     config: &ExtractionConfig,
     ridge_period_px: f64,
+    source: SourcePreparation,
 ) -> Result<Preprocessed, FingerprintError> {
-    config.validate()?;
-    if capture.pixels().len() > config.max_pixels {
-        return Err(FingerprintError::WorkLimit);
-    }
-
-    let width = capture.width() as usize;
-    let height = capture.height() as usize;
-    if !ridge_period_px.is_finite() || !(4.0..=128.0).contains(&ridge_period_px) {
-        return Err(FingerprintError::ScaleUnavailable(
-            "measured period exceeds filter support",
-        ));
-    }
-    let radius = (ridge_period_px / 2.0).ceil() as usize;
-    let orientation_input = normalization::standardize(capture, radius, config.min_contrast)?;
-    let tensor = orientation(
-        &orientation_input,
-        width,
-        height,
-        radius,
-        config.min_coherence,
-    )?;
-    let palette = normalization::estimate_palette(capture, &orientation_input, radius)?;
-    drop(orientation_input);
+    let (width, height) = (capture.width() as usize, capture.height() as usize);
+    let SourcePreparation { palette, tensor } = source;
     let local = normalization::apply_palette(capture, &palette);
     let filtered = denoise_intensity(&local, width, height, ridge_period_px / 20.0);
     let response = response::collect(&filtered, &tensor, width, height, ridge_period_px)?;
@@ -122,6 +119,16 @@ pub(super) fn preprocess(
         map,
         response,
     })
+}
+
+#[cfg(test)]
+pub(super) fn preprocess(
+    capture: &Capture,
+    config: &ExtractionConfig,
+    period: f64,
+) -> Result<Preprocessed, FingerprintError> {
+    let source = prepare_source(capture, config, period)?;
+    enhance(capture, config, period, source)
 }
 
 struct Normalized {

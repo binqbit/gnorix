@@ -1,6 +1,6 @@
 # Regional feature combinations
 
-`fingerprint::generate_combinations(&fingerprint, &config)` turns assessed features from one capture into a deterministic list of point subsets. It follows the [fingerprint extraction](fingerprint.md) stage. Each subset records original feature IDs, a ranking score and the regions that selected it.
+`fingerprint::generate_combinations(&features, &config)` turns a compact `FingerprintFeatures` analysis into a deterministic list of point subsets. Obtain it with `fingerprint::analyze`, or project an existing full report with `Fingerprint::features()`. The [fingerprint analysis](fingerprint.md) does not need to create report-only maps for this operation. Each subset records original feature IDs, a ranking score and the regions that selected it.
 
 ## Regions and point pools
 
@@ -69,7 +69,7 @@ Choose an output file that does not already exist. The adapter reads environment
 | `GNORIX_COMBINATION_POOL_MULTIPLIER` | 2 | Target pool size as a multiple of m. |
 | `GNORIX_COMBINATION_RADIUS_UNITS` | 30 | Initial radius in measured dark-ridge widths R. |
 | `GNORIX_COMBINATION_PER_REGION` | 12 | Maximum selected distinct subsets per region. |
-| `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative mask, topology, point-selection and subset-index work entries. |
+| `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative feature validation, point-selection, spatial-check and subset-index work entries. |
 
 These small defaults belong to the example. The library requires finite priority/fractions in `[0, 1]`, positive counts/work controls, an anchor count that fits the allowed pool, and sufficient subset budget to cover it. Enrollment and signing use the same retained priority and spatial policy. Changing that policy requires a new enrollment. The weighting curve cannot restore rejected points. Exhausting the possible valid subsets returns fewer than the budget. Exhausting work fails the operation instead of returning a partial successful result. The work count tracks actual processing; avoiding repeated traversal can let the same limit complete more selections without changing their ranking or spatial rules.
 

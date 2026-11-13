@@ -5,10 +5,10 @@ use std::fmt;
 use super::enhancement::Preprocessed;
 use super::{
     BootstrapScale, Capture, ClarityMap, CurveConfig, CurveGeometry, ExtractionConfig,
-    FeatureAssessment, FingerprintError, FullScale, GapJoin, GapPolicy, LocalPalette, PathOrigin,
-    Point, RidgeCleanup, RidgeGraph, RidgeMap, SmoothingAdjustment, SmoothingControls,
-    WidthConsistency, clarity, cleanup, curve, enhancement, features, full_scale, graph, repair,
-    scale, smoothing, thinning,
+    FeatureAssessment, FingerprintError, FingerprintFeatures, FullScale, GapJoin, GapPolicy,
+    LocalPalette, PathOrigin, Point, RidgeCleanup, RidgeGraph, RidgeMap, SmoothingAdjustment,
+    SmoothingControls, WidthConsistency, analysis, clarity, cleanup, curve, enhancement, features,
+    full_scale, graph, repair, scale, smoothing, thinning,
 };
 
 /// Geometric reconstruction with explicit links back to observed structure.
@@ -88,38 +88,92 @@ pub fn extract(
     capture: &Capture,
     config: &ExtractionConfig,
 ) -> Result<Fingerprint, FingerprintError> {
-    let bootstrap = scale::estimate(capture, config)?;
-    let scale = full_scale::measure(capture, config, &bootstrap)?;
-    let width_consistency = scale.width_consistency()?;
-    let clarity = clarity::assess(capture, bootstrap.ridge_period_px)?;
-    let prepared = enhancement::preprocess(capture, config, bootstrap.ridge_period_px)?;
-    let skeleton = thinning::thin(&prepared.map)?;
-    let traced = graph::trace_with_pixels(&skeleton)?;
-    let graph = &traced.graph;
+    let analysis = analyze_capture(capture, config)?;
+    let width_consistency = analysis.scale.width_consistency()?;
+    let clarity = clarity::assess(capture, analysis.bootstrap.ridge_period_px)?;
     let curve_config = CurveConfig {
-        sample_spacing: scale.unit_px / 4.0,
-        smoothing_sigma: scale.unit_px / 2.0,
+        sample_spacing: analysis.scale.unit_px / 4.0,
+        smoothing_sigma: analysis.scale.unit_px / 2.0,
     };
-    let (edge_geometry, cycle_geometry) = describe_graph(graph, curve_config);
-    let contours = reconstruct_contours(capture, &prepared, &skeleton, &traced, scale.unit_px)?;
-    let feature_strength = features::assess(capture, &prepared, graph, scale.unit_px, config)?;
+    let (edge_geometry, cycle_geometry) = describe_graph(&analysis.graph, curve_config);
+    let contours = describe_contours(analysis.contours);
 
     Ok(Fingerprint {
-        scale,
-        bootstrap,
+        scale: analysis.scale,
+        bootstrap: analysis.bootstrap,
         width_consistency,
-        palette: prepared.palette,
-        normalized: prepared.normalized,
-        denoised: prepared.denoised,
-        coherence: prepared.coherence,
+        palette: analysis.prepared.palette,
+        normalized: analysis.prepared.normalized,
+        denoised: analysis.prepared.denoised,
+        coherence: analysis.prepared.coherence,
         clarity,
-        binary: prepared.map,
+        binary: analysis.prepared.map,
+        skeleton: analysis.skeleton,
+        graph: analysis.graph,
+        contours,
+        feature_strength: analysis.feature_strength,
+        edge_geometry,
+        cycle_geometry,
+    })
+}
+
+/// Analyzes the same source structure and feature priorities as [`extract`],
+/// without computing report-only clarity maps or curve descriptors. All source
+/// width observations, cleanup, reconstruction and eight stress cases remain.
+/// The compact result releases the source rasters and diagnostic graphs.
+pub fn analyze(
+    capture: &Capture,
+    config: &ExtractionConfig,
+) -> Result<FingerprintFeatures, FingerprintError> {
+    let result = analyze_capture(capture, config)?;
+    let contours = &result.contours;
+    analysis::summarize(
+        (capture.width() as usize, capture.height() as usize),
+        &result.scale,
+        &result.feature_strength.candidates,
+        analysis::Projection::new(
+            &result.graph,
+            &contours.cleanup,
+            &contours.repaired.graph,
+            &contours.repaired.node_sources,
+            &contours.repaired.cycle_origins,
+        ),
+    )
+}
+
+struct CaptureAnalysis {
+    bootstrap: BootstrapScale,
+    scale: FullScale,
+    prepared: Preprocessed,
+    skeleton: RidgeMap,
+    graph: RidgeGraph,
+    contours: Reconstruction,
+    feature_strength: FeatureAssessment,
+}
+
+fn analyze_capture(
+    capture: &Capture,
+    config: &ExtractionConfig,
+) -> Result<CaptureAnalysis, FingerprintError> {
+    let bootstrap = scale::estimate(capture, config)?;
+    let source = enhancement::prepare_source(capture, config, bootstrap.ridge_period_px)?;
+    let measurement = enhancement::measurement_input(capture, &source)?;
+    let scale = full_scale::measure(capture, config, &bootstrap, measurement)?;
+    let prepared = enhancement::enhance(capture, config, bootstrap.ridge_period_px, source)?;
+    let skeleton = thinning::thin(&prepared.map)?;
+    let traced = graph::trace_with_pixels(&skeleton)?;
+    let contours = reconstruct_contours(capture, &prepared, &skeleton, &traced, scale.unit_px)?;
+    let feature_strength =
+        features::assess(capture, &prepared, &traced.graph, scale.unit_px, config)?;
+
+    Ok(CaptureAnalysis {
+        bootstrap,
+        scale,
+        prepared,
         skeleton,
         graph: traced.graph,
         contours,
         feature_strength,
-        edge_geometry,
-        cycle_geometry,
     })
 }
 
@@ -132,7 +186,10 @@ pub fn estimate_scale(
     config: &ExtractionConfig,
 ) -> Result<FullScale, FingerprintError> {
     let bootstrap = scale::estimate(capture, config)?;
-    full_scale::measure(capture, config, &bootstrap)
+    let source = enhancement::prepare_source(capture, config, bootstrap.ridge_period_px)?;
+    let measurement = enhancement::measurement_input(capture, &source)?;
+    drop(source);
+    full_scale::measure(capture, config, &bootstrap, measurement)
 }
 
 type CurveMeasurements = Vec<Result<CurveGeometry, FingerprintError>>;
@@ -146,13 +203,21 @@ fn describe_graph(
     })
 }
 
+struct Reconstruction {
+    cleanup: RidgeCleanup,
+    smoothing: SmoothingControls,
+    repaired: repair::GapRepair,
+    edge_smoothing: Vec<SmoothingAdjustment>,
+    cycle_smoothing: Vec<SmoothingAdjustment>,
+}
+
 fn reconstruct_contours(
     capture: &Capture,
     prepared: &Preprocessed,
     skeleton: &RidgeMap,
     observed: &graph::TracedGraph,
     unit_px: f64,
-) -> Result<ContourReconstruction, FingerprintError> {
+) -> Result<Reconstruction, FingerprintError> {
     let cleaned = cleanup::clean(capture, &prepared.palette, skeleton, observed, unit_px)?;
     let smoothed = smoothing::smooth(&cleaned.result.graph, &prepared.map, unit_px)?;
     let repaired = repair::reconstruct(
@@ -162,26 +227,37 @@ fn reconstruct_contours(
         &cleaned.skeleton,
         unit_px,
     )?;
-    let smoothing = SmoothingControls::for_unit(unit_px)?;
-    let spacing = smoothing.sample_spacing_px;
-    let (edge_geometry, cycle_geometry) = describe_paths(&repaired.graph, |points, closed| {
-        curve::describe_smoothed(points, closed, spacing)
-    });
 
-    Ok(ContourReconstruction {
+    Ok(Reconstruction {
         cleanup: cleaned.result,
-        smoothing,
-        gap_policy: repaired.policy,
-        graph: repaired.graph,
-        node_sources: repaired.node_sources,
-        edge_origins: repaired.edge_origins,
-        cycle_origins: repaired.cycle_origins,
-        joins: repaired.joins,
+        smoothing: SmoothingControls::for_unit(unit_px)?,
+        repaired,
         edge_smoothing: smoothed.edge_adjustments,
         cycle_smoothing: smoothed.cycle_adjustments,
+    })
+}
+
+fn describe_contours(result: Reconstruction) -> ContourReconstruction {
+    let spacing = result.smoothing.sample_spacing_px;
+    let (edge_geometry, cycle_geometry) =
+        describe_paths(&result.repaired.graph, |points, closed| {
+            curve::describe_smoothed(points, closed, spacing)
+        });
+
+    ContourReconstruction {
+        cleanup: result.cleanup,
+        smoothing: result.smoothing,
+        gap_policy: result.repaired.policy,
+        graph: result.repaired.graph,
+        node_sources: result.repaired.node_sources,
+        edge_origins: result.repaired.edge_origins,
+        cycle_origins: result.repaired.cycle_origins,
+        joins: result.repaired.joins,
+        edge_smoothing: result.edge_smoothing,
+        cycle_smoothing: result.cycle_smoothing,
         edge_geometry,
         cycle_geometry,
-    })
+    }
 }
 
 fn describe_paths(

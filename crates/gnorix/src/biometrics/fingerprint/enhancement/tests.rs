@@ -182,7 +182,11 @@ fn raw_measurement_input_keeps_a_bright_interruption_and_source_normals() {
     let interruption = 32 * width + 25;
     pixels[interruption] = 230;
     let input = capture(width, height, pixels, None);
-    let measured = measurement_input(&input, &ExtractionConfig::default(), 12.0).unwrap();
+    let measured = measurement_input(
+        &input,
+        &prepare_source(&input, &ExtractionConfig::default(), 12.0).unwrap(),
+    )
+    .unwrap();
     assert!(measured.map.usable[interruption]);
     assert!(!measured.map.ridges[interruption]);
     assert!(measured.map.ridges[interruption - width]);

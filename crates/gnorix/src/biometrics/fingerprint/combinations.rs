@@ -1,14 +1,13 @@
 //! Deterministic regional subsets of assessed, surviving fingerprint features.
 
 mod enumeration;
-mod projection;
 mod regions;
 mod search;
 mod spatial;
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
-use super::{FeatureKind, Fingerprint, FingerprintError, Point};
+use super::{FeatureKind, FingerprintError, FingerprintFeatures, Point};
 
 pub use search::{
     SigningRegion, SigningSearch, SigningSearchConfig, prepare_signing_search, signing_candidates,
@@ -30,7 +29,7 @@ pub struct CombinationConfig {
     pub radius_units: f64,
     /// Maximum distinct subsets selected in each region, including coverage.
     pub combinations_per_region: usize,
-    /// Cumulative source-mask visits and selection/search work entries.
+    /// Cumulative feature validation and selection/search work entries.
     pub max_work: usize,
 }
 
@@ -179,7 +178,7 @@ impl Error for CombinationError {
 /// reproduce the result; registration and stable candidate encoding are separate.
 /// Exceeding work limits returns an error, never a partial successful result.
 pub fn generate_combinations(
-    fingerprint: &Fingerprint,
+    fingerprint: &FingerprintFeatures,
     config: &CombinationConfig,
 ) -> Result<FeatureCombinations, CombinationError> {
     config.validate()?;
@@ -192,12 +191,12 @@ pub fn generate_combinations(
         });
     }
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
-    let spatial = derive_spatial_requirements(bounds, fingerprint.scale.unit_px, &config.spatial)?;
-    let spatial_pixels = spatial.pixels(fingerprint.scale.unit_px)?;
+    let spatial = derive_spatial_requirements(bounds, fingerprint.unit_px, &config.spatial)?;
+    let spatial_pixels = spatial.pixels(fingerprint.unit_px)?;
     let selected = regions::select(
         &points,
         bounds,
-        fingerprint.scale.unit_px,
+        fingerprint.unit_px,
         config,
         spatial_pixels,
         &mut work,
@@ -216,47 +215,32 @@ pub fn generate_combinations(
 }
 
 fn collect_points(
-    fingerprint: &Fingerprint,
+    fingerprint: &FingerprintFeatures,
     min_priority: f64,
     work: &mut WorkBudget,
 ) -> Result<(Vec<CombinationPoint>, usize), CombinationError> {
-    charge_projection(fingerprint, work)?;
-    let retained = projection::retained_candidates(fingerprint)
+    work.spend(fingerprint.features.len())?;
+    fingerprint
+        .validate()
         .map_err(CombinationError::InvalidFingerprint)?;
-    let unscored = retained
-        .iter()
-        .filter(|feature| feature.priority.is_none())
-        .count();
+    let mut unscored = 0;
     let mut points = Vec::new();
-    for feature in retained {
+    for feature in &fingerprint.features {
         let Some(priority) = feature.priority else {
+            unscored += 1;
             continue;
         };
-        if !priority.is_finite() || !(0.0..=1.0).contains(&priority) {
-            return Err(CombinationError::InvalidFingerprint(
-                FingerprintError::InvalidTopology("feature priority must be in [0, 1]"),
-            ));
+        if priority >= min_priority {
+            points.push(CombinationPoint {
+                id: feature.id,
+                kind: feature.kind,
+                position: feature.position,
+                priority,
+            });
         }
-        let position = feature.position;
-        if position.x() < 0.0
-            || position.y() < 0.0
-            || position.x() >= fingerprint.binary.width() as f64
-            || position.y() >= fingerprint.binary.height() as f64
-        {
-            return Err(CombinationError::InvalidFingerprint(
-                FingerprintError::InvalidTopology("feature lies outside the source image"),
-            ));
-        }
-        if priority < min_priority {
-            continue;
-        }
-        points.push(CombinationPoint {
-            id: feature.id,
-            kind: feature.kind,
-            position: feature.position,
-            priority,
-        });
     }
+    work.spend(points.len())?;
+    points.sort_unstable_by_key(|point| point.id);
     Ok((points, unscored))
 }
 
@@ -265,30 +249,6 @@ fn validate_min_priority(min_priority: f64) -> Result<(), CombinationError> {
         return Err(CombinationError::InvalidConfig(
             "minimum feature priority must be finite and in [0, 1]",
         ));
-    }
-    Ok(())
-}
-
-fn charge_projection(
-    fingerprint: &Fingerprint,
-    work: &mut WorkBudget,
-) -> Result<(), CombinationError> {
-    work.spend(fingerprint.feature_strength.candidates.len())?;
-    let contours = &fingerprint.contours;
-    for graph in [&fingerprint.graph, &contours.cleanup.graph, &contours.graph] {
-        work.spend(graph.nodes.len())?;
-        work.spend(graph.edges.len())?;
-        work.spend(graph.cycles.len())?;
-    }
-    work.spend(contours.cleanup.node_sources.len())?;
-    work.spend(contours.node_sources.len())?;
-    for origin in &contours.cleanup.cycle_origins {
-        work.spend(1)?;
-        work.spend(origin.source_cycles.len())?;
-    }
-    for origin in &contours.cycle_origins {
-        work.spend(1)?;
-        work.spend(origin.source_cycles.len())?;
     }
     Ok(())
 }
@@ -366,29 +326,36 @@ mod tests {
         }
     }
 
-    fn threshold_fingerprint() -> (Fingerprint, Vec<usize>) {
-        let size = 96;
-        let pixels = (0..size * size)
-            .map(|index| if (index % size) % 12 < 6 { 25 } else { 225 })
-            .collect();
-        let capture =
-            super::super::Capture::new(size as u32, size as u32, pixels, None, None).unwrap();
-        let mut fingerprint =
-            super::super::extract(&capture, &super::super::ExtractionConfig::default()).unwrap();
-        let ids: Vec<_> = projection::retained_candidates(&fingerprint)
-            .unwrap()
-            .iter()
-            .take(5)
-            .map(|feature| feature.id)
-            .collect();
-        assert_eq!(ids.len(), 5);
-        for feature in &mut fingerprint.feature_strength.candidates {
-            feature.priority = None;
-        }
-        for (&id, priority) in ids.iter().zip([0.0, 0.49, 0.5, 0.75, 1.0]) {
-            fingerprint.feature_strength.candidates[id].priority = Some(priority);
-        }
-        (fingerprint, ids)
+    fn threshold_fingerprint() -> (FingerprintFeatures, Vec<usize>) {
+        let features = [
+            Some(0.0),
+            Some(0.49),
+            Some(0.5),
+            Some(0.75),
+            Some(1.0),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(id, priority)| super::super::AnalyzedFeature {
+            id,
+            kind: FeatureKind::Ending,
+            position: Point::new(10.0 + id as f64 * 12.0, 40.0).unwrap(),
+            priority,
+        })
+        .collect();
+        let fingerprint = FingerprintFeatures::new(
+            96,
+            96,
+            6.0,
+            Some(RegionBounds {
+                min: Point::new(-0.5, -0.5).unwrap(),
+                max: Point::new(95.5, 95.5).unwrap(),
+            }),
+            features,
+        )
+        .unwrap();
+        (fingerprint, (0..5).collect())
     }
 
     fn threshold_config(min_priority: f64) -> CombinationConfig {
@@ -438,7 +405,7 @@ mod tests {
     #[test]
     fn insufficient_anchor_points_are_reported_before_pattern_layout() {
         let (mut fingerprint, _) = threshold_fingerprint();
-        fingerprint.scale.pattern_support.fill(false);
+        fingerprint.pattern_bounds = None;
         let mut config = threshold_config(1.0);
         config.min_points = 2;
         config.spatial.min_anchor_points = 3;
@@ -539,10 +506,10 @@ mod tests {
             Err(error) if error == expected
         ));
 
-        for feature in &mut fingerprint.feature_strength.candidates {
+        for feature in &mut fingerprint.features {
             feature.priority = Some(0.0);
         }
-        fingerprint.scale.pattern_support.fill(false);
+        fingerprint.pattern_bounds = None;
         // Insufficient eligible data is known before any attempt to lay out
         // circles, even when the capture also lacks usable pattern bounds.
         assert!(matches!(
@@ -569,14 +536,14 @@ mod tests {
         }
         let (mut fingerprint, ids) = threshold_fingerprint();
         let controls = threshold_config(1.0);
-        let original = fingerprint.feature_strength.candidates[ids[0]].position;
-        fingerprint.feature_strength.candidates[ids[0]].position = Point::new(-1.0, 0.0).unwrap();
+        let original = fingerprint.features[ids[0]].position;
+        fingerprint.features[ids[0]].position = Point::new(-1.0, 0.0).unwrap();
         assert!(matches!(
             generate_combinations(&fingerprint, &controls),
             Err(CombinationError::InvalidFingerprint(_))
         ));
-        fingerprint.feature_strength.candidates[ids[0]].position = original;
-        fingerprint.feature_strength.candidates[ids[0]].priority = Some(f64::NAN);
+        fingerprint.features[ids[0]].position = original;
+        fingerprint.features[ids[0]].priority = Some(f64::NAN);
         assert!(matches!(
             prepare_signing_search(&fingerprint, &signing_config(controls)),
             Err(CombinationError::InvalidFingerprint(_))

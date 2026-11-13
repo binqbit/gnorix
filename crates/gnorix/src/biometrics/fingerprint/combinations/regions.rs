@@ -6,8 +6,8 @@ mod layout;
 mod tests;
 
 use super::{
-    CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, Fingerprint,
-    FingerprintError, Point, RegionBounds, WorkBudget, enumeration, spatial,
+    CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FingerprintError,
+    FingerprintFeatures, Point, RegionBounds, WorkBudget, enumeration, spatial,
 };
 
 pub(super) struct RegionCandidates {
@@ -20,50 +20,14 @@ pub(super) struct RegionCandidates {
 }
 
 pub(super) fn pattern_bounds(
-    fingerprint: &Fingerprint,
+    fingerprint: &FingerprintFeatures,
     points: &[CombinationPoint],
     work: &mut WorkBudget,
 ) -> Result<RegionBounds, CombinationError> {
-    let map = &fingerprint.scale.skeleton;
-    let support = &fingerprint.scale.pattern_support;
-    if map.width().checked_mul(map.height()) != Some(support.len())
-        || map.width() != fingerprint.binary.width()
-        || map.height() != fingerprint.binary.height()
-    {
-        return Err(CombinationError::InvalidFingerprint(
-            FingerprintError::InvalidMap(
-                "pattern support dimensions differ from measurement skeleton",
-            ),
-        ));
-    }
-    let bounds = support_bounds(support, map.width(), work)?;
+    let bounds = fingerprint
+        .pattern_bounds
+        .ok_or(CombinationError::PatternUnavailable)?;
     cover_points(bounds, points, work)
-}
-
-fn support_bounds(
-    support: &[bool],
-    width: usize,
-    work: &mut WorkBudget,
-) -> Result<RegionBounds, CombinationError> {
-    work.spend(support.len())?;
-    let mut extent: Option<(usize, usize, usize, usize)> = None;
-    for (index, &supported) in support.iter().enumerate() {
-        if !supported {
-            continue;
-        }
-        let (x, y) = (index % width, index / width);
-        extent = Some(match extent {
-            None => (x, y, x, y),
-            Some((left, top, right, bottom)) => {
-                (left.min(x), top.min(y), right.max(x), bottom.max(y))
-            }
-        });
-    }
-    let (left, top, right, bottom) = extent.ok_or(CombinationError::PatternUnavailable)?;
-    Ok(RegionBounds {
-        min: Point::new(left as f64 - 0.5, top as f64 - 0.5).expect("finite pixel bounds"),
-        max: Point::new(right as f64 + 0.5, bottom as f64 + 0.5).expect("finite pixel bounds"),
-    })
 }
 
 fn cover_points(

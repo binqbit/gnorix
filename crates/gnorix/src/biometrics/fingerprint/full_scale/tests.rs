@@ -392,3 +392,14 @@ fn full_pass_uses_all_lengths_in_unequal_thickness_groups() {
         "must not retain the dominant median as the unit"
     );
 }
+
+fn measure(
+    capture: &Capture,
+    config: &ExtractionConfig,
+    bootstrap: &BootstrapScale,
+) -> Result<FullScale, FingerprintError> {
+    let source =
+        super::super::enhancement::prepare_source(capture, config, bootstrap.ridge_period_px)?;
+    let input = super::super::enhancement::measurement_input(capture, &source)?;
+    super::measure(capture, config, bootstrap, input)
+}

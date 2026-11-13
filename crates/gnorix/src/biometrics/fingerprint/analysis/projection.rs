@@ -3,30 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::{
-    CleanupOrigin, FeatureKind, FeatureStrength, Fingerprint, FingerprintError, NodeKind,
-    PathOrigin, RidgeGraph,
+    CleanupOrigin, FeatureKind, FeatureStrength, FingerprintError, NodeKind, PathOrigin,
+    RidgeCleanup, RidgeGraph,
 };
 
-/// Preserve original evidence only while its assessed type and degree survive.
-/// Repeated source identities appear once, in ascending original candidate ID.
-pub(super) fn retained_candidates(
-    fingerprint: &Fingerprint,
-) -> Result<Vec<&FeatureStrength>, FingerprintError> {
-    let contours = &fingerprint.contours;
-    let projection = Projection {
-        source: &fingerprint.graph,
-        cleaned: &contours.cleanup.graph,
-        final_graph: &contours.graph,
-        cleaned_node_sources: &contours.cleanup.node_sources,
-        final_node_sources: &contours.node_sources,
-        cleaned_cycle_origins: &contours.cleanup.cycle_origins,
-        final_cycle_origins: &contours.cycle_origins,
-    };
-
-    project(&fingerprint.feature_strength.candidates, projection)
-}
-
-struct Projection<'a> {
+pub(in super::super) struct Projection<'a> {
     source: &'a RidgeGraph,
     cleaned: &'a RidgeGraph,
     final_graph: &'a RidgeGraph,
@@ -36,13 +17,33 @@ struct Projection<'a> {
     final_cycle_origins: &'a [PathOrigin],
 }
 
+impl<'a> Projection<'a> {
+    pub(in super::super) fn new(
+        source: &'a RidgeGraph,
+        cleaned: &'a RidgeCleanup,
+        final_graph: &'a RidgeGraph,
+        final_node_sources: &'a [usize],
+        final_cycle_origins: &'a [PathOrigin],
+    ) -> Self {
+        Self {
+            source,
+            cleaned: &cleaned.graph,
+            final_graph,
+            cleaned_node_sources: &cleaned.node_sources,
+            final_node_sources,
+            cleaned_cycle_origins: &cleaned.cycle_origins,
+            final_cycle_origins,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Origin {
     Node(usize),
     Cycle(usize),
 }
 
-fn project<'a>(
+pub(super) fn project<'a>(
     candidates: &'a [FeatureStrength],
     projection: Projection<'_>,
 ) -> Result<Vec<&'a FeatureStrength>, FingerprintError> {

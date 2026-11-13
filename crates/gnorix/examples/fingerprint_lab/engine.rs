@@ -226,7 +226,7 @@ impl Engine {
             &self.frame.image
         };
         let selected = capture::select(source, request.selection)?;
-        let extracted = fingerprint::extract(&selected.capture, &ExtractionConfig::default())?;
+        let extracted = fingerprint::analyze(&selected.capture, &ExtractionConfig::default())?;
         phase("Preparing regions and features");
         let id = self.next_id;
         self.next_id = self
@@ -240,7 +240,7 @@ impl Engine {
             selection: request.selection,
             work_limit: request.work_limit,
             artifact_revision: request.artifact_revision,
-            unit_px: extracted.scale.unit_px,
+            unit_px: extracted.unit_px,
             spatial: self
                 .enrolled
                 .as_ref()

@@ -28,7 +28,7 @@ use gnorix::{
     authorization::{self, Action, Authorization, EnrollmentStatus},
     biometrics::{
         Capture,
-        fingerprint::{self, ExtractionConfig, Fingerprint},
+        fingerprint::{self, ExtractionConfig, FingerprintFeatures},
     },
     crypto::SignatureVerifier,
     package::EnrollmentPackage,
@@ -64,8 +64,8 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
     let action = read_action(action_path, &limits)?;
     validate_profile(&package, controls.profile_id)?;
     let secret = secret_input::read_secret(package.commitment().context.spec.secret_policy)?;
-    let fingerprint = extract(image)?;
-    let unit_px = fingerprint.scale.unit_px;
+    let fingerprint = analyze(image)?;
+    let unit_px = fingerprint.unit_px;
     let candidates = fingerprint::prepare_signing_search(&fingerprint, &controls.search)?;
     let point_count = candidates.points().len();
     let region_count = candidates.regions().len();
@@ -124,11 +124,11 @@ fn verify(
     Ok(())
 }
 
-fn extract(path: &Path) -> Result<Fingerprint> {
+fn analyze(path: &Path) -> Result<FingerprintFeatures> {
     let controls = ExtractionConfig::default();
     let image = image_input::read(path, controls.max_pixels)?;
     let capture = Capture::new(image.width(), image.height(), image.into_raw(), None, None)?;
-    Ok(fingerprint::extract(&capture, &controls)?)
+    Ok(fingerprint::analyze(&capture, &controls)?)
 }
 
 fn validate_profile(package: &EnrollmentPackage, expected: gnorix::merkle::Hash) -> Result<()> {
