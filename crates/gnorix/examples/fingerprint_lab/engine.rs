@@ -60,13 +60,7 @@ struct ArtifactFrame {
 
 impl Engine {
     pub fn new(source: GrayImage, output: PathBuf) -> Result<Self> {
-        let frame = ArtifactFrame::new(
-            source.clone(),
-            0,
-            0,
-            u32::from_le_bytes(random_bytes()?),
-            None,
-        )?;
+        let frame = ArtifactFrame::new(source.clone(), 0, 0, artifact_seed(None)?, None)?;
         let data = LabData {
             artifact: frame.view.clone(),
             ..LabData::default()
@@ -110,16 +104,7 @@ impl Engine {
         if request.level == self.frame.view.level && !request.randomize {
             return Ok(());
         }
-        let seed = if request.randomize {
-            let candidate = u32::from_le_bytes(random_bytes()?);
-            if candidate == self.frame.view.seed {
-                candidate.wrapping_add(1)
-            } else {
-                candidate
-            }
-        } else {
-            self.frame.view.seed
-        };
+        let seed = artifact_seed(Some(self.frame.view.seed))?;
         let revision = self
             .frame
             .view
@@ -543,6 +528,20 @@ impl ArtifactFrame {
     }
 }
 
+/// Capture variation uses the render time; cryptographic keys use separate entropy.
+fn artifact_seed(previous: Option<u32>) -> Result<u32> {
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let seed = (timestamp as u32)
+        ^ ((timestamp >> 32) as u32)
+        ^ ((timestamp >> 64) as u32)
+        ^ ((timestamp >> 96) as u32);
+    Ok(if previous == Some(seed) {
+        seed.wrapping_add(1)
+    } else {
+        seed
+    })
+}
+
 fn point_views(points: &[CombinationPoint], offset: [f64; 2]) -> Vec<PointView> {
     points
         .iter()
@@ -753,7 +752,7 @@ mod tests {
         assert_eq!(engine.data.artifact.ridge_width_px, None);
         let source = engine.source.clone();
         let root = engine.data.enrollment.as_ref().unwrap().root.clone();
-        let seed = engine.data.artifact.seed;
+        let mut previous_seed = engine.data.artifact.seed;
         for level in [35, 80, 0] {
             engine
                 .change_artifacts(
@@ -770,7 +769,8 @@ mod tests {
             assert_eq!(decoded, engine.frame.image);
             assert_eq!(engine.source, source);
             assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
-            assert_eq!(engine.data.artifact.seed, seed);
+            assert_ne!(engine.data.artifact.seed, previous_seed);
+            previous_seed = engine.data.artifact.seed;
             assert_eq!(engine.data.artifact.level, level);
             assert_eq!(engine.data.artifact.ridge_width_px, Some(5.0));
             let metadata = serde_json::to_value(&engine.data.artifact).unwrap();
@@ -800,7 +800,7 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-        assert_ne!(engine.data.artifact.seed, seed);
+        assert_ne!(engine.data.artifact.seed, previous_seed);
         assert_eq!(engine.frame.image, source);
         assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
     }

@@ -163,7 +163,8 @@
                         >
                             <span>Weak</span><i class="legend-gradient"></i
                             ><span>Strong</span> </span
-                        ><span id="feature-filter"></span><span
+                        ><span id="feature-filter"></span
+                        ><span
                             ><svg
                                 class="legend-indicator"
                                 viewBox="0 0 16 16"
@@ -294,7 +295,6 @@
                                 value="0"
                             />
                             <div class="artifact-pattern">
-                                <span id="artifact-seed">Fixed pattern</span>
                                 <button
                                     id="artifact-randomize"
                                     class="text-button"
@@ -304,8 +304,9 @@
                                 </button>
                             </div>
                             <p class="microcopy">
-                                0 keeps the original scan. Higher values
-                                strengthen local bends, merged ridges and gaps.
+                                0 keeps the original scan. Higher values add
+                                stronger, spatially varying bends, merged
+                                ridges, gaps and broad blur across the image.
                                 The level is severity, not the percentage of
                                 affected pixels.
                             </p>
@@ -315,8 +316,9 @@
                                 role="status"
                                 aria-live="polite"
                             >
-                                The same pattern is kept as severity changes.
-                                Enrollment always uses the clean original.
+                                Changing severity or selecting Randomize creates
+                                a new variation. Enrollment always uses the
+                                clean original.
                             </p>
                         </section>
                         <div class="primary-actions">

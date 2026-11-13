@@ -751,13 +751,8 @@ input[type="range"] {
 .artifact-pattern {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 12px;
-}
-.artifact-pattern > span {
-    color: #89bea2;
-    font: 10px var(--mono);
-    overflow-wrap: anywhere;
 }
 .artifact-status {
     margin: 11px 0 0;

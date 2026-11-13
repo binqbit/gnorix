@@ -421,7 +421,8 @@ function drawEvidence(prepared) {
     diagnosticsLayer.replaceChildren();
     const regionList = $("region-list");
     regionList.replaceChildren();
-    $("feature-filter").textContent = `Priority ≥ ${MIN_VISIBLE_PRIORITY} · display only`;
+    $("feature-filter").textContent =
+        `Priority ≥ ${MIN_VISIBLE_PRIORITY} · display only`;
     if (!prepared) {
         $("scale-value").textContent = "R — not measured yet";
         return;
@@ -645,8 +646,6 @@ function render() {
         state.artifactLevel === 0
             ? "Original · 0"
             : `${state.artifactLevel} / 100`;
-    $("artifact-seed").textContent =
-        `Pattern seed ${state.server.artifact?.seed ?? "—"}`;
     const artifactControlsLocked =
         !registered || (state.busy && !state.artifactRequest);
     $("artifact-level").disabled = artifactControlsLocked;
@@ -657,7 +656,7 @@ function render() {
           ? state.artifactError
           : !artifactReady()
             ? "Updating the exact scan preview. Previous feature markers are hidden."
-            : "This preview is the scan used for extraction. The pattern stays fixed until Randomize.";
+            : "This exact preview is used for extraction. Change severity or select Randomize for a new variation.";
     const displayReady =
         state.mode === "enrollment"
             ? state.imageKey === "original"

@@ -7,7 +7,7 @@ use crate::Result;
 pub const MAX_WORK: usize = 1_000_000_000;
 pub const MAX_ATTEMPTS: usize = 1_000_000_000;
 pub const MAX_VARIANTS: u64 = 1_000_000;
-pub const ARTIFACT_GENERATOR: &str = "gnorix.test-artifacts.v1";
+pub const ARTIFACT_GENERATOR: &str = "gnorix.test-artifacts.v2";
 
 pub fn default_work_limit() -> usize {
     MAX_WORK
