@@ -118,6 +118,7 @@
                             />
                             <g id="regions-layer"></g>
                             <g id="points-layer"></g>
+                            <g id="diagnostics-layer"></g>
                             <rect
                                 id="outside-shade"
                                 width="1086"
@@ -150,7 +151,6 @@
                                     vector-effect="non-scaling-stroke"
                                 />
                             </g>
-                            <g id="matched-layer"></g>
                         </svg>
                         <div id="viewer-notice" class="viewer-notice">
                             Prepare the image to see its detected features.
@@ -158,13 +158,63 @@
                     </div>
                     <div class="viewer-footer">
                         <span
-                            ><i class="legend-dot muted"></i> All features</span
+                            class="priority-legend"
+                            aria-label="Feature priority: weak red through orange and yellow to strong green. Opacity follows report priority."
+                        >
+                            <span>Weak</span><i class="legend-gradient"></i
+                            ><span>Strong</span> </span
                         ><span
-                            ><i class="legend-dot selected"></i> Selected
-                            pool</span
-                        ><span><i class="legend-dot matched"></i> Matched</span
+                            ><svg
+                                class="legend-indicator"
+                                viewBox="0 0 16 16"
+                                aria-hidden="true"
+                            >
+                                <path d="M3 11H13" />
+                            </svg>
+                            Selected pool</span
+                        ><span
+                            ><svg
+                                class="legend-indicator matched"
+                                viewBox="0 0 16 16"
+                                aria-hidden="true"
+                            >
+                                <path d="M3 8L6 11L13 4" />
+                            </svg>
+                            Matched</span
                         ><span id="scale-value" class="scale-value"
                             >R — not measured yet</span
+                        >
+                    </div>
+                    <div
+                        class="feature-kind-legend"
+                        aria-label="Feature shapes"
+                    >
+                        <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true">
+                                <circle cx="8" cy="8" r="5" /></svg
+                            >Ending</span
+                        >
+                        <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true">
+                                <path d="M8 2L14 14H2Z" /></svg
+                            >Bifurcation</span
+                        >
+                        <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true">
+                                <path d="M8 1L15 8L8 15L1 8Z" /></svg
+                            >Junction</span
+                        >
+                        <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true">
+                                <rect x="3" y="3" width="10" height="10" /></svg
+                            >Isolated node</span
+                        >
+                        <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true">
+                                <path
+                                    d="M5.5 1H10.5V5.5H15V10.5H10.5V15H5.5V10.5H1V5.5H5.5Z"
+                                /></svg
+                            >Isolated cycle</span
                         >
                     </div>
                     <div

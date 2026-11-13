@@ -13,10 +13,12 @@ Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic o
 1. In **Enrollment**, adjust the parameters and select **Prepare features**. Inspect the actual detected points and algorithm regions. Region buttons highlight each selected pool. Preparation also checks the complete grid-variant count before enrollment.
 2. Select **Create Merkle set**. The stand derives the enrolled keys, creates the package, checks its readback and displays its Merkle root and leaf count.
 3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Adjust **Artifact severity** to test local capture defects, or leave it at zero for the original pixels. Select **Prepare features** to extract the circular capture again and inspect its regions and points.
-4. Select **Sign message**. The stand searches the prepared candidate stream and stops at the first enrolled member. On success, white rings mark the exact features in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
+4. Select **Sign message**. The stand searches the prepared candidate stream and stops at the first enrolled member. On success, white checkmarks identify the exact features in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
 5. **Verify signature** checks the authorization against the retained enrollment and current message. Changing the message makes verification fail. A consumed search needs another preparation before retrying.
 
 The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves the selected scan's grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
+
+Feature markers use the same style as the static fingerprint reports: red → orange → yellow → green on the fixed 0–1 priority scale, with opacity `0.4 + 0.5 × sqrt(priority)` (40–90%). Endings are circles, bifurcations are triangles, junctions are diamonds, isolated nodes are squares, and isolated cycles are plus signs. The marker size stays fixed for each kind. A small neutral underline identifies the selected pool; a white checkmark identifies a matching feature. These separate indicators preserve the marker’s priority color and opacity.
 
 ## Test capture artifacts
 

@@ -311,6 +311,85 @@ function svgElement(tag, attributes, title) {
     return element;
 }
 
+function priorityColor(priority) {
+    const fraction = Math.max(0, Math.min(1, priority));
+    const stops = [
+        [217, 67, 85],
+        [236, 132, 61],
+        [220, 191, 59],
+        [184, 230, 81],
+        [125, 255, 105],
+    ];
+    const sample = Math.min(255, Math.floor(fraction * 256)) / 255;
+    const position = sample * (stops.length - 1);
+    const index = Math.min(stops.length - 2, Math.floor(position));
+    const blend = position - index;
+    const channels = stops[index].map((channel, component) =>
+        Math.round(channel + (stops[index + 1][component] - channel) * blend)
+            .toString(16)
+            .padStart(2, "0"),
+    );
+    return `#${channels.join("")}`;
+}
+
+function priorityOpacity(priority) {
+    return 0.4 + 0.5 * Math.sqrt(Math.max(0, Math.min(1, priority)));
+}
+
+function featureMarker(point, attributes, title) {
+    const { x, y, kind } = point;
+    const size = 7;
+    switch (kind) {
+        case "ending":
+            return svgElement(
+                "circle",
+                { cx: x, cy: y, r: size, ...attributes },
+                title,
+            );
+        case "bifurcation":
+            return svgElement(
+                "polygon",
+                {
+                    points: `${x},${y - size} ${x + size},${y + size} ${x - size},${y + size}`,
+                    ...attributes,
+                },
+                title,
+            );
+        case "junction":
+            return svgElement(
+                "polygon",
+                {
+                    points: `${x},${y - size} ${x + size},${y} ${x},${y + size} ${x - size},${y}`,
+                    ...attributes,
+                },
+                title,
+            );
+        case "isolated":
+            return svgElement(
+                "rect",
+                {
+                    x: x - size,
+                    y: y - size,
+                    width: size * 2,
+                    height: size * 2,
+                    ...attributes,
+                },
+                title,
+            );
+        case "cycle":
+            return svgElement(
+                "path",
+                {
+                    d: `M${x - 2.5},${y - size}H${x + 2.5}V${y - 2.5}H${x + size}V${y + 2.5}H${x + 2.5}V${y + size}H${x - 2.5}V${y + 2.5}H${x - size}V${y - 2.5}H${x - 2.5}Z`,
+                    ...attributes,
+                },
+                title,
+            );
+        default:
+            throw new Error(`Unsupported feature kind: ${kind}`);
+    }
+}
+
 function drawSelection() {
     const visible = state.mode === "signing" && state.circle;
     $("circle-control").style.display = visible ? "" : "none";
@@ -335,10 +414,10 @@ function drawSelection() {
 function drawEvidence(prepared) {
     const regionsLayer = $("regions-layer"),
         pointsLayer = $("points-layer"),
-        matchedLayer = $("matched-layer");
+        diagnosticsLayer = $("diagnostics-layer");
     regionsLayer.replaceChildren();
     pointsLayer.replaceChildren();
-    matchedLayer.replaceChildren();
+    diagnosticsLayer.replaceChildren();
     const regionList = $("region-list");
     regionList.replaceChildren();
     if (!prepared) {
@@ -403,49 +482,56 @@ function drawEvidence(prepared) {
     }
     for (const point of prepared.points ?? []) {
         const included = pool.has(point.id);
+        const isMatched = matched.has(point.id);
+        const color = priorityColor(point.priority);
         pointsLayer.append(
-            svgElement(
-                "circle",
+            featureMarker(
+                point,
                 {
-                    cx: point.x,
-                    cy: point.y,
-                    r: included ? 7 : 4,
-                    fill: included ? "#b8ff73" : "#d4e5d7",
-                    "fill-opacity": included ? 0.92 : 0.52,
-                    stroke: "#072318",
-                    "stroke-width": 1,
+                    fill: color,
+                    stroke: color,
+                    opacity: priorityOpacity(point.priority),
+                    "stroke-width": 0.3,
                     "vector-effect": "non-scaling-stroke",
-                    "pointer-events": "none",
+                    "data-feature-id": point.id,
+                    "data-x": point.x,
+                    "data-y": point.y,
+                    "data-kind": point.kind,
+                    "data-priority": point.priority,
+                    "data-matched": isMatched,
+                    "data-selected-pool": included,
                 },
-                `#${point.id} · ${point.kind} · priority ${format.format(point.priority * 100)}%`,
+                `#${point.id} · ${point.kind} · priority ${format.format(point.priority * 100)}%${isMatched ? " · matched" : included ? " · selected pool" : ""}`,
             ),
         );
-        if (matched.has(point.id)) {
-            matchedLayer.append(
-                svgElement("circle", {
-                    cx: point.x,
-                    cy: point.y,
-                    r: 14,
-                    fill: "#ffffff",
-                    "fill-opacity": 0.1,
-                    stroke: "#ffffff",
-                    "stroke-width": 2,
+        if (included) {
+            diagnosticsLayer.append(
+                svgElement("path", {
+                    d: `M${point.x - 4},${point.y + 10}H${point.x + 4}`,
+                    fill: "none",
+                    stroke: "#a8b9b0",
+                    "stroke-width": 0.8,
                     "vector-effect": "non-scaling-stroke",
                     "pointer-events": "none",
+                    "data-indicator": "selected-pool",
+                    "data-for-feature-id": point.id,
                 }),
             );
-            matchedLayer.append(
-                svgElement(
-                    "circle",
-                    {
-                        cx: point.x,
-                        cy: point.y,
-                        r: 5,
-                        fill: "#fff",
-                        "pointer-events": "none",
-                    },
-                    `Feature #${point.id} matched`,
-                ),
+        }
+        if (isMatched) {
+            diagnosticsLayer.append(
+                svgElement("path", {
+                    d: `M${point.x + 9},${point.y - 4}L${point.x + 11},${point.y - 2}L${point.x + 15},${point.y - 7}`,
+                    fill: "none",
+                    stroke: "#ffffff",
+                    "stroke-width": 0.9,
+                    "stroke-linecap": "round",
+                    "stroke-linejoin": "round",
+                    "vector-effect": "non-scaling-stroke",
+                    "pointer-events": "none",
+                    "data-indicator": "matched",
+                    "data-for-feature-id": point.id,
+                }),
             );
         }
     }
@@ -655,7 +741,7 @@ function render() {
             state.mode === "enrollment"
                 ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.combination_count, "combination")} · ${countLabel(prepared.variant_count ?? 0, "positional variant")}`
                 : state.server.result?.status === "matched"
-                  ? `White markers show ${countLabel(state.server.result.feature_ids.length, "feature")} used to reconstruct the key`
+                  ? `White ticks mark ${countLabel(state.server.result.feature_ids.length, "feature")} used to reconstruct the key`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;
     if (state.mode === "signing" && registered && !artifactReady())
         notice = "Updating scan preview · prepare or test when ready";
