@@ -39,6 +39,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Grid mathematics | `src/biometrics/geometry.rs` | Explicit triangular positions, Euclidean-nearest nodes and six-neighbor coordinates, with overflow/finite-value checks. |
 | Fingerprint extraction | `src/biometrics/fingerprint/` | Native per-capture image stages, topology-preserving skeleton tracing, curve geometry and diagnostic output. |
 | Regional subsets | `src/biometrics/fingerprint/combinations/` | Surviving feature projection, nine expandable circular pools and bounded weighted point combinations. |
+| Fresh-image search | `src/biometrics/fingerprint/combinations/search.rs` | Global ranked subsets of n–2n surviving scored points, lazy baseline grid candidates and bounded search work. |
 | Grid figures | `src/biometrics/fingerprint/shapes/` | Convex-hull frames, measured-width snapping, fixed uncertainty padding and complete positional traversal. |
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
@@ -49,7 +50,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Limits and errors | `src/policy.rs`, `src/error.rs` | Caller-selected software bounds, per-enrollment secret policy and typed failures with algorithm error sources. |
 | Byte framing | `src/encoding.rs` | Bounded, unambiguous field framing for contexts and signed messages. |
 
-Locations in this table are relative to `crates/gnorix`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipeline functions are `enrollment::enroll`, `authorization::sign` and `authorization::verify`.
+Locations in this table are relative to `crates/gnorix`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipelines are `enrollment::enroll` / `enroll_candidates`, `authorization::sign` / `sign_candidates` and `authorization::verify`.
 
 ### Fingerprint implementation layout
 
@@ -63,24 +64,26 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `enhancement/` | Local normalization, intensity filtering, orientation tensors and reusable directional responses. |
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
 | `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
-| `combinations.rs`, `combinations/` | Compose candidate projection, region selection, lazy weighted subset enumeration and global deduplication. |
+| `combinations.rs`, `combinations/` | Shared candidate projection and lazy weighted subset enumeration; regional enrollment selection/deduplication and global fresh-image signing search. |
 | `shapes.rs`, `shapes/` | Prepare oriented figures, preserve staggered-grid phase, stream positional assignments and hash canonical integer-coordinate descriptors. |
 
 Feature assessment separates local evidence (`features/evidence.rs`), extended source-backed structure (`features/context.rs` and its tracing/probe modules), threshold correspondence (`features/stability/`) and bounded crowding (`features/neighborhood.rs`). The orchestration combines these independent measurements; the report adapters only serialize and validate them. All source/graph observation preserves the original topology. Context traversal, sampling and neighborhood work have explicit bounds.
 
 The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` exports image stages, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
 
-`examples/feature_combinations.rs` runs extraction and [regional subset generation](feature-combinations.md), with explicit example environment controls and JSON output. Both examples use `examples/support/image_input.rs` for bounded opaque-image decoding. Subsets contain capture-local feature IDs; registration, stable candidate encoding and key derivation remain separate.
+`examples/feature_combinations.rs` runs extraction and [regional subset generation](feature-combinations.md), with explicit example environment controls and JSON output. Both examples use `examples/support/image_input.rs` for bounded opaque-image decoding. Subsets contain capture-local feature IDs; the later grid and enrollment stages encode positions independently of these IDs and derive keys.
 
 `examples/feature_grid.rs` orchestrates the [complete grid variants](grid-shapes.md) stage and its environment controls. Its `feature_grid/input.rs` module reads the bounded combination export; `feature_grid/output.rs` streams bounded JSON and removes partial outputs if traversal or writing fails. File I/O stays outside the library.
 
 `examples/enroll_grid.rs` consumes that same combination input, streams grid candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. Both grid examples use `examples/support/grid_config.rs` for their controls.
 
+`examples/fingerprint_signing.rs` extracts a fresh image, searches globally ranked point subsets and signs with the first member of an existing package. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls, evidence and crop results. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
+
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
 ## Connecting algorithms
 
-The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance; it does not implement registration, tolerance selection or biometric candidate encoding.
+The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance. Separate fingerprint components select subsets, normalize them to the grid and encode candidates; registration of whole captures and calibrated biometric tolerances remain separate work.
 
 Implement `MeasurementEngine` for the selected measurement strategy. It supplies a profile identifier, builds its own reconstruction model, enumerates all accepted enrollment candidates, and reconstructs candidates from a new capture under that same model. Its identifier must cover every setting that affects interpretation or candidate bytes.
 
@@ -102,6 +105,8 @@ Use these public entry points in order:
 
 The [lifecycle integration tests](../crates/gnorix/tests/lifecycle/main.rs) demonstrate this wiring with deliberately nonproduction measurement and crypto doubles. The suite groups enrollment, verification and failure behavior into cohesive modules with shared fixtures. They are test fixtures, not algorithms to copy into an application.
 
+For an existing fingerprint `.grx` package, the alternative path is `fingerprint::extract` → `fingerprint::signing_candidates` → `authorization::sign_candidates`, followed by the same trusted verification. This path uses the enrolled profile and padding, stops at the first matching public key and leaves the accepted set unchanged.
+
 ## Bounds and failure semantics
 
 `Limits` requires explicit nonzero maxima for candidate attempts, candidate bytes, public-key bytes, signature bytes, framed action bytes and framed context bytes. These are software resource limits, not biometric acceptance criteria. Context/action limits include their domain and length framing. No scanner thresholds, candidate-count defaults or quality cutoffs are embedded in the library.
@@ -122,7 +127,7 @@ The application defines canonical operation payloads and a consistent unit for e
 
 The core is independent of NEAR. A future adapter must supply trusted registry state, canonical actions, permissions, replay reservation and asynchronous pending/success/failure handling. Root registration, replacement and recovery need their own authority. No contract API, custody model, callback/retry policy or deployment is implied by the library interfaces.
 
-Persistence, encrypted backups and enrollment restoration are deliberately not implemented before their format, protection key and authority model are selected. The library exposes the local reconstruction model and proof material as separate components; possession of the public commitment alone does not recreate them.
+Canonical `.grx` persistence covers public context and retained Merkle hashes. Protected model storage, encrypted backups and recovery authority remain application work. The package does not serialize an arbitrary `MeasurementEngine` model; applications retain the required reconstruction settings separately.
 
 Tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy, resistance to biometric attacks, or on-chain gas/execution. Those require the separate measurement and integration validation plans.
 

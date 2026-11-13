@@ -15,10 +15,11 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Architecture](docs/architecture.md) describes component responsibilities, the user/verifier boundary, independent library and NEAR integration.
 - [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
 - [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
+- [Fingerprint signing](docs/fingerprint-signing.md) covers global point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
 
 ## Development
 
-The Rust workspace contains the independent `gnorix` library in `crates/gnorix`. It provides capture and geometry types, native per-capture fingerprint extraction, enrollment/signing/verification pipelines, bounded candidate processing, and a working SHA-256 Merkle commitment and proof implementation. Applications supply the complete measurement engine and KDF/signature provider explicitly.
+The Rust workspace contains the independent `gnorix` library in `crates/gnorix`. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice.
 
 Use the pinned Rust 1.99.1 toolchain, then run:
 
@@ -27,4 +28,4 @@ cargo test --workspace --all-targets --locked
 cargo run -p gnorix --example merkle --locked
 ```
 
-The example exercises membership proofs with illustrative public-key bytes. Registration between captures, numerical acceptance criteria, biometric candidate encoding, production KDF/signature providers, protected persistence and the NEAR execution adapter remain development work. See [Development](docs/development.md) for the complete workflow and test scope.
+The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection, protected persistence and the NEAR execution adapter remain development work. See [Development](docs/development.md) for the complete workflow and test scope.

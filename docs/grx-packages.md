@@ -32,6 +32,8 @@ Each leaf is the existing context-bound `merkle::leaf_hash(context, public_key)`
 
 For a later public key, `EnrollmentPackage::proof_for(public_key, &limits)` computes the same leaf hash, searches the sorted leaves, and constructs the membership path. Verify it with `merkle::verify` against the application's trusted root. An absent leaf is an explicit error.
 
+[Fresh-image signing](fingerprint-signing.md) generates candidate keys from newly extracted point subsets and searches this retained tree. It signs with the first member and returns its public key, membership proof and action signature; it does not modify or extend the package.
+
 ## Retained package
 
 `EnrollmentPackage` contains the full enrollment context, Merkle root, leaf count and retained hash tree. Its binary representation stores only canonical leaf hashes: all internal nodes and paths are rebuilt on load. It contains no public-key list, private keys, candidate digests, coordinates, source image or independent secret.
@@ -62,4 +64,4 @@ The included context has fixed public values for the local test image. The examp
 
 The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`: [HKDF-SHA256](https://www.rfc-editor.org/rfc/rfc5869.html) derives a 32-byte seed, and [ed25519-dalek](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/) handles key generation and signatures. HKDF uses the encoded context as salt; its input frames the domain `gnorix.example.ed25519-input.v1`, candidate digest, secret-presence byte and secret bytes with `u64be` lengths. Expansion info is `gnorix.example.ed25519-seed.v1`. This is an example-selected suite, not a library default or a password-hardening policy.
 
-The command traverses the full configured set, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. This validates the implemented derivation/storage mechanics; fresh-capture correspondence and biometric acceptance remain separate work.
+The command traverses the full configured set, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses the same package format, profile and crypto suite. Its crop checks validate the implemented search path; repeatability on independent sensor captures and biometric acceptance remain separate work.
