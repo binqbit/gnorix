@@ -51,4 +51,4 @@ For the checked-in image's 108 selected subsets (61 triples, 38 quadruples, nine
 
 ## Interpretation
 
-This is per-subset geometric normalization, not registration of whole captures or a canonical key encoding. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.
+This is per-subset geometric normalization, not registration of whole captures. The next [candidate and package stage](grx-packages.md) canonically hashes these integer positions and commits caller-selected public keys. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.

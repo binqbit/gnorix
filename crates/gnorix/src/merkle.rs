@@ -107,6 +107,12 @@ impl MerkleTree {
         self.levels[0].len()
     }
 
+    /// Canonical sorted, unique hashes sufficient to rebuild this tree and its
+    /// membership paths. No candidate public keys or secret inputs are retained.
+    pub fn leaves(&self) -> &[Hash] {
+        &self.levels[0]
+    }
+
     /// Find an enrolled leaf and construct its membership path.
     pub fn proof_for(&self, leaf: &Hash) -> Result<MerkleProof, MerkleError> {
         let leaves = &self.levels[0];

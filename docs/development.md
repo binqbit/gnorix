@@ -43,6 +43,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
 | Enrollment | `src/enrollment.rs` | Bind profile and context, prepare a model, process the complete candidate set, retain its commitment/model/hash tree. |
+| Enrollment packages | `src/package.rs`, `src/package/` | Bounded canonical `.grx` storage of enrollment context and leaf hashes, validated tree reconstruction and public-key membership lookup. |
 | Signing and verification | `src/authorization.rs` | Reconstruct a member, sign an exact action, and verify against trusted application state. |
 | Commitment | `src/merkle.rs` | Deterministic SHA-256 tree, indexed membership lookup and strict proof verification. |
 | Limits and errors | `src/policy.rs`, `src/error.rs` | Caller-selected software bounds, per-enrollment secret policy and typed failures with algorithm error sources. |

@@ -49,4 +49,4 @@ The JSON contains the effective configuration, bounds, eligible point IDs/coordi
 
 ## Scope
 
-This stage supplies point subsets for later encoding. [Grid figures and positional variants](grid-shapes.md) apply hull-based orientation, measured-R snapping and complete local uncertainty traversal to those subsets. Original IDs and region bounds belong to this capture. Repeated identical input and settings reproduce the output; handling partial new captures still requires correspondence and stable descriptor encoding. Key derivation and biometric acceptance criteria are separate stages.
+This stage supplies point subsets for later encoding. [Grid figures and positional variants](grid-shapes.md) apply hull-based orientation, measured-R snapping and complete local uncertainty traversal to those subsets. [Candidate hashing and enrollment packages](grx-packages.md) then encode integer positions independently of source IDs and use the selected crypto provider. Original IDs and region bounds belong to this capture. Repeated identical input and settings reproduce the output; partial new captures still require correspondence and evaluated biometric acceptance criteria.

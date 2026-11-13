@@ -4,7 +4,8 @@
 //! [`crypto::CryptoProvider`]. Per-capture ridge extraction is available in
 //! [`biometrics::fingerprint`], including normalized grid candidate hashing.
 //! Registration, matching tolerances, key derivation and signature algorithms
-//! remain explicit choices.
+//! remain explicit choices. [`package`] stores enrollment context and Merkle
+//! hashes for later membership lookup.
 //! Public verification alone requires only [`crypto::SignatureVerifier`].
 //!
 //! [`authorization::verify`] checks evidence against an independently trusted
@@ -17,6 +18,7 @@ pub mod crypto;
 pub mod enrollment;
 pub mod error;
 pub mod merkle;
+pub mod package;
 pub mod policy;
 
 mod encoding;
