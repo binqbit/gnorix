@@ -16,8 +16,11 @@ from .snapshot import MAX_SNAPSHOT_BYTES, SCHEMA, SOURCE_IMAGE_FILES
 from .structure import REPORT_FILES, render_structure
 
 _DATA_FILES = {"features.json", *SOURCE_IMAGE_FILES}
-_COMBINATION_FILES = {"feature-combinations.json", "feature-combinations.png"}
-_COMBINATION_SCHEMA = "gnorix.feature-combinations.v1"
+_STAGE_SCHEMAS = {
+    "feature-combinations.json": "gnorix.feature-combinations.v1",
+    "feature-grid.json": "gnorix.feature-grid.v1",
+}
+_STAGE_FILES = {*_STAGE_SCHEMAS, "feature-combinations.png", "feature-grid.png"}
 
 
 class _RecoveryRequired(RuntimeError):
@@ -62,15 +65,13 @@ def _validate_existing(output: Path) -> None:
         raise ValueError("reports/fingerprint must be a real directory")
     if not output.exists() or not any(output.iterdir()):
         return
-    expected = {*REPORT_FILES, "README.md", "data", *_COMBINATION_FILES}
+    expected = {*REPORT_FILES, "README.md", "data", *_STAGE_FILES}
     children = {path.name: path for path in output.iterdir()}
     # Recognize owned output by its core files and known filenames. A new
     # diagnostic may be absent in a previous run; it needs no legacy renderer.
     native = {"overview.png", "README.md", "data"} <= children.keys()
-    combinations_only = (
-        "feature-combinations.json" in children and children.keys() <= _COMBINATION_FILES
-    )
-    if not ((native or combinations_only) and children.keys() <= expected) or any(
+    stages_only = bool(children.keys() & _STAGE_SCHEMAS.keys()) and children.keys() <= _STAGE_FILES
+    if not ((native or stages_only) and children.keys() <= expected) or any(
         path.is_symlink() for path in children.values()
     ):
         raise ValueError(
@@ -80,9 +81,10 @@ def _validate_existing(output: Path) -> None:
         not path.is_file() for name, path in children.items() if name != "data"
     ):
         raise ValueError("reports/fingerprint contains unexpected file types")
-    if "feature-combinations.json" in children:
-        _validate_existing_json(children["feature-combinations.json"], _COMBINATION_SCHEMA)
-    if combinations_only:
+    for name, schema in _STAGE_SCHEMAS.items():
+        if name in children:
+            _validate_existing_json(children[name], schema)
+    if stages_only:
         return
 
     data = {path.name: path for path in children["data"].iterdir()}

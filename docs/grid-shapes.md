@@ -45,7 +45,7 @@ The output file must not already exist. The adapter reads the combination export
 | `GNORIX_GRID_MAX_VARIANTS` | 1000000 | Maximum complete assignment count across all combinations. |
 | `GNORIX_GRID_MAX_WORK` | 10000000 | Preparation and traversal work entries. |
 
-The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output.
+The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
 For the checked-in image's 108 selected subsets (61 triples, 38 quadruples, nine quintuples), level 1 traverses **263,424 assignments**. They are positional alternatives, not distinct keys.
 

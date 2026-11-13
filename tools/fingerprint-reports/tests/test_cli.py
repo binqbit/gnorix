@@ -286,6 +286,39 @@ class CommandTests(unittest.TestCase):
         run.assert_not_called()
         self.assertTrue((self.output / "feature-combinations.png").is_file())
 
+    def test_grid_stage_identification_and_refresh_preserve_the_same_ownership_rules(self):
+        self.output.mkdir(parents=True)
+        data = self.output / "feature-grid.json"
+        picture = self.output / "feature-grid.png"
+        shutil.copyfile(self.image, picture)
+        with patch("gnorix_reports.cli.subprocess.run") as run:
+            with self.assertRaises(ValueError):
+                generate_report(self.image, 50, 0.5)
+            data.write_text('{"schema":"wrong"}')
+            with self.assertRaises(ValueError):
+                generate_report(self.image, 50, 0.5)
+            run.assert_not_called()
+
+        data.write_text('{"schema":"gnorix.feature-grid.v1"}')
+        self.write_combinations()
+        previous = self.contents()
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=OSError("extraction")):
+            with self.assertRaises(OSError):
+                generate_report(self.image, 50, 0.5)
+        self.assertEqual(self.contents(), previous)
+
+        def render_overview(snapshot, destination, dpi, alpha):
+            shutil.copyfile(self.image, destination / "overview.png")
+
+        with patch("gnorix_reports.cli.subprocess.run", side_effect=self.native_success):
+            with patch("gnorix_reports.cli.render_structure", side_effect=render_overview):
+                generate_report(self.image, 50, 0.5)
+        self.assertFalse(data.exists())
+        self.assertFalse(picture.exists())
+        self.assertFalse((self.output / "feature-combinations.json").exists())
+        self.assertTrue((self.output / "overview.png").is_file())
+        self.assert_only_canonical_folder()
+
     def test_extraction_and_render_failures_preserve_the_previous_complete_report(self):
         self.complete_previous()
         previous = self.contents()
