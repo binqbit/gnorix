@@ -194,7 +194,7 @@ pub fn generate_combinations(
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
     let spatial = derive_spatial_requirements(bounds, fingerprint.scale.unit_px, &config.spatial)?;
     let spatial_pixels = spatial.pixels(fingerprint.scale.unit_px)?;
-    let mut regions = regions::select(
+    let selected = regions::select(
         &points,
         bounds,
         fingerprint.scale.unit_px,
@@ -202,8 +202,7 @@ pub fn generate_combinations(
         spatial_pixels,
         &mut work,
     )?;
-    let combinations =
-        collect_combinations(&points, &mut regions, config, spatial_pixels, &mut work)?;
+    let (regions, combinations) = collect_combinations(selected, &mut work)?;
 
     Ok(FeatureCombinations {
         bounds,
@@ -295,34 +294,14 @@ fn charge_projection(
 }
 
 fn collect_combinations(
-    points: &[CombinationPoint],
-    regions: &mut [CombinationRegion],
-    config: &CombinationConfig,
-    spatial: spatial::SpatialPixels,
+    selected: Vec<regions::RegionSelection>,
     work: &mut WorkBudget,
-) -> Result<Vec<FeatureCombination>, CombinationError> {
-    let indexed: BTreeMap<_, _> = points.iter().map(|point| (point.id, point)).collect();
+) -> Result<(Vec<CombinationRegion>, Vec<FeatureCombination>), CombinationError> {
+    let mut regions = Vec::new();
     let mut unique: BTreeMap<Vec<usize>, FeatureCombination> = BTreeMap::new();
-    for region in regions {
-        let scores: Vec<_> = region.pool.iter().map(|id| indexed[id].priority).collect();
-        let positions: Vec<_> = region.pool.iter().map(|id| indexed[id].position).collect();
-        let selected = enumeration::enumerate_spatial(
-            &scores,
-            &positions,
-            config.min_points,
-            config.combinations_per_region,
-            spatial,
-            work,
-        )?;
-        if let Some(&uncovered) = selected.uncovered.first() {
-            return Err(CombinationError::UncoverablePoint {
-                region: region.id,
-                feature_id: region.pool[uncovered],
-            });
-        }
-        let subsets = selected.subsets;
-        region.combination_count = subsets.len();
-        for subset in subsets {
+    for selection in selected {
+        let region = selection.region;
+        for subset in selection.subsets {
             work.spend(subset.ranks.len())?;
             let mut ids: Vec<_> = subset.ranks.iter().map(|&rank| region.pool[rank]).collect();
             ids.sort_unstable();
@@ -339,6 +318,7 @@ fn collect_combinations(
                 );
             }
         }
+        regions.push(region);
     }
     let mut combinations: Vec<_> = unique.into_values().collect();
     combinations.sort_by(|a, b| {
@@ -346,7 +326,7 @@ fn collect_combinations(
             .total_cmp(&a.score)
             .then_with(|| a.feature_ids.cmp(&b.feature_ids))
     });
-    Ok(combinations)
+    Ok((regions, combinations))
 }
 
 pub(super) struct WorkBudget {
@@ -628,7 +608,7 @@ mod tests {
         };
         config.validate().unwrap();
         let mut work = WorkBudget::new(config.max_work);
-        let mut regions = regions::select(
+        let selected = regions::select(
             &points,
             bounds,
             1.0,
@@ -637,20 +617,13 @@ mod tests {
             &mut work,
         )
         .unwrap();
+        let (regions, combinations) = collect_combinations(selected, &mut work).unwrap();
         let region_count = regions.len();
         assert!(
             regions
                 .iter()
                 .all(|region| region.pool == [0, 1, 2, 3] && region.radius > region.initial_radius)
         );
-        let combinations = collect_combinations(
-            &points,
-            &mut regions,
-            &config,
-            permissive_requirements().pixels(1.0).unwrap(),
-            &mut work,
-        )
-        .unwrap();
         assert_eq!(combinations.len(), 5);
         assert!(regions.iter().all(|region| region.combination_count == 5));
         assert!(

@@ -103,19 +103,28 @@ pub(super) struct SpatialCoverage {
     pub uncovered: Vec<usize>,
 }
 
-/// Find quality-ordered valid witnesses, stopping once every pool point is covered.
-/// An exhausted pool may contain valid subsets while still having uncovered points.
-pub(super) fn coverage_spatial(
+/// Keep coverage witnesses and the best valid subsets in one ranked traversal.
+/// A bounded best-candidate buffer avoids replaying the stream after coverage.
+pub(super) fn enumerate_spatial(
     priorities: &[f64],
     positions: &[Point],
     minimum: usize,
+    budget: usize,
     policy: spatial::SpatialPixels,
     work: &mut WorkBudget,
 ) -> Result<SpatialCoverage, CombinationError> {
+    validate_limits(priorities.len(), minimum, budget)?;
+    if policy.unconstrained() {
+        return Ok(SpatialCoverage {
+            subsets: enumerate(priorities, minimum, budget, work)?,
+            uncovered: Vec::new(),
+        });
+    }
     work.spend(priorities.len())?;
     let mut covered = vec![false; priorities.len()];
     let mut remaining = priorities.len();
-    let mut selected = Vec::new();
+    let mut witnesses = Vec::new();
+    let mut best = Vec::new();
     let minimum = minimum.max(policy.anchors);
     if minimum <= priorities.len() {
         let mut ranked = RankedSubsets::new(priorities, minimum, priorities.len(), work)?;
@@ -132,71 +141,56 @@ pub(super) fn coverage_spatial(
                     adds_coverage = true;
                 }
             }
-            if adds_coverage {
-                selected.push(subset);
+            if best.len() < budget {
+                work.spend(subset.ranks.len())?;
+                best.push(subset.clone());
             }
-            if remaining == 0 {
+            if adds_coverage {
+                witnesses.push(subset);
+            }
+            if remaining == 0 && best.len() == budget {
                 break;
             }
         }
     }
-    let uncovered = covered
+    work.spend(covered.len())?;
+    let uncovered: Vec<_> = covered
         .into_iter()
         .enumerate()
         .filter_map(|(rank, present)| (!present).then_some(rank))
         .collect();
-    Ok(SpatialCoverage {
-        subsets: selected,
-        uncovered,
-    })
-}
-
-/// Spend output slots only on valid sets; retain coverage before filling by score.
-pub(super) fn enumerate_spatial(
-    priorities: &[f64],
-    positions: &[Point],
-    minimum: usize,
-    budget: usize,
-    policy: spatial::SpatialPixels,
-    work: &mut WorkBudget,
-) -> Result<SpatialCoverage, CombinationError> {
-    validate_limits(priorities.len(), minimum, budget)?;
-    if policy.unconstrained() {
+    if !uncovered.is_empty() {
         return Ok(SpatialCoverage {
-            subsets: enumerate(priorities, minimum, budget, work)?,
-            uncovered: Vec::new(),
+            subsets: witnesses,
+            uncovered,
         });
     }
-    let mut coverage = coverage_spatial(priorities, positions, minimum, policy, work)?;
-    if !coverage.uncovered.is_empty() {
-        return Ok(coverage);
-    }
-    let selected = &mut coverage.subsets;
-    let mut seen = BTreeSet::new();
-    for subset in selected.iter() {
+    let subsets = complete_coverage(witnesses, best, budget, work)?;
+    Ok(SpatialCoverage { subsets, uncovered })
+}
+
+fn complete_coverage(
+    mut selected: Vec<RankedSubset>,
+    best: Vec<RankedSubset>,
+    budget: usize,
+    work: &mut WorkBudget,
+) -> Result<Vec<RankedSubset>, CombinationError> {
+    let mut witnesses = BTreeSet::new();
+    for subset in &selected {
         work.spend(subset.ranks.len())?;
-        seen.insert(subset.ranks.clone());
+        witnesses.insert(subset.ranks.clone());
     }
-    let mut ranked = RankedSubsets::new(
-        priorities,
-        minimum.max(policy.anchors),
-        priorities.len(),
-        work,
-    )?;
-    while selected.len() < budget {
-        let Some(subset) = ranked.next(priorities, work)? else {
+    for subset in best {
+        if selected.len() == budget {
             break;
-        };
-        if !spatial::subset(positions, &subset.ranks, policy, work)? {
-            continue;
         }
         work.spend(subset.ranks.len())?;
-        if seen.insert(subset.ranks.clone()) {
+        if !witnesses.contains(&subset.ranks) {
             selected.push(subset);
         }
     }
     selected.sort_unstable_by(compare_subsets);
-    Ok(coverage)
+    Ok(selected)
 }
 
 fn validate_limits(
@@ -512,6 +506,177 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    fn spatial_reference(
+        priorities: &[f64],
+        positions: &[Point],
+        minimum: usize,
+        budget: usize,
+        policy: spatial::SpatialPixels,
+    ) -> SpatialCoverage {
+        let mut valid = (1_usize..1 << priorities.len())
+            .filter_map(|mask| {
+                let ranks: Vec<_> = (0..priorities.len())
+                    .filter(|rank| mask & (1 << rank) != 0)
+                    .collect();
+                if ranks.len() < minimum.max(policy.anchors) {
+                    return None;
+                }
+                let selected: Vec<_> = ranks.iter().map(|&rank| positions[rank]).collect();
+                spatial::check(&selected, policy, &mut WorkBudget::new(100_000))
+                    .unwrap()
+                    .then(|| ranked_subset(priorities, ranks))
+            })
+            .collect::<Vec<_>>();
+        valid.sort_unstable_by(compare_subsets);
+        let mut covered = BTreeSet::<usize>::new();
+        let mut selected = Vec::new();
+        for subset in &valid {
+            if subset.ranks.iter().any(|rank| !covered.contains(rank)) {
+                covered.extend(subset.ranks.iter().copied());
+                selected.push(subset.clone());
+            }
+        }
+        let uncovered: Vec<_> = (0..priorities.len())
+            .filter(|rank| !covered.contains(rank))
+            .collect();
+        if uncovered.is_empty() {
+            for subset in valid {
+                if selected.len() == budget {
+                    break;
+                }
+                if !selected.iter().any(|seed| seed.ranks == subset.ranks) {
+                    selected.push(subset);
+                }
+            }
+            selected.sort_unstable_by(compare_subsets);
+        }
+        SpatialCoverage {
+            subsets: selected,
+            uncovered,
+        }
+    }
+
+    #[test]
+    fn spatial_selection_matches_exhaustive_coverage_and_ranking() {
+        let layouts = [
+            vec![
+                (0., 0.),
+                (10., 0.),
+                (0., 10.),
+                (-1., 1.),
+                (3., 3.),
+                (0., 0.),
+            ],
+            vec![(0., 0.), (2., 0.), (4., 0.), (6., 0.), (8., 0.), (10., 0.)],
+            vec![
+                (0., 0.),
+                (10., 0.),
+                (12., 7.),
+                (7., 12.),
+                (0., 10.),
+                (5., 5.),
+            ],
+        ];
+        for layout in layouts {
+            let positions: Vec<_> = layout
+                .into_iter()
+                .map(|(x, y)| Point::new(x, y).unwrap())
+                .collect();
+            for priorities in [vec![0.5; 6], vec![1., 0.9, 0.8, 0.5, 0.3, 0.]] {
+                for (diameter, anchors, separation) in
+                    [(0., 2, 0.), (8., 3, 5.), (10., 4, 3.), (20., 3, 5.)]
+                {
+                    let policy = spatial::SpatialPixels {
+                        diameter,
+                        anchors,
+                        separation,
+                    };
+                    for minimum in 1..=3 {
+                        for budget in [7 - minimum, 12, 64] {
+                            let expected =
+                                spatial_reference(&priorities, &positions, minimum, budget, policy);
+                            let actual = enumerate_spatial(
+                                &priorities,
+                                &positions,
+                                minimum,
+                                budget,
+                                policy,
+                                &mut WorkBudget::new(100_000),
+                            )
+                            .unwrap();
+                            assert_eq!(actual.subsets, expected.subsets);
+                            assert_eq!(actual.uncovered, expected.uncovered);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn spatial_selection_keeps_late_coverage_without_losing_best_valid_sets() {
+        let positions: Vec<_> = [(0., 0.), (10., 0.), (0., 10.), (9., 9.), (4., 4.)]
+            .into_iter()
+            .map(|(x, y)| Point::new(x, y).unwrap())
+            .collect();
+        let priorities = [1., 0.9, 0.8, 0.7, 0.];
+        let policy = spatial::SpatialPixels {
+            diameter: 8.,
+            anchors: 3,
+            separation: 5.,
+        };
+        let expected = spatial_reference(&priorities, &positions, 3, 3, policy);
+        assert!(expected.uncovered.is_empty());
+        assert!(
+            expected
+                .subsets
+                .iter()
+                .any(|subset| subset.ranks.contains(&4))
+        );
+        let mut succeeded = false;
+        for limit in 1..=10_000 {
+            match enumerate_spatial(
+                &priorities,
+                &positions,
+                3,
+                3,
+                policy,
+                &mut WorkBudget::new(limit),
+            ) {
+                Ok(actual) => {
+                    assert_eq!(actual.subsets, expected.subsets);
+                    assert!(actual.uncovered.is_empty());
+                    succeeded = true;
+                    break;
+                }
+                Err(error) => assert_eq!(error, CombinationError::WorkLimit),
+            }
+        }
+        assert!(succeeded);
+    }
+
+    #[test]
+    fn impossible_large_spatial_pool_stops_at_work_limit() {
+        let positions: Vec<_> = (0..32).map(|x| Point::new(x as f64, 0.).unwrap()).collect();
+        let priorities = vec![1.; 32];
+        let policy = spatial::SpatialPixels {
+            diameter: 100.,
+            anchors: 3,
+            separation: 10.,
+        };
+        assert!(matches!(
+            enumerate_spatial(
+                &priorities,
+                &positions,
+                3,
+                32,
+                policy,
+                &mut WorkBudget::new(1000)
+            ),
+            Err(CombinationError::WorkLimit)
+        ));
     }
 
     #[test]

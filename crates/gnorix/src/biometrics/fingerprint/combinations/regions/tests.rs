@@ -67,7 +67,8 @@ fn an_invalid_full_pool_is_kept_when_valid_subsets_cover_every_point() {
         &mut WorkBudget::new(100_000),
     )
     .unwrap();
-    assert_eq!(pool, [0, 1, 2, 3]);
+    assert_eq!(pool.indices, [0, 1, 2, 3]);
+    assert_eq!(pool.subsets.len(), 2);
     let scores: Vec<_> = points.iter().map(|point| point.priority).collect();
     let selected = enumeration::enumerate_spatial(
         &scores,
@@ -142,7 +143,8 @@ fn pool_rescue_requires_no_valid_original_subset_and_retains_strong_fillers() {
             policy,
             &mut WorkBudget::new(100_000)
         )
-        .unwrap(),
+        .unwrap()
+        .indices,
         [0, 1, 4, 5]
     );
     let mut with_uncoverable = points;
@@ -227,8 +229,8 @@ fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
     )
     .unwrap();
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].pool, [3, 2]);
-    assert_eq!(regions[0].available_points, 3);
+    assert_eq!(regions[0].region.pool, [3, 2]);
+    assert_eq!(regions[0].region.available_points, 3);
     let all = circular_regions(
         &points,
         bounds(6.0, 2.0),
