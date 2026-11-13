@@ -45,7 +45,7 @@ Choose an output file that does not already exist. The adapter reads environment
 
 These small defaults belong to the example. The library requires positive explicit controls and sufficient subset budget to cover the configured pool. Exhausting the possible distinct subsets returns fewer than the budget. Exhausting the work allowance fails the operation instead of returning a partial successful result.
 
-The JSON contains the effective configuration, bounds, eligible point IDs/coordinates/priorities, all adaptive pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The number of regions follows the observed extent and R; it is exported with their centers, initial/effective radii and selected pools.
+The JSON contains the effective configuration, bounds, eligible point IDs/coordinates/priorities, all adaptive pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The number of regions follows the observed extent and R; it is exported with their centers, initial/effective radii and selected pools. At 30R the checked-in fixture yields **299 scored features, four pools of six and 48 unique combinations**. A freshly extracted 512×512 central crop needs one circle.
 
 ## Scale and coverage
 

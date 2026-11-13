@@ -52,3 +52,19 @@ These limits do not alter the enrolled profile or accepted set. The core may req
 The `gnorix.authorization.v1` JSON contains the enrollment ID/revision, exact action, public key, proof (`leaf_index`, `leaf_count`, sibling hashes) and signature. It contains no replacement root/context, coordinates, image or private key. Binary fields use lowercase hexadecimal; decoding checks field sets, lengths and numeric bounds.
 
 Verification uses the independently trusted enrollment commitment, expected action, enrollment status and current time. It checks both the Merkle path and the signature, with the signed message binding the full enrollment context, root, leaf count and action. In this CLI, the separately supplied `.grx` path is the trusted enrollment source and status is active; do not substitute a package supplied by the authorization sender. Applications obtain current status and commitment from their trusted registry and apply permissions and durable replay handling before execution.
+
+## Checked local example
+
+Fresh extraction and signing were run against the new adaptive-region enrollment on the full 1086×1448 image, three unscaled 760×1014 crops and one 512×512 crop. The radius multiplier is 30R in every case. Crop boxes use `(left, top, right, bottom)` with exclusive right/bottom coordinates.
+
+| Input | Crop box | Measured R, px | Regions | Candidates until match |
+|---|---|---:|---:|---:|
+| Full fixture | `(0, 0, 1086, 1448)` | 16.820793 | 4 | 1 |
+| Top left | `(0, 0, 760, 1014)` | 16.743084 | 2 | 1 |
+| Center | `(163, 217, 923, 1231)` | 16.195271 | 2 | 1 |
+| Bottom right | `(326, 434, 1086, 1448)` | 16.353278 | 2 | 2 |
+| Small center | `(287, 468, 799, 980)` | 16.331495 | 1 | 1 |
+
+All five runs produced a signature and Merkle proof that passed separate verification. The [PNG overview](../reports/enrollment/signing/crop-signing.png), authorizations and [run record](../reports/enrollment/signing/results.json) are kept under `reports/enrollment/signing/`, separately from fingerprint report refreshes. The [verification record](../reports/enrollment/signing/verification.json) also covers changed signed data/key/proof/signature, expiration, incompatible profiles and an incomplete one-attempt search.
+
+These are re-extracted crops of the **same synthetic test image**, not new sensor acquisitions. They demonstrate the implemented search/sign/verify path with small test subsets. They do not measure repeatability across real captures or establish biometric acceptance, rejection or key-entropy properties.
