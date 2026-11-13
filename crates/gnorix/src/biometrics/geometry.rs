@@ -126,6 +126,19 @@ impl TriangularGrid {
 
         rotate_and_translate(local, self.rotation_radians, self.origin)
     }
+
+    /// Finds the Euclidean-nearest node of the unbounded lattice.
+    ///
+    /// Negative coordinates are retained. Exact floating-point distance ties
+    /// choose the lexicographically smallest `(q, r)`. As with `position`,
+    /// floating-point rounding applies, including near Voronoi boundaries.
+    /// A nearest node outside `i32` returns an error; it is never clipped to a
+    /// farther representable node.
+    pub fn nearest(self, point: Point) -> Result<GridPoint, GeometryError> {
+        let local = inverse_grid_frame(point, self)?;
+
+        nearest_lattice_node(local)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,13 +156,66 @@ impl fmt::Display for GeometryError {
             Self::InvalidSpacing => formatter.write_str("grid spacing must be finite and positive"),
             Self::InvalidRotation => formatter.write_str("grid rotation must be finite"),
             Self::CoordinateOverflow => {
-                formatter.write_str("lattice neighbor exceeds the integer coordinate range")
+                formatter.write_str("lattice coordinates exceed the integer coordinate range")
             }
         }
     }
 }
 
 impl Error for GeometryError {}
+
+fn inverse_grid_frame(point: Point, grid: TriangularGrid) -> Result<Point, GeometryError> {
+    let delta = Point::new(
+        (point.x - grid.origin.x) / grid.spacing,
+        (point.y - grid.origin.y) / grid.spacing,
+    )?;
+    let (sin, cos) = grid.rotation_radians.sin_cos();
+
+    Point::new(
+        cos * delta.x + sin * delta.y,
+        -sin * delta.x + cos * delta.y,
+    )
+}
+
+fn nearest_lattice_node(local: Point) -> Result<GridPoint, GeometryError> {
+    let row_height = 3.0_f64.sqrt() / 2.0;
+    let fractional_r = local.y / row_height;
+    let fractional_q = local.x - fractional_r / 2.0;
+    // The nearest node differs by less than one in either axial coordinate.
+    // Keep a whole-node margin to compare the true unbounded nearest node,
+    // including candidates just outside the representable integer domain.
+    let lower = f64::from(i32::MIN) - 1.0;
+    let upper = f64::from(i32::MAX) + 1.0;
+    if !(lower..=upper).contains(&fractional_q) || !(lower..=upper).contains(&fractional_r) {
+        return Err(GeometryError::CoordinateOverflow);
+    }
+
+    // The covering radius is 1/sqrt(3), smaller than the row height. Thus only
+    // the two adjacent rows can contain the nearest node; each needs only its
+    // two adjacent horizontal nodes. Integer rounding of q and r separately
+    // would not respect Euclidean distance in the oblique lattice basis.
+    let first_row = fractional_r.floor() as i64;
+    let mut best = (i64::MAX, i64::MAX);
+    let mut best_distance = f64::INFINITY;
+    for r in [first_row, first_row + 1] {
+        let row_x = local.x - r as f64 / 2.0;
+        let first_column = row_x.floor() as i64;
+        for q in [first_column, first_column + 1] {
+            let dx = row_x - q as f64;
+            let dy = local.y - row_height * r as f64;
+            let distance = dx * dx + dy * dy;
+            if distance < best_distance || (distance == best_distance && (q, r) < best) {
+                best = (q, r);
+                best_distance = distance;
+            }
+        }
+    }
+
+    Ok(GridPoint {
+        q: i32::try_from(best.0).map_err(|_| GeometryError::CoordinateOverflow)?,
+        r: i32::try_from(best.1).map_err(|_| GeometryError::CoordinateOverflow)?,
+    })
+}
 
 fn lattice_position(point: GridPoint, spacing: f64) -> Result<Point, GeometryError> {
     let q = f64::from(point.q);
@@ -259,6 +325,141 @@ mod tests {
         assert_close(first_axis.y(), -2.0);
         assert_close(second_axis.x(), 10.0 - 3.0_f64.sqrt());
         assert_close(second_axis.y(), -3.0);
+    }
+
+    #[test]
+    fn snaps_by_euclidean_distance_instead_of_rounding_each_axial_coordinate() {
+        let grid = TriangularGrid::new(Point::new(0.0, 0.0).unwrap(), 1.0, 0.0).unwrap();
+        let y = (3.0_f64.sqrt() / 2.0) * 0.49;
+
+        assert_eq!(
+            grid.nearest(Point::new(0.48 + 0.49 / 2.0, y).unwrap()),
+            Ok(GridPoint { q: 0, r: 1 })
+        );
+        assert_eq!(
+            grid.nearest(Point::new(-0.48 - 0.49 / 2.0, -y).unwrap()),
+            Ok(GridPoint { q: 0, r: -1 })
+        );
+    }
+
+    #[test]
+    fn exact_boundary_ties_choose_lexicographic_coordinates_without_an_epsilon() {
+        let grid = TriangularGrid::new(Point::new(0.0, 0.0).unwrap(), 1.0, 0.0).unwrap();
+        let center = GridPoint { q: 0, r: 0 };
+        for neighbor in center.neighbors().unwrap() {
+            let position = grid.position(neighbor).unwrap();
+            let midpoint = Point::new(position.x() / 2.0, position.y() / 2.0).unwrap();
+            assert_eq!(grid.nearest(midpoint), Ok(center.min(neighbor)));
+        }
+
+        assert_eq!(
+            grid.nearest(Point::new(0.5_f64.next_up(), 0.0).unwrap()),
+            Ok(GridPoint { q: 1, r: 0 })
+        );
+        assert_eq!(
+            grid.nearest(Point::new(0.5_f64.next_down(), 0.0).unwrap()),
+            Ok(center)
+        );
+    }
+
+    #[test]
+    fn snapping_preserves_signed_nodes_in_rotated_translated_scaled_frames() {
+        for rotation in [0.0, 0.37, -1.1, FRAC_PI_2] {
+            let grid =
+                TriangularGrid::new(Point::new(17.25, -12.5).unwrap(), 2.5, rotation).unwrap();
+            for node in [
+                GridPoint { q: -7, r: -3 },
+                GridPoint { q: -2, r: 5 },
+                GridPoint { q: 4, r: -8 },
+                GridPoint { q: 0, r: 0 },
+            ] {
+                let position = grid.position(node).unwrap();
+                assert_eq!(grid.nearest(position), Ok(node));
+                for (dx, dy) in [(0.2, 0.3), (-0.3, 0.2), (-0.2, -0.3), (0.3, -0.2)] {
+                    let nearby = Point::new(position.x() + dx, position.y() + dy).unwrap();
+                    assert_eq!(grid.nearest(nearby), Ok(node));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nearest_matches_exhaustive_euclidean_search_across_negative_and_positive_cells() {
+        let grid = TriangularGrid::new(Point::new(0.0, 0.0).unwrap(), 1.0, 0.0).unwrap();
+        let nodes: Vec<_> = (-8..=8)
+            .flat_map(|q| (-8..=8).map(move |r| GridPoint { q, r }))
+            .map(|node| (node, grid.position(node).unwrap()))
+            .collect();
+        for x in -32..=32 {
+            for y in -32..=32 {
+                let source = Point::new(f64::from(x) / 8.0, f64::from(y) / 8.0).unwrap();
+                let expected = nodes
+                    .iter()
+                    .map(|&(node, position)| {
+                        let dx = source.x() - position.x();
+                        let dy = source.y() - position.y();
+                        (node, dx * dx + dy * dy)
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+                    .unwrap()
+                    .0;
+                assert_eq!(grid.nearest(source), Ok(expected), "source: {source:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn snapping_checks_the_true_nearest_node_before_integer_range_conversion() {
+        let grid = TriangularGrid::new(Point::new(0.0, 0.0).unwrap(), 1.0, 0.0).unwrap();
+        for node in [
+            GridPoint {
+                q: i32::MIN,
+                r: i32::MIN,
+            },
+            GridPoint {
+                q: i32::MAX,
+                r: i32::MAX,
+            },
+            GridPoint {
+                q: i32::MIN,
+                r: i32::MAX,
+            },
+            GridPoint {
+                q: i32::MAX,
+                r: i32::MIN,
+            },
+        ] {
+            assert_eq!(grid.nearest(grid.position(node).unwrap()), Ok(node));
+        }
+        for (boundary, direction) in [(i32::MIN, -1.0), (i32::MAX, 1.0)] {
+            assert_eq!(
+                grid.nearest(Point::new(f64::from(boundary) + direction * 0.25, 0.0).unwrap()),
+                Ok(GridPoint { q: boundary, r: 0 })
+            );
+            assert_eq!(
+                grid.nearest(Point::new(f64::from(boundary) + direction * 0.75, 0.0).unwrap()),
+                Err(GeometryError::CoordinateOverflow)
+            );
+        }
+        assert_eq!(
+            grid.nearest(Point::new(f64::MAX, 0.0).unwrap()),
+            Err(GeometryError::CoordinateOverflow)
+        );
+    }
+
+    #[test]
+    fn snapping_rejects_nonfinite_inverse_transforms() {
+        let tiny =
+            TriangularGrid::new(Point::new(0.0, 0.0).unwrap(), f64::MIN_POSITIVE, 0.0).unwrap();
+        assert_eq!(
+            tiny.nearest(Point::new(f64::MAX, 0.0).unwrap()),
+            Err(GeometryError::NonFinitePoint)
+        );
+        let distant = TriangularGrid::new(Point::new(f64::MAX, 0.0).unwrap(), 1.0, 0.0).unwrap();
+        assert_eq!(
+            distant.nearest(Point::new(-f64::MAX, 0.0).unwrap()),
+            Err(GeometryError::NonFinitePoint)
+        );
     }
 
     #[test]
