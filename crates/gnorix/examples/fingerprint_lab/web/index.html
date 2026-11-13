@@ -407,6 +407,36 @@
                                     required
                             /></label>
                             <label
+                                >Minimum diameter D, fraction<input
+                                    id="min-diameter-fraction"
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="any"
+                                    value="0.3333333333333333"
+                                    required
+                            /></label>
+                            <label
+                                >Minimum anchors k<input
+                                    id="min-anchor-points"
+                                    type="number"
+                                    min="1"
+                                    max="16"
+                                    step="1"
+                                    value="3"
+                                    required
+                            /></label>
+                            <label
+                                >Anchor separation d, fraction<input
+                                    id="min-anchor-separation-fraction"
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="any"
+                                    value="0.16666666666666666"
+                                    required
+                            /></label>
+                            <label
                                 >Pool size, ×n<input
                                     id="pool-multiplier"
                                     type="number"
@@ -458,8 +488,9 @@
                             before creating the set.
                         </p>
                         <p id="minimum-span" class="microcopy" aria-live="polite">
-                            Each combination needs a pair spanning at least one
-                            third of the enrollment pattern's shorter side.
+                            D and d are fractions of the enrolled pattern's
+                            shorter side. Additional points must lie inside or
+                            on the anchors' convex hull.
                         </p>
                         <details class="advanced">
                             <summary>Computation limits</summary>

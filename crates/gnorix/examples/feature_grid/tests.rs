@@ -20,7 +20,7 @@ use super::{
 
 fn fixture() -> Value {
     json!({
-        "schema": "gnorix.feature-combinations.v4", "unit_px": 4.0,
+        "schema": "gnorix.feature-combinations.v5", "unit_px": 4.0,
         "source": {"image": "test.png", "width": 20, "height": 20},
         "points": [
             {"id": 2, "kind": "ending", "position": [4,4], "priority": 0.8},
@@ -90,6 +90,7 @@ fn validates_schema_numeric_fields_coordinates_and_feature_kinds() {
         ("/schema", json!("gnorix.feature-combinations.v1")),
         ("/schema", json!("gnorix.feature-combinations.v2")),
         ("/schema", json!("gnorix.feature-combinations.v3")),
+        ("/schema", json!("gnorix.feature-combinations.v4")),
         ("/unit_px", json!(0)),
         ("/points/0/id", json!(-1)),
         ("/points/0/id", json!(1.5)),

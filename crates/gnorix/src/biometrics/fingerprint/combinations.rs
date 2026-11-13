@@ -4,7 +4,7 @@ mod enumeration;
 mod projection;
 mod regions;
 mod search;
-mod span;
+mod spatial;
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
@@ -13,7 +13,9 @@ use super::{FeatureKind, Fingerprint, FingerprintError, Point};
 pub use search::{
     SigningRegion, SigningSearch, SigningSearchConfig, prepare_signing_search, signing_candidates,
 };
-pub use span::{derive_min_pair_span_units, satisfies_min_pair_span};
+pub use spatial::{
+    SpatialPolicy, SpatialRequirements, derive_spatial_requirements, satisfies_spatial_requirements,
+};
 
 /// Selection controls. Applications choose these explicitly; they are not
 /// biometric matching tolerances or a cryptographic security estimate.
@@ -22,9 +24,7 @@ pub struct CombinationConfig {
     pub min_points: usize,
     /// Inclusive minimum final feature priority, between zero and one.
     pub min_priority: f64,
-    /// Minimum pair span as a fraction of the enrolled bounds' shorter side.
-    /// Zero disables the span requirement.
-    pub min_span_fraction: f64,
+    pub spatial: SpatialPolicy,
     pub pool_multiplier: usize,
     /// Initial circle radius in measured mean dark-ridge widths R.
     pub radius_units: f64,
@@ -37,11 +37,7 @@ pub struct CombinationConfig {
 impl CombinationConfig {
     pub fn validate(&self) -> Result<(), CombinationError> {
         validate_min_priority(self.min_priority)?;
-        if !self.min_span_fraction.is_finite() || !(0.0..=1.0).contains(&self.min_span_fraction) {
-            return Err(CombinationError::InvalidConfig(
-                "minimum span fraction must be finite and in [0, 1]",
-            ));
-        }
+        self.spatial.validate()?;
         if self.min_points == 0 || self.pool_multiplier == 0 {
             return Err(CombinationError::InvalidConfig(
                 "point counts must be nonzero",
@@ -51,6 +47,11 @@ impl CombinationConfig {
             .min_points
             .checked_mul(self.pool_multiplier)
             .ok_or(CombinationError::InvalidConfig("point pool size overflows"))?;
+        if self.spatial.min_anchor_points > target {
+            return Err(CombinationError::InvalidConfig(
+                "minimum anchor count exceeds configured pool capacity",
+            ));
+        }
         if !self.radius_units.is_finite() || self.radius_units <= 0.0 {
             return Err(CombinationError::InvalidConfig(
                 "circle radius in ridge units must be finite and positive",
@@ -113,8 +114,8 @@ pub struct FeatureCombination {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeatureCombinations {
     pub bounds: RegionBounds,
-    /// Enrollment-derived minimum pair span in mean dark-ridge widths R.
-    pub min_pair_span_units: f64,
+    /// Enrollment-derived source geometry in mean dark-ridge widths R.
+    pub spatial: SpatialRequirements,
     /// Surviving candidates whose known priority meets the configured minimum.
     pub points: Vec<CombinationPoint>,
     /// Type/degree-preserved source identities whose priority is unavailable.
@@ -131,7 +132,7 @@ pub enum CombinationError {
     InvalidFingerprint(FingerprintError),
     PatternUnavailable,
     InsufficientPoints { required: usize, available: usize },
-    InsufficientSpan,
+    UncoverablePoint { region: usize, feature_id: usize },
     WorkLimit,
 }
 
@@ -151,9 +152,10 @@ impl fmt::Display for CombinationError {
                 )
             }
             Self::WorkLimit => f.write_str("feature combination work limit exceeded"),
-            Self::InsufficientSpan => {
-                f.write_str("no regional point pool contains a pair meeting the minimum span")
-            }
+            Self::UncoverablePoint { region, feature_id } => write!(
+                f,
+                "feature {feature_id} in region {region} cannot enter any valid spatial combination"
+            ),
         }
     }
 }
@@ -170,10 +172,10 @@ impl Error for CombinationError {
 /// Selects bounded, quality-ranked subsets in adaptive ridge-scale circles.
 ///
 /// Unknown scores and priorities below the configured minimum are excluded.
-/// Every selected pool point occurs in at least one valid subset. With a span
-/// requirement, a weaker spatial anchor can occur more often than stronger,
-/// compact neighbors. Otherwise stronger pool points occur no less often within
-/// that region. Regions can overlap. Identical input and controls
+/// Every selected pool point must occur in at least one valid subset; otherwise
+/// the complete operation fails with its region and source ID. Spatial anchors
+/// can occur more often than stronger, compact neighbors. Valid subsets retain
+/// their quality ordering. Regions can overlap. Identical input and controls
 /// reproduce the result; registration and stable candidate encoding are separate.
 /// Exceeding work limits returns an error, never a partial successful result.
 pub fn generate_combinations(
@@ -183,32 +185,29 @@ pub fn generate_combinations(
     config.validate()?;
     let mut work = WorkBudget::new(config.max_work);
     let (points, unscored_features) = collect_points(fingerprint, config.min_priority, &mut work)?;
-    if points.len() < config.min_points {
+    if points.len() < config.min_points.max(config.spatial.min_anchor_points) {
         return Err(CombinationError::InsufficientPoints {
-            required: config.min_points,
+            required: config.min_points.max(config.spatial.min_anchor_points),
             available: points.len(),
         });
     }
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
-    let min_pair_span_units =
-        derive_min_pair_span_units(bounds, fingerprint.scale.unit_px, config.min_span_fraction)?;
-    let minimum_px = span::pixels(min_pair_span_units, fingerprint.scale.unit_px)?;
+    let spatial = derive_spatial_requirements(bounds, fingerprint.scale.unit_px, &config.spatial)?;
+    let spatial_pixels = spatial.pixels(fingerprint.scale.unit_px)?;
     let mut regions = regions::select(
         &points,
         bounds,
         fingerprint.scale.unit_px,
         config,
-        minimum_px,
+        spatial_pixels,
         &mut work,
     )?;
-    if regions.is_empty() {
-        return Err(CombinationError::InsufficientSpan);
-    }
-    let combinations = collect_combinations(&points, &mut regions, config, minimum_px, &mut work)?;
+    let combinations =
+        collect_combinations(&points, &mut regions, config, spatial_pixels, &mut work)?;
 
     Ok(FeatureCombinations {
         bounds,
-        min_pair_span_units,
+        spatial,
         points,
         unscored_features,
         regions,
@@ -299,7 +298,7 @@ fn collect_combinations(
     points: &[CombinationPoint],
     regions: &mut [CombinationRegion],
     config: &CombinationConfig,
-    minimum_px: f64,
+    spatial: spatial::SpatialPixels,
     work: &mut WorkBudget,
 ) -> Result<Vec<FeatureCombination>, CombinationError> {
     let indexed: BTreeMap<_, _> = points.iter().map(|point| (point.id, point)).collect();
@@ -307,14 +306,21 @@ fn collect_combinations(
     for region in regions {
         let scores: Vec<_> = region.pool.iter().map(|id| indexed[id].priority).collect();
         let positions: Vec<_> = region.pool.iter().map(|id| indexed[id].position).collect();
-        let subsets = enumeration::enumerate_spread(
+        let selected = enumeration::enumerate_spatial(
             &scores,
             &positions,
             config.min_points,
             config.combinations_per_region,
-            minimum_px,
+            spatial,
             work,
         )?;
+        if let Some(&uncovered) = selected.uncovered.first() {
+            return Err(CombinationError::UncoverablePoint {
+                region: region.id,
+                feature_id: region.pool[uncovered],
+            });
+        }
+        let subsets = selected.subsets;
         region.combination_count = subsets.len();
         for subset in subsets {
             work.spend(subset.ranks.len())?;
@@ -365,6 +371,21 @@ impl WorkBudget {
 mod tests {
     use super::*;
 
+    fn permissive_policy() -> SpatialPolicy {
+        SpatialPolicy {
+            min_diameter_fraction: 0.0,
+            min_anchor_points: 1,
+            min_anchor_separation_fraction: 0.0,
+        }
+    }
+    fn permissive_requirements() -> SpatialRequirements {
+        SpatialRequirements {
+            min_diameter_units: 0.0,
+            min_anchor_points: 1,
+            min_anchor_separation_units: 0.0,
+        }
+    }
+
     fn threshold_fingerprint() -> (Fingerprint, Vec<usize>) {
         let size = 96;
         let pixels = (0..size * size)
@@ -394,7 +415,7 @@ mod tests {
         CombinationConfig {
             min_points: 1,
             min_priority,
-            min_span_fraction: 0.0,
+            spatial: permissive_policy(),
             pool_multiplier: 2,
             radius_units: 1000.0,
             combinations_per_region: 12,
@@ -406,12 +427,54 @@ mod tests {
         SigningSearchConfig {
             min_points: controls.min_points,
             min_priority: controls.min_priority,
-            min_pair_span_units: 0.0,
+            spatial: permissive_requirements(),
             radius_units: controls.radius_units,
             uncertainty_steps: 0,
             max_work: controls.max_work,
             max_descriptor_bytes: std::num::NonZeroUsize::new(4096).unwrap(),
         }
+    }
+
+    #[test]
+    fn anchor_count_must_fit_the_configured_pool_capacity() {
+        let mut config = threshold_config(0.0);
+        config.spatial.min_anchor_points = 3;
+        assert!(matches!(
+            config.validate(),
+            Err(CombinationError::InvalidConfig(_))
+        ));
+        config.pool_multiplier = 3;
+        assert!(config.validate().is_ok());
+        for fraction in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+            let mut invalid = config;
+            invalid.spatial.min_diameter_fraction = fraction;
+            assert!(invalid.validate().is_err());
+            invalid = config;
+            invalid.spatial.min_anchor_separation_fraction = fraction;
+            assert!(invalid.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn insufficient_anchor_points_are_reported_before_pattern_layout() {
+        let (mut fingerprint, _) = threshold_fingerprint();
+        fingerprint.scale.pattern_support.fill(false);
+        let mut config = threshold_config(1.0);
+        config.min_points = 2;
+        config.spatial.min_anchor_points = 3;
+        let expected = CombinationError::InsufficientPoints {
+            required: 3,
+            available: 1,
+        };
+        assert_eq!(
+            generate_combinations(&fingerprint, &config).unwrap_err(),
+            expected
+        );
+        let mut signing = signing_config(config);
+        signing.spatial.min_anchor_points = 3;
+        assert!(
+            matches!(prepare_signing_search(&fingerprint,&signing),Err(error) if error==expected)
+        );
     }
 
     #[test]
@@ -541,54 +604,6 @@ mod tests {
     }
 
     #[test]
-    fn enrollment_replaces_compact_pools_and_retains_the_derived_span_for_signing() {
-        let (mut fingerprint, ids) = threshold_fingerprint();
-        let mut controls = threshold_config(0.5);
-        controls.min_span_fraction = 1.0 / 3.0;
-        for (&id, x) in ids[2..].iter().zip([10.0, 11.0, 12.0]) {
-            fingerprint.feature_strength.candidates[id].position = Point::new(x, 10.0).unwrap();
-        }
-        assert_eq!(
-            generate_combinations(&fingerprint, &controls).unwrap_err(),
-            CombinationError::InsufficientSpan
-        );
-        fingerprint.feature_strength.candidates[ids[2]].position = Point::new(80.0, 10.0).unwrap();
-        let selected = generate_combinations(&fingerprint, &controls).unwrap();
-        assert_eq!(
-            selected.min_pair_span_units,
-            derive_min_pair_span_units(
-                selected.bounds,
-                fingerprint.scale.unit_px,
-                controls.min_span_fraction
-            )
-            .unwrap()
-        );
-        assert!(
-            selected
-                .regions
-                .iter()
-                .all(|region| region.pool == [ids[4], ids[2]])
-        );
-        assert!(
-            selected
-                .combinations
-                .iter()
-                .all(|combination| combination.feature_ids.len() == 2)
-        );
-        let mut signing = signing_config(controls);
-        signing.min_pair_span_units = selected.min_pair_span_units;
-        let mut search = prepare_signing_search(&fingerprint, &signing).unwrap();
-        search.next().unwrap().unwrap();
-        assert_eq!(search.last_feature_ids(), [ids[2], ids[4]]);
-
-        controls.pool_multiplier = 1;
-        assert_eq!(
-            generate_combinations(&fingerprint, &controls).unwrap_err(),
-            CombinationError::InsufficientSpan
-        );
-    }
-
-    #[test]
     fn smaller_global_pool_uses_every_available_point_and_exhausts_subsets() {
         let points: Vec<_> = (0..4)
             .map(|id| CombinationPoint {
@@ -605,7 +620,7 @@ mod tests {
         let config = CombinationConfig {
             min_points: 3,
             min_priority: 0.0,
-            min_span_fraction: 0.0,
+            spatial: permissive_policy(),
             pool_multiplier: 2,
             radius_units: 1.0,
             combinations_per_region: 12,
@@ -613,15 +628,29 @@ mod tests {
         };
         config.validate().unwrap();
         let mut work = WorkBudget::new(config.max_work);
-        let mut regions = regions::select(&points, bounds, 1.0, &config, 0.0, &mut work).unwrap();
+        let mut regions = regions::select(
+            &points,
+            bounds,
+            1.0,
+            &config,
+            permissive_requirements().pixels(1.0).unwrap(),
+            &mut work,
+        )
+        .unwrap();
         let region_count = regions.len();
         assert!(
             regions
                 .iter()
                 .all(|region| region.pool == [0, 1, 2, 3] && region.radius > region.initial_radius)
         );
-        let combinations =
-            collect_combinations(&points, &mut regions, &config, 0.0, &mut work).unwrap();
+        let combinations = collect_combinations(
+            &points,
+            &mut regions,
+            &config,
+            permissive_requirements().pixels(1.0).unwrap(),
+            &mut work,
+        )
+        .unwrap();
         assert_eq!(combinations.len(), 5);
         assert!(regions.iter().all(|region| region.combination_count == 5));
         assert!(

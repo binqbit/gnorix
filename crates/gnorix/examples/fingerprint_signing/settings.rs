@@ -41,6 +41,18 @@ pub(super) fn read(package: &EnrollmentPackage) -> Result<Controls> {
         combination.combinations_per_region,
     )?;
     require_override(
+        "GNORIX_COMBINATION_MIN_DIAMETER_FRACTION",
+        combination.spatial.min_diameter_fraction,
+    )?;
+    require_override(
+        "GNORIX_COMBINATION_MIN_ANCHOR_POINTS",
+        combination.spatial.min_anchor_points,
+    )?;
+    require_override(
+        "GNORIX_COMBINATION_MIN_ANCHOR_SEPARATION_FRACTION",
+        combination.spatial.min_anchor_separation_fraction,
+    )?;
+    require_override(
         "GNORIX_GRID_UNCERTAINTY_STEPS",
         retained.uncertainty_steps(),
     )?;
@@ -48,7 +60,7 @@ pub(super) fn read(package: &EnrollmentPackage) -> Result<Controls> {
         min_points: combination.min_points,
         min_priority: combination.min_priority,
         radius_units: combination.radius_units,
-        min_pair_span_units: retained.min_pair_span_units(),
+        spatial: retained.spatial(),
         uncertainty_steps: retained.uncertainty_steps(),
         max_work: work,
         max_descriptor_bytes: nonzero(1024 * 1024)?,

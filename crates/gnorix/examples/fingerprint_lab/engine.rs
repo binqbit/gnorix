@@ -12,6 +12,7 @@ use gnorix::{
     biometrics::fingerprint::{
         self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind,
         GridBaselineConfig, GridBaselines, GridShapeError, SigningSearch, SigningSearchConfig,
+        SpatialRequirements,
     },
     crypto::SignatureVerifier,
     enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
@@ -61,7 +62,7 @@ struct Enrolled {
     config: LabConfig,
     authorization: Option<Authorization>,
     unit_px: f64,
-    min_pair_span_units: f64,
+    spatial: SpatialRequirements,
 }
 
 struct ArtifactFrame {
@@ -240,10 +241,18 @@ impl Engine {
             work_limit: request.work_limit,
             artifact_revision: request.artifact_revision,
             unit_px: extracted.scale.unit_px,
-            min_pair_span_units: self
+            spatial: self
                 .enrolled
                 .as_ref()
-                .map_or(0.0, |enrolled| enrolled.min_pair_span_units),
+                .map_or(
+                    SpatialRequirements {
+                        min_diameter_units: 0.0,
+                        min_anchor_points: request.config.min_anchor_points,
+                        min_anchor_separation_units: 0.0,
+                    },
+                    |enrolled| enrolled.spatial,
+                )
+                .into(),
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 0,
@@ -271,11 +280,11 @@ impl Engine {
                 })
                 .collect();
             view.combination_count = combinations.combinations.len();
-            view.min_pair_span_units = combinations.min_pair_span_units;
+            view.spatial = combinations.spatial.into();
             let parameters = ProfileParameters::new(
                 &combination_config,
                 request.config.uncertainty_steps,
-                combinations.min_pair_span_units,
+                combinations.spatial,
             )?;
             let budget = enrollment_budget.ok_or("enrollment memory budget missing")?;
             let grid = prepare_enrollment_grid(
@@ -301,7 +310,11 @@ impl Engine {
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
                     min_priority: request.config.min_priority,
-                    min_pair_span_units: view.min_pair_span_units,
+                    spatial: self
+                        .enrolled
+                        .as_ref()
+                        .ok_or("enrollment spatial requirements missing")?
+                        .spatial,
                     radius_units: request.config.radius_units,
                     uncertainty_steps: request.config.uncertainty_steps,
                     max_work: request.work_limit,
@@ -388,7 +401,7 @@ impl Engine {
             restored.commitment().context.profile_id,
         )?;
         let view = EnrollmentView {
-            min_pair_span_units: retained.min_pair_span_units(),
+            spatial: retained.spatial().into(),
             root: hex(&restored.commitment().root.0),
             leaf_count: restored.commitment().leaf_count,
             config: prepared.view.config,
@@ -405,7 +418,7 @@ impl Engine {
             config: prepared.view.config,
             authorization: None,
             unit_px: prepared.view.unit_px,
-            min_pair_span_units: retained.min_pair_span_units(),
+            spatial: retained.spatial(),
         });
         Ok(())
     }
@@ -805,6 +818,14 @@ fn error_detail(error: &(dyn StdError + 'static)) -> String {
 mod tests {
     use super::*;
 
+    fn test_spatial_requirements(config: LabConfig) -> SpatialRequirements {
+        SpatialRequirements {
+            min_diameter_units: config.min_diameter_fraction * 3.0,
+            min_anchor_points: config.min_anchor_points,
+            min_anchor_separation_units: config.min_anchor_separation_fraction * 3.0,
+        }
+    }
+
     #[test]
     fn repeated_enrollment_rechecks_memory_without_requiring_new_preparation() {
         let directory = std::env::temp_dir().join(format!(
@@ -842,7 +863,7 @@ mod tests {
             work_limit: MAX_WORK,
             artifact_revision: None,
             unit_px: 4.0,
-            min_pair_span_units: 1.0,
+            spatial: test_spatial_requirements(config).into(),
             points: Vec::new(),
             regions: Vec::new(),
             combination_count: 1,
@@ -854,7 +875,7 @@ mod tests {
         let parameters = ProfileParameters::new(
             &config.combinations().unwrap(),
             config.uncertainty_steps,
-            1.0,
+            test_spatial_requirements(config),
         )
         .unwrap();
         engine.prepared = Some(Prepared {
@@ -896,17 +917,20 @@ mod tests {
     }
 
     fn enrolled_engine() -> Engine {
+        enrolled_engine_with_config(LabConfig::default())
+    }
+
+    fn enrolled_engine_with_config(config: LabConfig) -> Engine {
         let source =
             GrayImage::from_fn(64, 80, |x, y| image::Luma([((x * 7 + y * 13) % 256) as u8]));
         let mut engine = Engine::new(source, PathBuf::new()).unwrap();
-        let config = LabConfig::default();
         let limits = limits(1).unwrap();
         let candidate = gnorix::biometrics::Candidate::new(vec![7; 32]).unwrap();
         let candidates = Box::new(std::iter::once(Ok(candidate)));
         let parameters = ProfileParameters::new(
             &config.combinations().unwrap(),
             config.uncertainty_steps,
-            1.0,
+            test_spatial_requirements(config),
         )
         .unwrap();
         let enrollment = enrollment::enroll_candidates(
@@ -922,7 +946,7 @@ mod tests {
             .with_profile_parameters(parameters.encoded().to_vec(), &limits)
             .unwrap();
         engine.data.enrollment = Some(EnrollmentView {
-            min_pair_span_units: 1.0,
+            spatial: test_spatial_requirements(config).into(),
             root: hex(&package.commitment().root.0),
             leaf_count: package.commitment().leaf_count,
             config,
@@ -932,7 +956,7 @@ mod tests {
             config,
             authorization: None,
             unit_px: 5.0,
-            min_pair_span_units: 1.0,
+            spatial: test_spatial_requirements(config),
         });
         engine
     }
@@ -994,6 +1018,54 @@ mod tests {
         assert_ne!(engine.data.artifact.seed, previous_seed);
         assert_eq!(engine.frame.image, source);
         assert_eq!(engine.data.enrollment.as_ref().unwrap().root, root);
+    }
+
+    #[test]
+    fn a_fresh_capture_uses_spatial_requirements_restored_from_the_enrollment() {
+        let config = LabConfig {
+            min_priority: 0.0,
+            ..LabConfig::default()
+        };
+        let mut engine = enrolled_engine_with_config(config);
+        let retained = engine.enrolled.as_ref().unwrap().spatial;
+        let package = &engine.enrolled.as_ref().unwrap().package;
+        let restored = ProfileParameters::decode(
+            package.profile_parameters().unwrap(),
+            package.commitment().context.profile_id,
+        )
+        .unwrap();
+        assert_eq!(restored.spatial(), retained);
+
+        let source =
+            image::load_from_memory(include_bytes!("../../tests/assets/test-fingerprint.png"))
+                .unwrap()
+                .to_luma8();
+        engine.source = source.clone();
+        engine.frame = ArtifactFrame::new(source, 0, 0, 1, Some(5.0)).unwrap();
+        engine
+            .prepare(
+                PrepareRequest {
+                    kind: "signing".into(),
+                    config,
+                    selection: Some(Circle {
+                        x: 543.0,
+                        y: 724.0,
+                        radius: 500.0,
+                    }),
+                    work_limit: MAX_WORK,
+                    artifact_revision: Some(0),
+                    memory_budget_gib: DEFAULT_MEMORY_GIB,
+                },
+                |_| {},
+            )
+            .unwrap();
+        let prepared = engine.data.prepared.as_ref().unwrap();
+        assert_eq!(prepared.spatial, retained.into());
+        assert_ne!(prepared.unit_px, 5.0);
+        assert_eq!(
+            engine.data.enrollment.as_ref().unwrap().spatial,
+            retained.into()
+        );
     }
 
     #[test]
@@ -1151,6 +1223,29 @@ mod tests {
         assert!(validate_work(0).is_err());
         assert!(validate_work(MAX_WORK + 1).is_err());
         assert!(validate_payload(&"a".repeat(16 * 1024 + 1)).is_err());
+    }
+
+    #[test]
+    fn every_spatial_policy_change_requires_a_new_enrollment() {
+        let enrolled = LabConfig::default();
+        assert!(require_config(enrolled, enrolled).is_ok());
+        for changed in [
+            LabConfig {
+                min_diameter_fraction: 0.4,
+                ..enrolled
+            },
+            LabConfig {
+                min_anchor_points: 4,
+                ..enrolled
+            },
+            LabConfig {
+                min_anchor_separation_fraction: 0.2,
+                ..enrolled
+            },
+        ] {
+            changed.validate().unwrap();
+            assert!(require_config(enrolled, changed).is_err());
+        }
     }
 
     #[test]

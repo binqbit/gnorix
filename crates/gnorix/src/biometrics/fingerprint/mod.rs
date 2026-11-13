@@ -36,8 +36,8 @@ pub use cleanup::{
 pub use combinations::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FeatureCombination,
     FeatureCombinations, RegionBounds, SigningRegion, SigningSearch, SigningSearchConfig,
-    derive_min_pair_span_units, generate_combinations, prepare_signing_search,
-    satisfies_min_pair_span, signing_candidates,
+    SpatialPolicy, SpatialRequirements, derive_spatial_requirements, generate_combinations,
+    prepare_signing_search, satisfies_spatial_requirements, signing_candidates,
 };
 pub use enhancement::LocalPalette;
 pub use features::{

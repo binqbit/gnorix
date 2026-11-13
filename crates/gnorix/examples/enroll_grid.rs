@@ -6,6 +6,8 @@ mod enrollment_profile;
 mod input;
 #[path = "support/output.rs"]
 mod output;
+#[path = "enroll_grid/policy.rs"]
+mod policy;
 #[path = "support/example_crypto.rs"]
 mod provider;
 #[path = "support/secret_input.rs"]
@@ -66,7 +68,7 @@ fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment>
     let spec = settings::read_context(&mut File::open(context_path)?)?;
     let secret = secret_input::read_secret(spec.secret_policy)?;
     let input = input::read(&mut File::open(input_path)?, MAX_JSON_BYTES)?;
-    let parameters = settings::parameters(&input, &config)?;
+    let parameters = policy::parameters(&input, &config)?;
     let context = EnrollmentContext {
         spec,
         profile_id: parameters.profile_id(),

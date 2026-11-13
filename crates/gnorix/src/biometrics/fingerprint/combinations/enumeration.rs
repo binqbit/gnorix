@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::collections::BinaryHeap;
 
-use super::{CombinationError, Point, WorkBudget, span};
+use super::{CombinationError, Point, WorkBudget, spatial};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct RankedSubset {
@@ -98,68 +98,96 @@ pub(super) fn enumerate(
     Ok(selected)
 }
 
-/// Keep coverage while spending the output budget only on spatially valid sets.
-pub(super) fn enumerate_spread(
+pub(super) struct SpatialCoverage {
+    pub subsets: Vec<RankedSubset>,
+    pub uncovered: Vec<usize>,
+}
+
+/// Find quality-ordered valid witnesses, stopping once every pool point is covered.
+/// An exhausted pool may contain valid subsets while still having uncovered points.
+pub(super) fn coverage_spatial(
+    priorities: &[f64],
+    positions: &[Point],
+    minimum: usize,
+    policy: spatial::SpatialPixels,
+    work: &mut WorkBudget,
+) -> Result<SpatialCoverage, CombinationError> {
+    work.spend(priorities.len())?;
+    let mut covered = vec![false; priorities.len()];
+    let mut remaining = priorities.len();
+    let mut selected = Vec::new();
+    let minimum = minimum.max(policy.anchors);
+    if minimum <= priorities.len() {
+        let mut ranked = RankedSubsets::new(priorities, minimum, priorities.len(), work)?;
+        while let Some(subset) = ranked.next(priorities, work)? {
+            if !spatial::subset(positions, &subset.ranks, policy, work)? {
+                continue;
+            }
+            let mut adds_coverage = false;
+            for &rank in &subset.ranks {
+                work.spend(1)?;
+                if !covered[rank] {
+                    covered[rank] = true;
+                    remaining -= 1;
+                    adds_coverage = true;
+                }
+            }
+            if adds_coverage {
+                selected.push(subset);
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+    }
+    let uncovered = covered
+        .into_iter()
+        .enumerate()
+        .filter_map(|(rank, present)| (!present).then_some(rank))
+        .collect();
+    Ok(SpatialCoverage {
+        subsets: selected,
+        uncovered,
+    })
+}
+
+/// Spend output slots only on valid sets; retain coverage before filling by score.
+pub(super) fn enumerate_spatial(
     priorities: &[f64],
     positions: &[Point],
     minimum: usize,
     budget: usize,
-    minimum_span: f64,
+    policy: spatial::SpatialPixels,
     work: &mut WorkBudget,
-) -> Result<Vec<RankedSubset>, CombinationError> {
-    if minimum_span == 0.0 {
-        return enumerate(priorities, minimum, budget, work);
-    }
+) -> Result<SpatialCoverage, CombinationError> {
     validate_limits(priorities.len(), minimum, budget)?;
-    let mut selected = Vec::new();
+    if policy.unconstrained() {
+        return Ok(SpatialCoverage {
+            subsets: enumerate(priorities, minimum, budget, work)?,
+            uncovered: Vec::new(),
+        });
+    }
+    let mut coverage = coverage_spatial(priorities, positions, minimum, policy, work)?;
+    if !coverage.uncovered.is_empty() {
+        return Ok(coverage);
+    }
+    let selected = &mut coverage.subsets;
     let mut seen = BTreeSet::new();
-    for seed in coverage_subsets(priorities, minimum, work)? {
-        let ranks = if span::subset(positions, &seed.ranks, minimum_span, work)? {
-            seed.ranks
-        } else {
-            span::coverage(
-                positions,
-                priorities,
-                *seed.ranks.last().unwrap(),
-                minimum,
-                minimum_span,
-                work,
-            )?
-        };
-        work.spend(ranks.len())?;
-        if seen.insert(ranks.clone()) {
-            selected.push(ranked_subset(priorities, ranks));
-        }
+    for subset in selected.iter() {
+        work.spend(subset.ranks.len())?;
+        seen.insert(subset.ranks.clone());
     }
-    // Replacement seeds cover their final point, but can omit an earlier prefix
-    // point. Give every uncovered pool point its own valid coverage seed.
-    for required in 0..priorities.len() {
-        for subset in &selected {
-            work.spend(subset.ranks.len())?;
-        }
-        if selected
-            .iter()
-            .any(|subset| subset.ranks.contains(&required))
-        {
-            continue;
-        }
-        let ranks = span::coverage(positions, priorities, required, minimum, minimum_span, work)?;
-        work.spend(ranks.len())?;
-        if seen.insert(ranks.clone()) {
-            selected.push(ranked_subset(priorities, ranks));
-        }
-    }
-    if selected.len() > budget {
-        return Err(CombinationError::InvalidConfig(
-            "subset budget cannot cover spatially valid pool points",
-        ));
-    }
-    let mut ranked = RankedSubsets::new(priorities, minimum.max(2), priorities.len(), work)?;
+    let mut ranked = RankedSubsets::new(
+        priorities,
+        minimum.max(policy.anchors),
+        priorities.len(),
+        work,
+    )?;
     while selected.len() < budget {
         let Some(subset) = ranked.next(priorities, work)? else {
             break;
         };
-        if !span::subset(positions, &subset.ranks, minimum_span, work)? {
+        if !spatial::subset(positions, &subset.ranks, policy, work)? {
             continue;
         }
         work.spend(subset.ranks.len())?;
@@ -168,7 +196,7 @@ pub(super) fn enumerate_spread(
         }
     }
     selected.sort_unstable_by(compare_subsets);
-    Ok(selected)
+    Ok(coverage)
 }
 
 fn validate_limits(
@@ -383,151 +411,6 @@ mod tests {
         }
         assert!(counts.iter().all(|&count| count > 0));
         assert!(counts.windows(2).all(|pair| pair[0] >= pair[1]));
-    }
-
-    #[test]
-    fn span_filter_fills_only_valid_subsets_and_covers_every_pool_point() {
-        for size in 2..=7 {
-            let priorities: Vec<_> = (0..size).map(|i| 1.0 - i as f64 / size as f64).collect();
-            let cases: Vec<Vec<Point>> = vec![
-                (0..size)
-                    .map(|i| Point::new(i as f64, 0.0).unwrap())
-                    .collect(),
-                (0..size)
-                    .map(|i| {
-                        Point::new(if i + 1 == size { 10.0 } else { i as f64 * 0.01 }, 0.0).unwrap()
-                    })
-                    .collect(),
-                (0..size)
-                    .map(|i| {
-                        let angle = i as f64 * 2.1;
-                        Point::new(angle.cos() * 3.0, angle.sin() * 3.0).unwrap()
-                    })
-                    .collect(),
-            ];
-            for positions in cases {
-                for minimum in 1..=size {
-                    let mut expected: Vec<_> = (1usize..1 << size)
-                        .filter_map(|mask| {
-                            let ranks: Vec<_> =
-                                (0..size).filter(|rank| mask & (1 << rank) != 0).collect();
-                            if ranks.len() < minimum
-                                || !span::subset(
-                                    &positions,
-                                    &ranks,
-                                    1.0,
-                                    &mut WorkBudget::new(1000),
-                                )
-                                .unwrap()
-                            {
-                                return None;
-                            }
-                            Some(ranked_subset(&priorities, ranks))
-                        })
-                        .collect();
-                    expected.sort_by(compare_subsets);
-                    let seed_budget = size - minimum + 1;
-                    for budget in [
-                        seed_budget,
-                        seed_budget + 1,
-                        expected.len().max(seed_budget),
-                    ] {
-                        let actual = enumerate_spread(
-                            &priorities,
-                            &positions,
-                            minimum,
-                            budget,
-                            1.0,
-                            &mut WorkBudget::new(1_000_000),
-                        )
-                        .unwrap();
-                        assert_eq!(actual.len(), budget.min(expected.len()));
-                        assert!(actual.iter().all(|item| expected.contains(item)));
-                        assert!(
-                            actual.windows(2).all(
-                                |pair| compare_subsets(&pair[0], &pair[1]) != Ordering::Greater
-                            )
-                        );
-                        assert!(
-                            (0..size)
-                                .all(|rank| actual.iter().any(|item| item.ranks.contains(&rank)))
-                        );
-                        if budget >= expected.len() {
-                            assert_eq!(actual, expected);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn required_far_anchor_can_outnumber_stronger_compact_points() {
-        let positions = [
-            Point::new(0.0, 0.0).unwrap(),
-            Point::new(0.1, 0.0).unwrap(),
-            Point::new(10.0, 0.0).unwrap(),
-        ];
-        let actual = enumerate_spread(
-            &[1.0, 0.8, 0.5],
-            &positions,
-            2,
-            3,
-            5.0,
-            &mut WorkBudget::new(10_000),
-        )
-        .unwrap();
-        assert_eq!(actual.len(), 3);
-        assert_eq!(
-            actual.iter().filter(|item| item.ranks.contains(&2)).count(),
-            3
-        );
-        assert_eq!(
-            actual.iter().filter(|item| item.ranks.contains(&0)).count(),
-            2
-        );
-    }
-
-    #[test]
-    fn minimal_output_budgets_cover_small_exhaustive_spatial_pools() {
-        let locations = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0)];
-        for size in 2..=5 {
-            let priorities: Vec<_> = (0..size).map(|i| 1.0 - i as f64 / size as f64).collect();
-            for mut pattern in 0..4_usize.pow(size as u32) {
-                let positions: Vec<_> = (0..size)
-                    .map(|_| {
-                        let (x, y) = locations[pattern % 4];
-                        pattern /= 4;
-                        Point::new(x, y).unwrap()
-                    })
-                    .collect();
-                if !span::subset(
-                    &positions,
-                    &(0..size).collect::<Vec<_>>(),
-                    1.5,
-                    &mut WorkBudget::new(100),
-                )
-                .unwrap()
-                {
-                    continue;
-                }
-                for minimum in 1..=size {
-                    let selected = enumerate_spread(
-                        &priorities,
-                        &positions,
-                        minimum,
-                        size - minimum + 1,
-                        1.5,
-                        &mut WorkBudget::new(100_000),
-                    )
-                    .unwrap();
-                    assert!(
-                        (0..size)
-                            .all(|rank| selected.iter().any(|subset| subset.ranks.contains(&rank)))
-                    );
-                }
-            }
-        }
     }
 
     #[test]

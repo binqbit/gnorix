@@ -51,7 +51,7 @@ The output file must not already exist. The adapter reads the combination export
 
 The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
-With `min_priority = 0.5` and the one-third span rule, the checked-in fixture supplies 48 valid subsets at radius 30R: 28 triples, 16 quadruples and four quintuples. The checked level-1 diagnostic export traverses **115,248 assignments** with no collisions, while enrollment uses only the **48 baselines**, before duplicate-key removal. The Cartesian count describes positional alternatives searched later, not the number of registered keys.
+With `min_priority = 0.5` and the initial [anchor policy](feature-combinations.md#spatial-policy), the checked-in fixture supplies 48 valid subsets at radius 30R: 25 triples, 16 quadruples, five quintuples and two six-point sets. The level-1 diagnostic export traverses **366,324 assignments** with no collisions, while enrollment uses only the **48 baselines**, before duplicate-key removal. The Cartesian count describes positional alternatives searched later, not registered keys. All 23 subsets shared with the prior pair-span report retained exactly the same frame, phase, aligned coordinates, snapped nodes and baseline.
 
 ## Interpretation
 

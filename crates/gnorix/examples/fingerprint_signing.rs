@@ -69,7 +69,10 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
     let candidates = fingerprint::prepare_signing_search(&fingerprint, &controls.search)?;
     let point_count = candidates.points().len();
     let region_count = candidates.regions().len();
-    let min_pair_span_units = controls.search.min_pair_span_units;
+    let spatial = controls.search.spatial;
+    let min_diameter_units = spatial.min_diameter_units;
+    let min_anchor_points = spatial.min_anchor_points;
+    let min_anchor_separation_units = spatial.min_anchor_separation_units;
     let attempted = Cell::new(0_usize);
     let counted = Box::new(candidates.inspect(|result| {
         if result.is_ok() {
@@ -89,7 +92,7 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
         Ok(signed) => signed,
         Err(error) => {
             eprintln!(
-                "search failed after generating {} candidates; {point_count} eligible features; {region_count} regions; minimum pair span {min_pair_span_units:.6}R: {error}",
+                "search failed after generating {} candidates; {point_count} eligible features; {region_count} regions; minimum diameter {min_diameter_units:.6}R; at least {min_anchor_points} anchors separated by at least {min_anchor_separation_units:.6}R: {error}",
                 attempted.get(),
             );
             return Err(error.into());
@@ -97,7 +100,7 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
     };
     publish_verified(&package, &action, &signed, output_path, &limits)?;
     println!(
-        "first matching key after {} candidates; {point_count} eligible features; {region_count} regions; minimum pair span {min_pair_span_units:.6}R; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
+        "first matching key after {} candidates; {point_count} eligible features; {region_count} regions; minimum diameter {min_diameter_units:.6}R; at least {min_anchor_points} anchors separated by at least {min_anchor_separation_units:.6}R; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
         attempted.get(),
         output_path.display(),
     );

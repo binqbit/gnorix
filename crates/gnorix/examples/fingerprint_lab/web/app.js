@@ -3,6 +3,9 @@ const NS = "http://www.w3.org/2000/svg";
 const configFields = {
     min_points: "min-points",
     min_priority: "min-priority",
+    min_diameter_fraction: "min-diameter-fraction",
+    min_anchor_points: "min-anchor-points",
+    min_anchor_separation_fraction: "min-anchor-separation-fraction",
     pool_multiplier: "pool-multiplier",
     radius_units: "radius-units",
     combinations_per_region: "per-region",
@@ -10,6 +13,7 @@ const configFields = {
 };
 const integerFields = new Set([
     "min_points",
+    "min_anchor_points",
     "pool_multiplier",
     "combinations_per_region",
     "uncertainty_steps",
@@ -86,6 +90,8 @@ function validConfig() {
     }
     const config = readConfig();
     return (
+        config.min_anchor_points <= config.min_points * config.pool_multiplier &&
+        config.min_anchor_points <= 2 * config.min_points &&
         config.combinations_per_region >=
         config.min_points * (config.pool_multiplier - 1) + 1
     );
@@ -737,17 +743,16 @@ function render() {
         Boolean(enrollment && !registered),
     );
     $("config-help").textContent = !valid
-        ? "Cover the pool: combinations / region ≥ n × (multiplier − 1) + 1. Check the value limits too."
+        ? "Anchors must fit the pool and the 2n signing limit. Combinations / region ≥ n × (multiplier − 1) + 1; check value limits too."
         : enrollment && !registered
           ? "These settings differ from the enrolled set. Prepare and create a new set, or restore the previous settings."
           : "Only features at or above the minimum priority enter key combinations. R is the mean dark-ridge width. Changing these settings requires a new Merkle set.";
-    const minimumSpan =
-        prepared?.min_pair_span_units ??
-        (registered ? enrollment?.min_pair_span_units : null);
+    const spatial =
+        prepared?.spatial ?? (registered ? enrollment?.spatial : null);
     $("minimum-span").textContent =
-        minimumSpan == null
-            ? "Each combination needs a pair spanning at least one third of the enrollment pattern's shorter side. Measured during enrollment preparation."
-            : `Minimum point span: ${format.format(minimumSpan)}R · one third of the enrolled pattern's shorter side. The same distance in R applies when signing a fragment.`;
+        spatial == null
+            ? "D and d are fractions of the enrolled pattern's shorter side. Additional points must lie inside or on the anchors' convex hull. Distances are measured during enrollment preparation."
+            : `D ≥ ${format.format(spatial.min_diameter_units)}R · at least ${countLabel(spatial.min_anchor_points, "anchor")} with every pair separated by d ≥ ${format.format(spatial.min_anchor_separation_units)}R. Additional points stay inside or on their convex hull. These distances in R are retained for signing fragments.`;
     $("merkle-root").textContent = enrollment?.root ?? "No set created yet";
     $("leaf-count").textContent = enrollment
         ? countLabel(enrollment.leaf_count, "key")

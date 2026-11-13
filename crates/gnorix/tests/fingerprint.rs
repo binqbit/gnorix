@@ -213,7 +213,11 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     let config = fingerprint::CombinationConfig {
         min_points: 3,
         min_priority: 0.0,
-        min_span_fraction: 0.0,
+        spatial: fingerprint::SpatialPolicy {
+            min_diameter_fraction: 0.0,
+            min_anchor_points: 1,
+            min_anchor_separation_fraction: 0.0,
+        },
         pool_multiplier: 2,
         radius_units: 30.0,
         combinations_per_region: 12,

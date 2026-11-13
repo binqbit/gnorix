@@ -1,15 +1,18 @@
 //! Explicit regional enrollment controls shared by the local examples.
 
-use gnorix::biometrics::fingerprint::CombinationConfig;
+use gnorix::biometrics::fingerprint::{CombinationConfig, SpatialPolicy};
 use std::{collections::BTreeMap, env, error::Error, str::FromStr};
 
-pub(super) const ENVIRONMENT: [&str; 6] = [
+pub(super) const ENVIRONMENT: [&str; 9] = [
     "GNORIX_COMBINATION_MIN_POINTS",
     "GNORIX_COMBINATION_POOL_MULTIPLIER",
     "GNORIX_COMBINATION_RADIUS_UNITS",
     "GNORIX_COMBINATION_PER_REGION",
     "GNORIX_COMBINATION_MAX_WORK",
     "GNORIX_COMBINATION_MIN_PRIORITY",
+    "GNORIX_COMBINATION_MIN_DIAMETER_FRACTION",
+    "GNORIX_COMBINATION_MIN_ANCHOR_POINTS",
+    "GNORIX_COMBINATION_MIN_ANCHOR_SEPARATION_FRACTION",
 ];
 
 pub(super) fn read() -> Result<CombinationConfig, Box<dyn Error + Send + Sync>> {
@@ -35,13 +38,29 @@ pub(super) fn parse_configuration<'a>(
     let config = CombinationConfig {
         min_points: number(ENVIRONMENT[0], value(ENVIRONMENT[0]), 3)?,
         min_priority: number(ENVIRONMENT[5], value(ENVIRONMENT[5]), 0.5)?,
-        min_span_fraction: 1.0 / 3.0,
+        spatial: SpatialPolicy {
+            min_diameter_fraction: number(ENVIRONMENT[6], value(ENVIRONMENT[6]), 1.0 / 3.0)?,
+            min_anchor_points: number(ENVIRONMENT[7], value(ENVIRONMENT[7]), 3)?,
+            min_anchor_separation_fraction: number(
+                ENVIRONMENT[8],
+                value(ENVIRONMENT[8]),
+                1.0 / 6.0,
+            )?,
+        },
         pool_multiplier: number(ENVIRONMENT[1], value(ENVIRONMENT[1]), 2)?,
         radius_units: number(ENVIRONMENT[2], value(ENVIRONMENT[2]), 30.0)?,
         combinations_per_region: number(ENVIRONMENT[3], value(ENVIRONMENT[3]), 12)?,
         max_work: number(ENVIRONMENT[4], value(ENVIRONMENT[4]), 10_000_000)?,
     };
     config.validate()?;
+    if config.spatial.min_anchor_points
+        > config
+            .min_points
+            .checked_mul(2)
+            .ok_or("signing subset capacity overflow")?
+    {
+        return Err("anchor count exceeds the signing subset capacity".into());
+    }
     Ok(config)
 }
 

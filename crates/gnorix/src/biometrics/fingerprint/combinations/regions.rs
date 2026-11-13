@@ -7,7 +7,7 @@ mod tests;
 
 use super::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, Fingerprint,
-    FingerprintError, Point, RegionBounds, WorkBudget, span,
+    FingerprintError, Point, RegionBounds, WorkBudget, enumeration, spatial,
 };
 
 pub(super) struct RegionCandidates {
@@ -91,7 +91,7 @@ pub(super) fn select(
     bounds: RegionBounds,
     unit_px: f64,
     config: &CombinationConfig,
-    minimum_span: f64,
+    spatial: spatial::SpatialPixels,
     work: &mut WorkBudget,
 ) -> Result<Vec<CombinationRegion>, CombinationError> {
     let target = config
@@ -102,23 +102,109 @@ pub(super) fn select(
     circular_regions(points, bounds, unit_px, config.radius_units, target, work)?
         .into_iter()
         .map(|region| {
-            work.spend(target)?;
-            let Some(indices) = span::pool(points, &region.indices, target, minimum_span, work)?
-            else {
-                return Ok(None);
-            };
-            Ok(Some(CombinationRegion {
+            let pool = select_pool(points, &region, config, target, spatial, work)?;
+            Ok(CombinationRegion {
                 id: region.id,
                 center: region.center,
                 initial_radius: region.initial_radius,
                 radius: region.radius,
                 available_points: region.indices.len(),
-                pool: indices.into_iter().map(|index| points[index].id).collect(),
+                pool: pool.into_iter().map(|index| points[index].id).collect(),
                 combination_count: 0,
-            }))
+            })
         })
-        .filter_map(|result| result.transpose())
         .collect()
+}
+
+fn pool_data(
+    points: &[CombinationPoint],
+    indices: &[usize],
+    work: &mut WorkBudget,
+) -> Result<(Vec<f64>, Vec<Point>), CombinationError> {
+    work.spend(indices.len())?;
+    work.spend(indices.len())?;
+    Ok((
+        indices
+            .iter()
+            .map(|&index| points[index].priority)
+            .collect(),
+        indices
+            .iter()
+            .map(|&index| points[index].position)
+            .collect(),
+    ))
+}
+
+/// Never discard an uncovered selected point. Rescue is allowed only when the
+/// original top-priority pool has no valid subset at all.
+fn select_pool(
+    points: &[CombinationPoint],
+    region: &RegionCandidates,
+    config: &CombinationConfig,
+    target: usize,
+    spatial: spatial::SpatialPixels,
+    work: &mut WorkBudget,
+) -> Result<Vec<usize>, CombinationError> {
+    let top = &region.indices[..target];
+    if spatial.unconstrained() {
+        work.spend(target)?;
+        return Ok(top.to_vec());
+    }
+    let failure = |index: usize| CombinationError::UncoverablePoint {
+        region: region.id,
+        feature_id: points[index].id,
+    };
+    if spatial.anchors > target {
+        return Err(failure(top[0]));
+    }
+    let (priorities, positions) = pool_data(points, top, work)?;
+    let coverage =
+        enumeration::coverage_spatial(&priorities, &positions, config.min_points, spatial, work)?;
+    if coverage.uncovered.is_empty() {
+        work.spend(target)?;
+        return Ok(top.to_vec());
+    }
+    if !coverage.subsets.is_empty() {
+        return Err(failure(top[coverage.uncovered[0]]));
+    }
+    let (priorities, positions) = pool_data(points, &region.indices, work)?;
+    let mut ranked = enumeration::RankedSubsets::new(
+        &priorities,
+        config.min_points.max(spatial.anchors),
+        target,
+        work,
+    )?;
+    while let Some(seed) = ranked.next(&priorities, work)? {
+        if !spatial::subset(&positions, &seed.ranks, spatial, work)? {
+            continue;
+        }
+        work.spend(region.indices.len())?;
+        let mut ranks = seed.ranks;
+        for rank in 0..region.indices.len() {
+            if ranks.len() == target {
+                break;
+            }
+            work.spend(ranks.len() + 1)?;
+            if !ranks.contains(&rank) {
+                ranks.push(rank);
+            }
+        }
+        ranks.sort_unstable();
+        let pool: Vec<_> = ranks.into_iter().map(|rank| region.indices[rank]).collect();
+        let (priorities, positions) = pool_data(points, &pool, work)?;
+        let coverage = enumeration::coverage_spatial(
+            &priorities,
+            &positions,
+            config.min_points,
+            spatial,
+            work,
+        )?;
+        if let Some(&uncovered) = coverage.uncovered.first() {
+            return Err(failure(pool[uncovered]));
+        }
+        return Ok(pool);
+    }
+    Err(failure(top[0]))
 }
 
 /// Keep every in-circle point for signing. Enrollment alone truncates this list
