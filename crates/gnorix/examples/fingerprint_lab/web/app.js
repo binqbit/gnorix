@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
+const MIN_VISIBLE_PRIORITY = 0.25;
 const configFields = {
     min_points: "min-points",
     pool_multiplier: "pool-multiplier",
@@ -420,6 +421,7 @@ function drawEvidence(prepared) {
     diagnosticsLayer.replaceChildren();
     const regionList = $("region-list");
     regionList.replaceChildren();
+    $("feature-filter").textContent = `Priority ≥ ${MIN_VISIBLE_PRIORITY} · display only`;
     if (!prepared) {
         $("scale-value").textContent = "R — not measured yet";
         return;
@@ -480,7 +482,11 @@ function drawEvidence(prepared) {
                 }),
             );
     }
-    for (const point of prepared.points ?? []) {
+    const points = prepared.points ?? [];
+    const visiblePoints = points.filter(
+        (point) => point.priority >= MIN_VISIBLE_PRIORITY,
+    );
+    for (const point of visiblePoints) {
         const included = pool.has(point.id);
         const isMatched = matched.has(point.id);
         const color = priorityColor(point.priority);
@@ -555,7 +561,7 @@ function drawEvidence(prepared) {
         regionList.append(button);
     }
     $("scale-value").textContent =
-        `R = ${format.format(prepared.unit_px)} px · ${countLabel(prepared.points.length, "feature")}`;
+        `R = ${format.format(prepared.unit_px)} px · ${visiblePoints.length}/${countLabel(points.length, "feature")} shown`;
 }
 
 function renderResult(prepared) {
@@ -741,7 +747,7 @@ function render() {
             state.mode === "enrollment"
                 ? `${countLabel(prepared.regions.length, "region")} · ${countLabel(prepared.combination_count, "combination")} · ${countLabel(prepared.variant_count ?? 0, "positional variant")}`
                 : state.server.result?.status === "matched"
-                  ? `White ticks mark ${countLabel(state.server.result.feature_ids.length, "feature")} used to reconstruct the key`
+                  ? `Key reconstructed with ${countLabel(state.server.result.feature_ids.length, "feature")} · white ticks mark visible matches`
                   : `${countLabel(prepared.points.length, "feature")} in the selected fragment · ready to search`;
     if (state.mode === "signing" && registered && !artifactReady())
         notice = "Updating scan preview · prepare or test when ready";
