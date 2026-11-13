@@ -49,4 +49,4 @@ The JSON contains the effective configuration, bounds, eligible point IDs/coordi
 
 ## Scope
 
-This stage supplies point subsets for later encoding. Original IDs and region bounds belong to this capture. Repeated identical input and settings reproduce the output; handling translated, rotated or partial new captures still requires registration and stable descriptor encoding. Key derivation, quantization and biometric acceptance criteria are separate stages.
+This stage supplies point subsets for later encoding. [Grid figures and positional variants](grid-shapes.md) apply hull-based orientation, measured-R snapping and complete local uncertainty traversal to those subsets. Original IDs and region bounds belong to this capture. Repeated identical input and settings reproduce the output; handling partial new captures still requires correspondence and stable descriptor encoding. Key derivation and biometric acceptance criteria are separate stages.

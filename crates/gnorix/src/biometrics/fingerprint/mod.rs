@@ -1,8 +1,9 @@
-//! Per-capture ridge extraction and geometric measurements.
+//! Per-capture ridge extraction, point subsets and geometric grid variants.
 //!
 //! This module exposes observed structure, not stable identities or signing
-//! candidates. Endings can result from missing signal. All positions and lengths
-//! are in source-image pixels; measured ridge spacing is not an inferred DPI.
+//! candidates. Endings can result from missing signal. Extraction measurements
+//! use source-image pixels; measured ridge spacing is not an inferred DPI.
+//! Final grid figures and positional variants use integer node indices.
 
 mod clarity;
 mod cleanup;
@@ -19,6 +20,7 @@ mod quality;
 mod raster;
 mod repair;
 mod scale;
+mod shapes;
 mod smoothing;
 mod thinning;
 
@@ -48,6 +50,10 @@ pub use pipeline::{ContourReconstruction, Fingerprint, estimate_scale, extract};
 pub use quality::WidthConsistency;
 pub use repair::{GapEvidence, GapJoin, GapPolicy, GapStatus, PathOrigin};
 pub use scale::{BootstrapScale, RidgeSpan, ScaleProfile};
+pub use shapes::{
+    GridCell, GridCollision, GridShape, GridShapeConfig, GridShapeError, GridShapeFrame,
+    GridShapes, GridVariant, GridVariants, prepare_grid_shapes,
+};
 pub use smoothing::{SmoothingAdjustment, SmoothingControls, SmoothingRejection};
 
 /// Image-processing controls, independent of biometric matching tolerances.

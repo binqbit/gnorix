@@ -39,6 +39,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Grid mathematics | `src/biometrics/geometry.rs` | Explicit triangular positions, Euclidean-nearest nodes and six-neighbor coordinates, with overflow/finite-value checks. |
 | Fingerprint extraction | `src/biometrics/fingerprint/` | Native per-capture image stages, topology-preserving skeleton tracing, curve geometry and diagnostic output. |
 | Regional subsets | `src/biometrics/fingerprint/combinations/` | Surviving feature projection, nine expandable circular pools and bounded weighted point combinations. |
+| Grid figures | `src/biometrics/fingerprint/shapes/` | Convex-hull frames, measured-width snapping, fixed uncertainty padding and complete positional traversal. |
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
 | Enrollment | `src/enrollment.rs` | Bind profile and context, prepare a model, process the complete candidate set, retain its commitment/model/hash tree. |
@@ -62,6 +63,7 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
 | `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
 | `combinations.rs`, `combinations/` | Compose candidate projection, region selection, lazy weighted subset enumeration and global deduplication. |
+| `shapes.rs`, `shapes/` | Prepare oriented figures, preserve staggered-grid phase and stream every positional assignment with explicit collisions. |
 
 Feature assessment separates local evidence (`features/evidence.rs`), extended source-backed structure (`features/context.rs` and its tracing/probe modules), threshold correspondence (`features/stability/`) and bounded crowding (`features/neighborhood.rs`). The orchestration combines these independent measurements; the report adapters only serialize and validate them. All source/graph observation preserves the original topology. Context traversal, sampling and neighborhood work have explicit bounds.
 
