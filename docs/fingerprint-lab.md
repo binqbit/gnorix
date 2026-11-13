@@ -34,15 +34,19 @@ Public test records include the artifact level, seed, clean ridge-width scale, g
 
 ## Parameters and outcomes
 
-The stand exposes minimum subset size, enrollment pool multiplier, search radius in R, selected combinations per region, grid uncertainty steps, attempt limit and search-work limit. It uses the same library mechanisms as the command-line examples. The weight curve remains `0.1 + 0.9 × priority²`.
+The stand exposes minimum subset size, enrollment pool multiplier, search radius in R, selected combinations per region, grid uncertainty steps, enrollment memory budget, attempt limit and search-work limit. It uses the same library mechanisms as the command-line examples. The weight curve remains `0.1 + 0.9 × priority²`.
+
+**Enrollment memory budget** defaults to **2 GiB** and accepts **1–10 GiB** under Computation limits. Preparation uses a conservative peak-memory estimate with reserved headroom to derive consistent limits for positional variants, retained leaves and package size. It shows the estimated peak and supported variant limit before key generation. If the complete requested set exceeds these limits, preparation fails; it never silently truncates the set. This is an estimate, not an operating-system memory cap: actual process memory may vary.
+
+The estimate reserves 512 MiB for working data, then adds 512 bytes per planned variant and 96 bytes per leaf in the already retained enrollment. Without a previous set, the default budget permits 3,145,728 variants; 10 GiB permits 19,922,944. Encoded package limits grow with that allowance, and temporary tree and byte-buffer copies are released before package readback.
 
 The attempt limit defaults to **1,000,000,000 candidate keys** and accepts values from 1 through that maximum. Search remains lazy: this capacity does not allocate or generate a billion candidates upfront. The separate work budget counts preparation, subset enumeration, deduplication and geometry operations, so it can stop a search before the key-attempt limit is reached. Both limits retain the **incomplete** outcome; neither means that all possible candidates were tested.
 
-Changing enrollment parameters requires a newly prepared and registered set. Changing the search-work limit requires preparing the fragment again; the attempt limit can change before signing. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
+Changing enrollment parameters requires a newly prepared and registered set. Changing only the enrollment memory budget invalidates an enrollment preparation, but does not change the key profile or invalidate an existing registered set. Changing the search-work limit requires preparing the fragment again; the attempt limit can change before signing. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
 
 - **Matched:** a member key was found, and both signature and Merkle proof were verified.
 - **No match:** the configured regional search was exhausted without a member.
-- **Incomplete:** an attempt or search-work limit stopped signing. This is not a completed no-match result. Excessive enrollment variant counts are rejected during preparation, before a package is created.
+- **Incomplete:** an attempt or search-work limit stopped signing. This is not a completed no-match result. Enrollment variant counts that exceed the memory-derived limits are rejected during preparation, before a package is created.
 - **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
 
 The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed.

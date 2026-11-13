@@ -338,6 +338,12 @@
                                 Create Merkle set
                             </button>
                         </div>
+                        <p
+                            id="enrollment-estimate"
+                            class="microcopy"
+                            hidden
+                            aria-live="polite"
+                        ></p>
                         <div
                             id="artifact-test-actions"
                             class="artifact-test-actions"
@@ -443,6 +449,24 @@
                         </p>
                         <details class="advanced">
                             <summary>Computation limits</summary>
+                            <div id="memory-budget-control">
+                                <label
+                                    >Enrollment memory budget (GiB)<input
+                                        id="memory-budget"
+                                        type="number"
+                                        min="1"
+                                        max="10"
+                                        step="1"
+                                        value="2"
+                                /></label>
+                                <p class="microcopy">
+                                    Approximate peak memory with reserved
+                                    headroom. Actual process memory may vary.
+                                    Changing this budget requires a new
+                                    enrollment preparation, not a new key
+                                    profile.
+                                </p>
+                            </div>
                             <label
                                 >Search work limit<input
                                     id="work-limit"

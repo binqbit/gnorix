@@ -98,6 +98,17 @@ function validSearchControls() {
     });
 }
 
+function validMemoryBudget() {
+    const input = $("memory-budget");
+    const value = Number(input.value);
+    return (
+        input.value !== "" &&
+        Number.isInteger(value) &&
+        value >= Number(input.min) &&
+        value <= Number(input.max)
+    );
+}
+
 function payloadBytes() {
     return new TextEncoder().encode($("payload").value);
 }
@@ -285,6 +296,11 @@ function currentPrepared() {
         return null;
     if (prepared.work_limit !== Number($("work-limit").value)) return null;
     if (state.mode === "enrollment" && state.imageKey !== "original")
+        return null;
+    if (
+        state.mode === "enrollment" &&
+        prepared.memory_budget_gib !== Number($("memory-budget").value)
+    )
         return null;
     if (
         state.mode === "signing" &&
@@ -642,6 +658,16 @@ function render() {
     $("reset-circle").hidden = state.mode !== "signing";
     $("artifact-settings").hidden = state.mode !== "signing";
     $("artifact-test-actions").hidden = state.mode !== "signing";
+    $("memory-budget-control").hidden = state.mode !== "enrollment";
+    $("memory-budget").disabled = state.busy || state.mode !== "enrollment";
+    const estimate = $("enrollment-estimate");
+    estimate.hidden =
+        state.mode !== "enrollment" ||
+        !prepared ||
+        prepared.estimated_peak_bytes == null ||
+        prepared.variant_limit == null;
+    if (!estimate.hidden)
+        estimate.textContent = `Estimated peak: ${format.format(prepared.estimated_peak_bytes / 1024 ** 3)} GiB of ${prepared.memory_budget_gib} GiB · variant limit: ${format.format(prepared.variant_limit)}`;
     $("artifact-value").textContent =
         state.artifactLevel === 0
             ? "Original · 0"
@@ -690,6 +716,7 @@ function render() {
         state.busy ||
         !displayReady ||
         !valid ||
+        (state.mode === "enrollment" && !validMemoryBudget()) ||
         (state.mode === "signing" && !signingReady);
     $("test-altered-scan").disabled = state.busy || !valid || !signingReady;
     for (const id of [
@@ -791,6 +818,11 @@ async function refresh() {
                 state.server.defaults;
             for (const [key, id] of Object.entries(configFields))
                 if (defaults[key] !== undefined) $(id).value = defaults[key];
+            const memory = state.server.enrollment_memory;
+            $("memory-budget").min = memory.min_gib;
+            $("memory-budget").max = memory.max_gib;
+            $("memory-budget").value =
+                state.server.prepared?.memory_budget_gib ?? memory.default_gib;
             const { width, height } = image;
             $("fingerprint").setAttribute("viewBox", `0 0 ${width} ${height}`);
             for (const id of [
@@ -910,6 +942,9 @@ $("prepare").addEventListener("click", () =>
         artifact_revision:
             state.mode === "signing" ? state.server.artifact.revision : null,
         work_limit: Number($("work-limit").value),
+        ...(state.mode === "enrollment"
+            ? { memory_budget_gib: Number($("memory-budget").value) }
+            : {}),
     }),
 );
 $("execute").addEventListener("click", () => {
@@ -945,6 +980,7 @@ for (const id of [
     ...Object.values(configFields),
     "work-limit",
     "attempt-limit",
+    "memory-budget",
 ])
     $(id).addEventListener("input", () => {
         state.region = null;
