@@ -1,0 +1,54 @@
+{
+  "images": [
+    {
+      "id": "socofing-226-right-middle",
+      "title": "SOCOFing 226 · Right middle",
+      "description": "A broad turning pattern with clearly separated dark ridges.",
+      "source": "Real/226__M_Right_middle_finger.BMP",
+      "source_sha256": "22d940e897065817ff7f32011e27fc9dad013e2f869e6c9eda6e397456806588",
+      "pixels_sha256": "ab87fd5603e7706243c897fce3fa8e93ee9ae91e9ba9ebd0edd64b887b91342e",
+      "width": 241,
+      "height": 298
+    },
+    {
+      "id": "socofing-270-right-index",
+      "title": "SOCOFing 270 · Right index",
+      "description": "A compact central spiral with contrasting ridge directions.",
+      "source": "Real/270__M_Right_index_finger.BMP",
+      "source_sha256": "d3f3f221956248c1c14ad7a28f500f03140f3ce404014b84a19dab6f8da3754f",
+      "pixels_sha256": "4de8e93f5a98672c12b74e2b91c25ac0a0ab13a7134227383482e73ceca4cb47",
+      "width": 241,
+      "height": 298
+    },
+    {
+      "id": "socofing-53-right-ring",
+      "title": "SOCOFing 53 · Right ring",
+      "description": "Smooth sweeping arcs with clear light valleys.",
+      "source": "Real/53__M_Right_ring_finger.BMP",
+      "source_sha256": "325dc53a50d64f4fab1c271e5c884ddf65a819a067bcd4348c74540d0a59e65d",
+      "pixels_sha256": "a045c86e2dfdd3b5cd3839c09386ddd6f623fbd0d5cc4bc5a05ebfa4b5074b6a",
+      "width": 241,
+      "height": 298
+    },
+    {
+      "id": "socofing-560-left-little",
+      "title": "SOCOFing 560 · Left little",
+      "description": "Fine curved ridges with softer source contrast.",
+      "source": "Real/560__F_Left_little_finger.BMP",
+      "source_sha256": "e9643730e17108c626de7d1881cc7f8340d1ebe6c54644366df78fcebb0f8489",
+      "pixels_sha256": "7fa2503b0ea6d73eb0bdb5aac757b5f4f1c82fb5e1f83f7eb185533a5155e46b",
+      "width": 241,
+      "height": 298
+    },
+    {
+      "id": "socofing-590-left-middle",
+      "title": "SOCOFing 590 · Left middle",
+      "description": "A visible central turn and evenly spaced neighboring ridges.",
+      "source": "Real/590__M_Left_middle_finger.BMP",
+      "source_sha256": "774b1ea10d1aa7a8333fb9deb4d6c813332957f0225e6fe805083904ef653d4a",
+      "pixels_sha256": "6c06477dc8553c6cb576ab01545ff6bd5a38d2c7805d677edd17e09a43f8ff04",
+      "width": 241,
+      "height": 298
+    }
+  ]
+}

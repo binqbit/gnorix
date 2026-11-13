@@ -1,5 +1,6 @@
 /.agent-workspace/
 /private-docs/
 /target/
+/test-data/fingerprint-gallery/
 /reports/*
 !/reports/README.md
