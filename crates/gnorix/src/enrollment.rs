@@ -4,7 +4,7 @@ use std::num::NonZeroU64;
 
 use crate::{
     Error, Result,
-    biometrics::{Capture, MeasurementEngine},
+    biometrics::{Candidates, Capture, MeasurementEngine},
     crypto::{CryptoProvider, SecretInput, derive_candidate},
     encoding,
     error::{Resource, Stage, algorithm},
@@ -42,7 +42,13 @@ pub struct EnrollmentContext {
 }
 
 impl EnrollmentContext {
-    pub(crate) fn encode(&self, limits: &Limits) -> Result<Vec<u8>> {
+    /// Encode the exact context used for candidate-key derivation and Merkle leaves.
+    ///
+    /// The versioned, length-prefixed framing is shared by enrollment and signing.
+    /// Callers can reproduce provider inputs and membership leaf hashes without
+    /// rebuilding this encoding themselves. The context is validated and bounded
+    /// by `limits.context_bytes`; its bytes contain public enrollment metadata.
+    pub fn encode(&self, limits: &Limits) -> Result<Vec<u8>> {
         validate_spec(&self.spec)?;
 
         if self.suite_id.is_empty() {
@@ -111,31 +117,60 @@ pub fn enroll<M: MeasurementEngine, C: CryptoProvider>(
     secret: Option<&SecretInput>,
     limits: &Limits,
 ) -> Result<Enrollment<M::Model>> {
-    let context = bind_context(measurement, crypto, spec, secret, limits)?;
+    let context = bind_context(measurement, crypto, spec);
+    let encoded_context = validate_context(crypto, &context, secret, limits)?;
     let model = prepare_model(measurement, captures, limits)?;
-    let tree = build_commitment(measurement, crypto, &model, &context, secret, limits)?;
+    let candidates = prepare_candidates(measurement, &model, limits)?;
+    let tree = build_commitment(crypto, candidates, &encoded_context, secret, limits)?;
 
     Ok(assemble_enrollment(context, model, tree))
+}
+
+/// Enroll a complete stream of already encoded candidates using an explicit context.
+///
+/// This entry point shares key derivation, limits and tree construction with
+/// [`enroll`]. It retains no reconstruction model: the caller owns candidate
+/// generation and must identify its exact interpretation through `profile_id`.
+/// Context validity, the provider's suite and secret policy are checked before
+/// consuming the stream. Any stream, derivation or resource failure rejects the
+/// entire enrollment; transient candidate/private keys are not retained.
+pub fn enroll_candidates<C: CryptoProvider>(
+    crypto: &C,
+    candidates: Candidates<'_>,
+    context: EnrollmentContext,
+    secret: Option<&SecretInput>,
+    limits: &Limits,
+) -> Result<Enrollment<()>> {
+    let encoded_context = validate_context(crypto, &context, secret, limits)?;
+    let tree = build_commitment(crypto, candidates, &encoded_context, secret, limits)?;
+
+    Ok(assemble_enrollment(context, (), tree))
 }
 
 fn bind_context<M: MeasurementEngine, C: CryptoProvider>(
     measurement: &M,
     crypto: &C,
     spec: EnrollmentSpec,
-    secret: Option<&SecretInput>,
-    limits: &Limits,
-) -> Result<EnrollmentContext> {
-    spec.secret_policy.validate(secret)?;
-
-    let context = EnrollmentContext {
+) -> EnrollmentContext {
+    EnrollmentContext {
         spec,
         profile_id: measurement.profile_id(),
         suite_id: crypto.suite_id().to_owned(),
-    };
+    }
+}
 
-    context.encode(limits)?;
+fn validate_context<C: CryptoProvider>(
+    crypto: &C,
+    context: &EnrollmentContext,
+    secret: Option<&SecretInput>,
+    limits: &Limits,
+) -> Result<Vec<u8>> {
+    context.spec.secret_policy.validate(secret)?;
+    if context.suite_id != crypto.suite_id() {
+        return Err(Error::SuiteMismatch);
+    }
 
-    Ok(context)
+    context.encode(limits)
 }
 
 fn prepare_model<M: MeasurementEngine>(
@@ -152,27 +187,32 @@ fn prepare_model<M: MeasurementEngine>(
         .map_err(|error| algorithm(Stage::EnrollmentPreparation, error))
 }
 
-fn build_commitment<M: MeasurementEngine, C: CryptoProvider>(
-    measurement: &M,
+fn prepare_candidates<'a, M: MeasurementEngine>(
+    measurement: &'a M,
+    model: &'a M::Model,
+    limits: &Limits,
+) -> Result<Candidates<'a>> {
+    measurement
+        .enrollment_candidates(model, limits)
+        .map_err(|error| algorithm(Stage::CandidateGeneration, error))
+}
+
+fn build_commitment<C: CryptoProvider>(
     crypto: &C,
-    model: &M::Model,
-    context: &EnrollmentContext,
+    candidates: Candidates<'_>,
+    context: &[u8],
     secret: Option<&SecretInput>,
     limits: &Limits,
 ) -> Result<MerkleTree> {
-    let context = context.encode(limits)?;
-    let candidates = measurement
-        .enrollment_candidates(model, limits)
-        .map_err(|error| algorithm(Stage::CandidateGeneration, error))?;
     let mut leaves = Vec::new();
 
     for (attempt, candidate) in candidates.enumerate() {
         check_attempt(attempt, limits)?;
 
         let candidate = candidate.map_err(|error| algorithm(Stage::CandidateGeneration, error))?;
-        let key = derive_candidate(crypto, &candidate, &context, secret, limits)?;
+        let key = derive_candidate(crypto, &candidate, context, secret, limits)?;
 
-        leaves.push(leaf_hash(&context, &key.public));
+        leaves.push(leaf_hash(context, &key.public));
     }
 
     Ok(MerkleTree::from_leaves(leaves)?)
