@@ -5,8 +5,8 @@
 ## Regions and point pools
 
 1. Keep source feature identities whose assessed type and degree survive cleanup and reconstruction. Count repeated identities once. Unknown priorities are excluded; measured zero remains eligible. The previous 30% illustration cutoff does not apply.
-2. Bound the confirmed three-ridge pattern mask with a rectangle. Place nine centers at the centers of its 3×3 cells, in row-major order, IDs 0–8. This is a frame for this capture, not anatomical segmentation or alignment between captures.
-3. Start each circle with diameter `diameter_fraction × min(width, height)` of that rectangle. The initial example fraction is 0.5.
+2. Bound the confirmed three-ridge pattern mask with a rectangle, extending it to include retained eligible point centers where needed. Cover it with a regular grid of overlapping circles; use the fewest cells whose half diagonal fits the configured radius. A small fragment needs one circle, while larger captures use more. Nine is neither mandatory nor a maximum. This is a frame for the visible capture, not an estimate of an anatomical full finger.
+3. Start each circle with radius `radius_units × R`, where R is the measured mean dark-ridge width. The example uses 30R. Re-measure R on each capture; cropping the image does not directly shrink the configured radius.
 4. The target pool size is `min_points × pool_multiplier`. If necessary, enlarge the circle to the distance of the target-th nearest eligible point. Boundary points are included. From all points inside the final circle, take the highest priorities, breaking ties by original ID.
 5. If the whole capture has fewer points than the target but at least `min_points`, use all available points. Fewer than `min_points` produces an explicit error.
 
@@ -39,13 +39,19 @@ Choose an output file that does not already exist. The adapter reads environment
 |---|---:|---|
 | `GNORIX_COMBINATION_MIN_POINTS` | 3 | Minimum subset size m. |
 | `GNORIX_COMBINATION_POOL_MULTIPLIER` | 2 | Target pool size as a multiple of m. |
-| `GNORIX_COMBINATION_DIAMETER_FRACTION` | 0.5 | Initial diameter relative to the shorter bounds side. |
+| `GNORIX_COMBINATION_RADIUS_UNITS` | 30 | Initial radius in measured dark-ridge widths R. |
 | `GNORIX_COMBINATION_PER_REGION` | 12 | Maximum selected distinct subsets per region. |
 | `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative mask, topology, point-selection and subset-index work entries. |
 
 These small defaults belong to the example. The library requires positive explicit controls and sufficient subset budget to cover the configured pool. Exhausting the possible distinct subsets returns fewer than the budget. Exhausting the work allowance fails the operation instead of returning a partial successful result.
 
-The JSON contains the effective configuration, bounds, eligible point IDs/coordinates/priorities, all nine pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The checked-in test image with the example settings gives **299 scored features, nine pools of six and 108 unique combinations**.
+The JSON contains the effective configuration, bounds, eligible point IDs/coordinates/priorities, all adaptive pools and radii, per-point occurrence counts and the unified `combinations` list. Other source measurements remain available through the original `Fingerprint` and its feature IDs. The number of regions follows the observed extent and R; it is exported with their centers, initial/effective radii and selected pools.
+
+## Scale and coverage
+
+R is the thickness of a dark ridge, not the period from one ridge to the next. The same radius multiplier is used for enrollment and reconstruction. The algorithm does not assume a fixed “full-finger ridge count”: ridge dimensions vary by person and location, and plain versus rolled acquisition covers different skin areas. See the [NIST-hosted ridge-width discussion](https://www.nist.gov/system/files/documents/2016/12/19/p19_jain_chen_nistlevel3.pdf) and [FBI acquisition definitions](https://le.fbi.gov/science-and-lab/biometrics-and-fingerprints/biometrics/recording-legible-fingerprints).
+
+Circle coverage ensures that this rectangle, including every eligible point, is covered. It does not ensure that every previously enrolled multi-point subset lies together inside one circle of a new crop. [Signing](fingerprint-signing.md) deliberately searches only its regional subsets; a spatially excluded combination is not recovered by a global fallback.
 
 ## Scope
 

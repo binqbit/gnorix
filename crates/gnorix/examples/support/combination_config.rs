@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, env, error::Error, str::FromStr};
 pub(super) const ENVIRONMENT: [&str; 5] = [
     "GNORIX_COMBINATION_MIN_POINTS",
     "GNORIX_COMBINATION_POOL_MULTIPLIER",
-    "GNORIX_COMBINATION_DIAMETER_FRACTION",
+    "GNORIX_COMBINATION_RADIUS_UNITS",
     "GNORIX_COMBINATION_PER_REGION",
     "GNORIX_COMBINATION_MAX_WORK",
 ];
@@ -34,7 +34,7 @@ pub(super) fn parse_configuration<'a>(
     let config = CombinationConfig {
         min_points: number(ENVIRONMENT[0], value(ENVIRONMENT[0]), 3)?,
         pool_multiplier: number(ENVIRONMENT[1], value(ENVIRONMENT[1]), 2)?,
-        diameter_fraction: number(ENVIRONMENT[2], value(ENVIRONMENT[2]), 0.5)?,
+        radius_units: number(ENVIRONMENT[2], value(ENVIRONMENT[2]), 30.0)?,
         combinations_per_region: number(ENVIRONMENT[3], value(ENVIRONMENT[3]), 12)?,
         max_work: number(ENVIRONMENT[4], value(ENVIRONMENT[4]), 10_000_000)?,
     };

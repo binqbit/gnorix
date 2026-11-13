@@ -17,8 +17,8 @@ pub use search::{SigningSearchConfig, signing_candidates};
 pub struct CombinationConfig {
     pub min_points: usize,
     pub pool_multiplier: usize,
-    /// Initial circle diameter divided by the shorter pattern-bounds side.
-    pub diameter_fraction: f64,
+    /// Initial circle radius in measured mean dark-ridge widths R.
+    pub radius_units: f64,
     /// Maximum distinct subsets selected in each region, including coverage.
     pub combinations_per_region: usize,
     /// Cumulative source-mask visits and selection/search work entries.
@@ -36,9 +36,9 @@ impl CombinationConfig {
             .min_points
             .checked_mul(self.pool_multiplier)
             .ok_or(CombinationError::InvalidConfig("point pool size overflows"))?;
-        if !self.diameter_fraction.is_finite() || self.diameter_fraction <= 0.0 {
+        if !self.radius_units.is_finite() || self.radius_units <= 0.0 {
             return Err(CombinationError::InvalidConfig(
-                "diameter fraction must be finite and positive",
+                "circle radius in ridge units must be finite and positive",
             ));
         }
         if self.combinations_per_region < target - self.min_points + 1 {
@@ -64,7 +64,7 @@ pub struct CombinationPoint {
     pub priority: f64,
 }
 
-/// Pixel-edge bounding rectangle of the confirmed pattern-support mask.
+/// Confirmed pattern pixel-edge bounds, extended to cover eligible point centers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RegionBounds {
     pub min: Point,
@@ -73,8 +73,8 @@ pub struct RegionBounds {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CombinationRegion {
-    /// Row-major position in the 3 by 3 center grid, from zero to eight.
-    pub id: u8,
+    /// Row-major position in the capture's adaptive rectangular center grid.
+    pub id: usize,
     pub center: Point,
     pub initial_radius: f64,
     pub radius: f64,
@@ -92,7 +92,7 @@ pub struct FeatureCombination {
     /// Mean of 0.1 + 0.9 * priority² over the subset.
     pub score: f64,
     /// All regions selecting this same point set, in ascending order.
-    pub regions: Vec<u8>,
+    pub regions: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,7 +146,7 @@ impl Error for CombinationError {
     }
 }
 
-/// Selects bounded, quality-ranked subsets in nine circular regions.
+/// Selects bounded, quality-ranked subsets in adaptive ridge-scale circles.
 ///
 /// Unknown scores are excluded; known zero remains eligible. Every selected
 /// pool point occurs in at least one subset. Stronger pool points occur no less
@@ -160,7 +160,6 @@ pub fn generate_combinations(
 ) -> Result<FeatureCombinations, CombinationError> {
     config.validate()?;
     let mut work = WorkBudget::new(config.max_work);
-    let bounds = regions::pattern_bounds(fingerprint, &mut work)?;
     let (points, unscored_features) = collect_points(fingerprint, &mut work)?;
     if points.len() < config.min_points {
         return Err(CombinationError::InsufficientPoints {
@@ -168,7 +167,14 @@ pub fn generate_combinations(
             available: points.len(),
         });
     }
-    let mut regions = regions::select(&points, bounds, config, &mut work)?;
+    let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
+    let mut regions = regions::select(
+        &points,
+        bounds,
+        fingerprint.scale.unit_px,
+        config,
+        &mut work,
+    )?;
     let combinations = collect_combinations(&points, &mut regions, config, &mut work)?;
 
     Ok(FeatureCombinations {
@@ -332,13 +338,14 @@ mod tests {
         let config = CombinationConfig {
             min_points: 3,
             pool_multiplier: 2,
-            diameter_fraction: 0.01,
+            radius_units: 1.0,
             combinations_per_region: 12,
             max_work: 10_000,
         };
         config.validate().unwrap();
         let mut work = WorkBudget::new(config.max_work);
-        let mut regions = regions::select(&points, bounds, &config, &mut work).unwrap();
+        let mut regions = regions::select(&points, bounds, 1.0, &config, &mut work).unwrap();
+        let region_count = regions.len();
         assert!(
             regions
                 .iter()
@@ -350,7 +357,7 @@ mod tests {
         assert!(
             combinations
                 .iter()
-                .all(|item| item.regions == (0..9).collect::<Vec<_>>())
+                .all(|item| item.regions == (0..region_count).collect::<Vec<_>>())
         );
         assert!(
             combinations

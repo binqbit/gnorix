@@ -38,8 +38,8 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Acquisition input | `src/biometrics/capture.rs` | Owned grayscale pixels, optional valid-region mask and scale; shape and numeric validation; redacted diagnostics. |
 | Grid mathematics | `src/biometrics/geometry.rs` | Explicit triangular positions, Euclidean-nearest nodes and six-neighbor coordinates, with overflow/finite-value checks. |
 | Fingerprint extraction | `src/biometrics/fingerprint/` | Native per-capture image stages, topology-preserving skeleton tracing, curve geometry and diagnostic output. |
-| Regional subsets | `src/biometrics/fingerprint/combinations/` | Surviving feature projection, nine expandable circular pools and bounded weighted point combinations. |
-| Fresh-image search | `src/biometrics/fingerprint/combinations/search.rs` | Global ranked subsets of n–2n surviving scored points, lazy baseline grid candidates and bounded search work. |
+| Regional subsets | `src/biometrics/fingerprint/combinations/` | Surviving feature projection, adaptive overlapping circles in measured ridge units and bounded weighted point combinations. |
+| Fresh-image search | `src/biometrics/fingerprint/combinations/search.rs` | Ranked n–2n subsets inside adaptive circles, overlap deduplication, lazy baseline candidates and bounded search work. |
 | Grid figures | `src/biometrics/fingerprint/shapes/` | Convex-hull frames, measured-width snapping, fixed uncertainty padding and complete positional traversal. |
 | Measurement boundary | `src/biometrics/mod.rs` | Algorithm-owned reconstruction model and fallible candidate streams. |
 | Crypto boundary | `src/crypto.rs` | Explicit KDF/signature suite, secret input handling and candidate-key operations. |
@@ -64,7 +64,7 @@ The public entry points and types are exported by `src/biometrics/fingerprint/mo
 | `enhancement/` | Local normalization, intensity filtering, orientation tensors and reusable directional responses. |
 | `cleanup/`, `smoothing/`, `repair/` | Source-supported cleanup, constrained smoothing and gap reconstruction. Repair separates cubic construction, obstruction checks and graph assembly. |
 | `features/` | Source probes, geometric evidence and stress correspondence. Ending assessment borrows unchanged paths and retains only the clipped remainder of its own edge. |
-| `combinations.rs`, `combinations/` | Shared candidate projection and lazy weighted subset enumeration; regional enrollment selection/deduplication and global fresh-image signing search. |
+| `combinations.rs`, `combinations/` | Shared candidate projection and lazy weighted subset enumeration; regional enrollment selection and regional fresh-image signing search with shared circle geometry. |
 | `shapes.rs`, `shapes/` | Prepare oriented figures, preserve staggered-grid phase, stream positional assignments and hash canonical integer-coordinate descriptors. |
 
 Feature assessment separates local evidence (`features/evidence.rs`), extended source-backed structure (`features/context.rs` and its tracing/probe modules), threshold correspondence (`features/stability/`) and bounded crowding (`features/neighborhood.rs`). The orchestration combines these independent measurements; the report adapters only serialize and validate them. All source/graph observation preserves the original topology. Context traversal, sampling and neighborhood work have explicit bounds.
@@ -77,7 +77,7 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/enroll_grid.rs` consumes that same combination input, streams grid candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. Both grid examples use `examples/support/grid_config.rs` for their controls.
 
-`examples/fingerprint_signing.rs` extracts a fresh image, searches globally ranked point subsets and signs with the first member of an existing package. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls, evidence and crop results. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
+`examples/fingerprint_signing.rs` extracts a fresh image, searches ranked subsets within adaptive overlapping regions and signs with the first member of an existing package. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls, evidence and crop results. Shared example modules under `examples/support/` own image decoding, combination/grid controls, enrollment profile, crypto provider, secret input, bounded JSON and exclusive file output; file I/O remains outside the library.
 
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 

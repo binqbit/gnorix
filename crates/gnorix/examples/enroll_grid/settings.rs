@@ -135,7 +135,7 @@ pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) 
     let expected = [
         "min_points",
         "pool_multiplier",
-        "diameter_fraction",
+        "radius_units",
         "combinations_per_region",
         "max_work",
     ];
@@ -147,10 +147,10 @@ pub(super) fn profile_id(metadata: &Map<String, Value>, grid: &GridShapeConfig) 
     let controls = CombinationConfig {
         min_points: integer(config, "min_points")?,
         pool_multiplier: integer(config, "pool_multiplier")?,
-        diameter_fraction: config
-            .get("diameter_fraction")
+        radius_units: config
+            .get("radius_units")
             .and_then(Value::as_f64)
-            .ok_or("diameter_fraction must be numeric")?,
+            .ok_or("radius_units must be numeric")?,
         combinations_per_region: integer(config, "combinations_per_region")?,
         max_work: integer(config, "max_work")?,
     };
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn profile_tracks_selection_and_uncertainty_but_not_pixels_or_limits() {
         let mut metadata = json!({"config":{"min_points":3,"pool_multiplier":2,
-            "diameter_fraction":0.5,"combinations_per_region":12,"max_work":10000000},
+            "radius_units":30.0,"combinations_per_region":12,"max_work":10000000},
             "source":{"image":"a.png"},"unit_px":16.8})
         .as_object()
         .unwrap()
@@ -212,6 +212,9 @@ mod tests {
             max_work: 10000000,
         };
         let baseline = profile_id(&metadata, &grid).unwrap();
+        let previous_profile =
+            hex("8bd0d14924be772d55dc471ce7c448f72d8a926c29f70022e98b59627413494b").unwrap();
+        assert_ne!(baseline.as_slice(), previous_profile);
         metadata.insert("unit_px".into(), json!(33.6));
         metadata.insert("source".into(), json!({"image":"b.png"}));
         metadata.get_mut("config").unwrap()["max_work"] = json!(20000000);
@@ -221,7 +224,31 @@ mod tests {
         grid.uncertainty_steps = 2;
         assert_ne!(baseline, profile_id(&metadata, &grid).unwrap());
         grid.uncertainty_steps = 1;
-        metadata.get_mut("config").unwrap()["diameter_fraction"] = json!(0.6);
+        metadata.get_mut("config").unwrap()["radius_units"] = json!(31.0);
         assert_ne!(baseline, profile_id(&metadata, &grid).unwrap());
+    }
+
+    #[test]
+    fn profile_rejects_obsolete_or_invalid_region_configuration() {
+        let metadata = json!({"config":{"min_points":3,"pool_multiplier":2,
+            "radius_units":30.0,"combinations_per_region":12,"max_work":10000000}})
+        .as_object()
+        .unwrap()
+        .clone();
+        let grid = GridShapeConfig {
+            uncertainty_steps: 1,
+            max_variants: 1000000,
+            max_work: 10000000,
+        };
+        for invalid in [json!(0), json!(-1), json!("30"), json!(null)] {
+            let mut changed = metadata.clone();
+            changed.get_mut("config").unwrap()["radius_units"] = invalid;
+            assert!(profile_id(&changed, &grid).is_err());
+        }
+        let mut obsolete = metadata;
+        let config = obsolete.get_mut("config").unwrap().as_object_mut().unwrap();
+        config.remove("radius_units");
+        config.insert("diameter_fraction".into(), json!(0.5));
+        assert!(profile_id(&obsolete, &grid).is_err());
     }
 }

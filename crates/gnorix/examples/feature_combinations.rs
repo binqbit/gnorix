@@ -131,18 +131,20 @@ fn snapshot(
         .collect();
 
     json!({
-        "schema": "gnorix.feature-combinations.v1",
+        "schema": "gnorix.feature-combinations.v2",
         "source": {"image": input.to_string_lossy(), "width": width, "height": height},
         "unit_px": unit_px,
         "config": {
             "min_points": config.min_points,
             "pool_multiplier": config.pool_multiplier,
-            "diameter_fraction": config.diameter_fraction,
+            "radius_units": config.radius_units,
             "combinations_per_region": config.combinations_per_region,
             "max_work": config.max_work,
         },
         "policy": {
-            "region_layout": "3x3 cell centers of confirmed-pattern bounds",
+            "region_layout": "adaptive row-major cell centers covering confirmed-pattern and eligible-point bounds",
+            "region_coverage": "minimum cell count whose half-diagonals fit the initial radius; closest-to-square cells break ties",
+            "initial_radius": "radius_units * measured mean ridge width R",
             "point_weight": "0.1 + 0.9 * priority^2",
             "combination_score": "mean point weight",
             "subset_sizes": "min_points through regional pool size",
@@ -165,9 +167,9 @@ type OccurrenceCounts = BTreeMap<usize, usize>;
 
 fn occurrence_counts(
     result: &FeatureCombinations,
-) -> (OccurrenceCounts, BTreeMap<u8, OccurrenceCounts>) {
+) -> (OccurrenceCounts, BTreeMap<usize, OccurrenceCounts>) {
     let mut global = BTreeMap::new();
-    let mut regional = BTreeMap::<u8, OccurrenceCounts>::new();
+    let mut regional = BTreeMap::<usize, OccurrenceCounts>::new();
     for combination in &result.combinations {
         for &id in &combination.feature_ids {
             *global.entry(id).or_default() += 1;
@@ -216,21 +218,21 @@ mod tests {
         let defaults = parse_configuration(|_| None).unwrap();
         assert_eq!(defaults.min_points, 3);
         assert_eq!(defaults.pool_multiplier, 2);
-        assert_eq!(defaults.diameter_fraction, 0.5);
+        assert_eq!(defaults.radius_units, 30.0);
         assert_eq!(defaults.combinations_per_region, 12);
         assert_eq!(defaults.max_work, 10_000_000);
 
         let settings = BTreeMap::from([
             (ENVIRONMENT[0], "2"),
             (ENVIRONMENT[1], "3"),
-            (ENVIRONMENT[2], "0.75"),
+            (ENVIRONMENT[2], "24.5"),
             (ENVIRONMENT[3], "20"),
             (ENVIRONMENT[4], "1000"),
         ]);
         let config = parse_configuration(|name| settings.get(name).copied()).unwrap();
         assert_eq!(config.min_points, 2);
         assert_eq!(config.pool_multiplier, 3);
-        assert_eq!(config.diameter_fraction, 0.75);
+        assert_eq!(config.radius_units, 24.5);
         assert_eq!(config.combinations_per_region, 20);
         assert_eq!(config.max_work, 1000);
     }
@@ -246,6 +248,7 @@ mod tests {
             (ENVIRONMENT[2], "NaN"),
             (ENVIRONMENT[2], "inf"),
             (ENVIRONMENT[2], "-0.5"),
+            (ENVIRONMENT[2], "0"),
             (ENVIRONMENT[3], "0"),
             (ENVIRONMENT[4], "0"),
         ] {

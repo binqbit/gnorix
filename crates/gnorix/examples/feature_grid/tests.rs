@@ -20,7 +20,7 @@ use super::{
 
 fn fixture() -> Value {
     json!({
-        "schema": "gnorix.feature-combinations.v1", "unit_px": 4.0,
+        "schema": "gnorix.feature-combinations.v2", "unit_px": 4.0,
         "source": {"image": "test.png", "width": 20, "height": 20},
         "points": [
             {"id": 2, "kind": "ending", "position": [4,4], "priority": 0.8},
@@ -87,6 +87,7 @@ fn settings_reject_invalid_values_without_reading_global_environment() {
 fn validates_schema_numeric_fields_coordinates_and_feature_kinds() {
     for (pointer, invalid) in [
         ("/schema", json!("different.v1")),
+        ("/schema", json!("gnorix.feature-combinations.v1")),
         ("/unit_px", json!(0)),
         ("/points/0/id", json!(-1)),
         ("/points/0/id", json!(1.5)),
@@ -95,7 +96,8 @@ fn validates_schema_numeric_fields_coordinates_and_feature_kinds() {
         ("/points/0/position/0", json!("NaN")),
         ("/points/0/priority", json!(1.01)),
         ("/combinations/0/score", json!(null)),
-        ("/combinations/0/regions/0", json!(256)),
+        ("/combinations/0/regions/0", json!(-1)),
+        ("/combinations/0/regions/0", json!(1.5)),
     ] {
         let mut document = fixture();
         *document.pointer_mut(pointer).unwrap() = invalid;
@@ -104,6 +106,21 @@ fn validates_schema_numeric_fields_coordinates_and_feature_kinds() {
     let mut missing = fixture();
     missing.as_object_mut().unwrap().remove("points");
     assert!(parse_input(missing).is_err());
+}
+
+#[test]
+fn adaptive_region_identifiers_are_not_limited_to_a_fixed_grid() {
+    let mut document = fixture();
+    document["combinations"][0]["regions"] = json!([0, 9, 256, 65536]);
+    let input = parse_input(document).unwrap();
+    assert_eq!(input.combinations[0].regions, vec![0, 9, 256, 65536]);
+    let config = parse_configuration(|_| None).unwrap();
+    let shapes = prepared(&input, &config);
+    let document = manifest(Path::new("input.json"), &input, &config, &shapes);
+    assert_eq!(
+        document["combinations"][0]["regions"],
+        json!([0, 9, 256, 65536])
+    );
 }
 
 #[test]

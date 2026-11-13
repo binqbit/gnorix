@@ -17,7 +17,7 @@ from .structure import REPORT_FILES, render_structure
 
 _DATA_FILES = {"features.json", *SOURCE_IMAGE_FILES}
 _STAGE_SCHEMAS = {
-    "feature-combinations.json": "gnorix.feature-combinations.v1",
+    "feature-combinations.json": "gnorix.feature-combinations.v2",
     "feature-grid.json": "gnorix.feature-grid.v1",
 }
 _STAGE_FILES = {*_STAGE_SCHEMAS, "feature-combinations.png", "feature-grid.png"}

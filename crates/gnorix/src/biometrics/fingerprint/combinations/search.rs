@@ -1,9 +1,14 @@
-//! Global, lazy signing search over the observed points of a fresh capture.
+//! Lazy signing search over overlapping circles of a fresh capture.
 
-use std::num::NonZeroUsize;
+use std::{
+    cmp::Ordering,
+    collections::{BTreeSet, BinaryHeap},
+    num::NonZeroUsize,
+};
 
 use super::{
-    CombinationError, CombinationPoint, WorkBudget, collect_points, enumeration::RankedSubsets,
+    CombinationError, CombinationPoint, RegionBounds, WorkBudget, collect_points,
+    enumeration::RankedSubsets, regions,
 };
 use crate::{
     biometrics::{
@@ -13,14 +18,16 @@ use crate::{
     error::AlgorithmError,
 };
 
-/// Signing searches all retained, scored points, independent of enrollment's
-/// nine regions. Applications must supply the enrolled minimum and padding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Signing searches every retained, scored point inside each adaptive circle.
+/// Applications supply the enrolled minimum, circle radius and frame padding.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningSearchConfig {
     pub min_points: usize,
+    /// Initial circle radius measured in the fresh capture's mean ridge width R.
+    pub radius_units: f64,
     /// Fixed frame padding used during enrollment, not a new neighbor search.
     pub enrollment_padding: u32,
-    /// Cumulative projection, frontier, geometry entries and descriptor bytes.
+    /// Cumulative projection, regions, frontier, deduplication and geometry work.
     /// The caller's authorization limits separately bound candidate attempts.
     pub max_work: usize,
     pub max_descriptor_bytes: NonZeroUsize,
@@ -31,6 +38,11 @@ impl SigningSearchConfig {
         if self.min_points == 0 || self.min_points.checked_mul(2).is_none() {
             return Err(CombinationError::InvalidConfig(
                 "signing subset size must be nonzero and its double must fit usize",
+            ));
+        }
+        if !self.radius_units.is_finite() || self.radius_units <= 0.0 {
+            return Err(CombinationError::InvalidConfig(
+                "circle radius must be finite and positive in ridge units",
             ));
         }
         if self.enrollment_padding > i32::MAX as u32 {
@@ -47,18 +59,22 @@ impl SigningSearchConfig {
     }
 }
 
-/// Produces one canonical baseline candidate for each global point subset of
-/// size `min_points..=min(2 * min_points, available_points)`.
+/// Produces one canonical baseline for each distinct regional point subset of
+/// size `min_points..=min(2 * min_points, points_in_region)`.
 ///
-/// Subsets use the existing mean `0.1 + 0.9 * priority²` ranking. Equal point
-/// priorities use ascending source IDs; equally scored subsets use that rank
-/// order. Known zero priorities remain eligible, while unknown scores do not.
+/// Adaptive circles cover the confirmed pattern and grow to include twice the
+/// minimum, or all available points when fewer exist. Every scored point inside
+/// a circle remains eligible. Overlapping circles never repeat the same subset.
+/// Subsets are merged by mean `0.1 + 0.9 * priority²`, then global point rank;
+/// equal point priorities use ascending source IDs. Known zero scores remain
+/// eligible, while unknown scores do not. There is no global-search fallback.
 /// No coverage seeds, regional pool cap or positional perturbations are added.
 /// The same observed subset retains enrollment's frame, phase and fixed padding.
 ///
 /// Preparation owns the projected points. Each request generates only the next
 /// candidate, so the caller can stop immediately at a Merkle membership match.
-/// Work or geometry errors are yielded once, then the stream is exhausted.
+/// Natural exhaustion covers only the configured regional space. Work or
+/// geometry errors are yielded once, then the stream is exhausted.
 pub fn signing_candidates(
     fingerprint: &Fingerprint,
     config: &SigningSearchConfig,
@@ -72,14 +88,14 @@ pub fn signing_candidates(
     }
     let mut work = WorkBudget::new(config.max_work);
     let (points, _) = collect_points(fingerprint, &mut work)?;
-    let mut search = SigningSearch::new(points, spacing, *config, work)?;
+    let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
+    let mut search = SigningSearch::new(points, bounds, spacing, *config, work)?;
     Ok(Box::new(std::iter::from_fn(move || search.next())))
 }
 
 struct SigningSearch {
     points: Vec<CombinationPoint>,
-    priorities: Vec<f64>,
-    subsets: RankedSubsets,
+    subsets: RegionalSubsets,
     spacing: f64,
     config: SigningSearchConfig,
     work: WorkBudget,
@@ -89,6 +105,7 @@ struct SigningSearch {
 impl SigningSearch {
     fn new(
         mut points: Vec<CombinationPoint>,
+        bounds: RegionBounds,
         spacing: f64,
         config: SigningSearchConfig,
         mut work: WorkBudget,
@@ -101,16 +118,17 @@ impl SigningSearch {
         }
         work.spend(points.len())?;
         points.sort_unstable_by(|a, b| b.priority.total_cmp(&a.priority).then(a.id.cmp(&b.id)));
-        work.spend(points.len())?;
-        let priorities = points
-            .iter()
-            .map(|point| point.priority)
-            .collect::<Vec<_>>();
-        let maximum = (2 * config.min_points).min(points.len());
-        let subsets = RankedSubsets::new(&priorities, config.min_points, maximum, &mut work)?;
+        let circles = regions::circular_regions(
+            &points,
+            bounds,
+            spacing,
+            config.radius_units,
+            2 * config.min_points,
+            &mut work,
+        )?;
+        let subsets = RegionalSubsets::new(&points, circles, config.min_points, &mut work)?;
         Ok(Self {
             points,
-            priorities,
             subsets,
             spacing,
             config,
@@ -137,12 +155,11 @@ impl SigningSearch {
     }
 
     fn advance(&mut self) -> Result<Option<Candidate>, AlgorithmError> {
-        let Some(subset) = self.subsets.next(&self.priorities, &mut self.work)? else {
+        let Some(ranks) = self.subsets.next(&mut self.work)? else {
             return Ok(None);
         };
-        self.work.spend(subset.ranks.len())?;
-        let mut selected = subset
-            .ranks
+        self.work.spend(ranks.len())?;
+        let mut selected = ranks
             .iter()
             .map(|&rank| &self.points[rank])
             .collect::<Vec<_>>();
@@ -164,6 +181,122 @@ impl SigningSearch {
     }
 }
 
+struct RegionCursor {
+    indices: Vec<usize>,
+    priorities: Vec<f64>,
+    subsets: RankedSubsets,
+}
+
+/// Keep one head per regional stream; expand a consumed head only on demand.
+struct RegionalSubsets {
+    regions: Vec<RegionCursor>,
+    pending: BinaryHeap<RegionHead>,
+    deferred: Option<usize>,
+    seen: BTreeSet<Vec<usize>>,
+}
+
+impl RegionalSubsets {
+    fn new(
+        points: &[CombinationPoint],
+        circles: Vec<regions::RegionCandidates>,
+        minimum: usize,
+        work: &mut WorkBudget,
+    ) -> Result<Self, CombinationError> {
+        let mut search = Self {
+            regions: Vec::new(),
+            pending: BinaryHeap::new(),
+            deferred: None,
+            seen: BTreeSet::new(),
+        };
+        for circle in circles {
+            work.spend(1)?;
+            work.spend(circle.indices.len())?;
+            let priorities: Vec<_> = circle
+                .indices
+                .iter()
+                .map(|&index| points[index].priority)
+                .collect();
+            let maximum = (2 * minimum).min(priorities.len());
+            let subsets = RankedSubsets::new(&priorities, minimum, maximum, work)?;
+            let region = search.regions.len();
+            search.regions.push(RegionCursor {
+                indices: circle.indices,
+                priorities,
+                subsets,
+            });
+            search.replenish(region, work)?;
+        }
+        Ok(search)
+    }
+
+    fn next(&mut self, work: &mut WorkBudget) -> Result<Option<Vec<usize>>, CombinationError> {
+        loop {
+            if let Some(region) = self.deferred.take() {
+                self.replenish(region, work)?;
+            }
+            let Some(head) = self.pending.pop() else {
+                return Ok(None);
+            };
+            work.spend(1)?;
+            self.deferred = Some(head.region);
+            // Global ranks identify the same source IDs in every circle. Charge
+            // the lookup/copy even when an overlapping circle repeats a subset.
+            work.spend(head.ranks.len())?;
+            if self.seen.insert(head.ranks.clone()) {
+                return Ok(Some(head.ranks));
+            }
+        }
+    }
+
+    fn replenish(&mut self, region: usize, work: &mut WorkBudget) -> Result<(), CombinationError> {
+        let cursor = &mut self.regions[region];
+        let Some(subset) = cursor.subsets.next(&cursor.priorities, work)? else {
+            return Ok(());
+        };
+        work.spend(1)?;
+        work.spend(subset.ranks.len())?;
+        self.pending.push(RegionHead {
+            region,
+            ranks: subset
+                .ranks
+                .iter()
+                .map(|&rank| cursor.indices[rank])
+                .collect(),
+            score: subset.score,
+        });
+        Ok(())
+    }
+}
+
+struct RegionHead {
+    region: usize,
+    ranks: Vec<usize>,
+    score: f64,
+}
+
+impl PartialEq for RegionHead {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for RegionHead {}
+
+impl PartialOrd for RegionHead {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RegionHead {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score
+            .total_cmp(&other.score)
+            .then_with(|| other.ranks.cmp(&self.ranks))
+            .then_with(|| other.region.cmp(&self.region))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +312,7 @@ mod tests {
     fn config(min_points: usize, enrollment_padding: u32) -> SigningSearchConfig {
         SigningSearchConfig {
             min_points,
+            radius_units: 100_000.0,
             enrollment_padding,
             max_work: 1_000_000,
             max_descriptor_bytes: NonZeroUsize::new(4096).unwrap(),
@@ -199,7 +333,32 @@ mod tests {
 
     fn search(points: Vec<CombinationPoint>, config: SigningSearchConfig) -> SigningSearch {
         config.validate().unwrap();
-        SigningSearch::new(points, 2.3, config, WorkBudget::new(config.max_work)).unwrap()
+        let bounds = bounds(&points);
+        SigningSearch::new(
+            points,
+            bounds,
+            2.3,
+            config,
+            WorkBudget::new(config.max_work),
+        )
+        .unwrap()
+    }
+
+    fn bounds(points: &[CombinationPoint]) -> RegionBounds {
+        let extent = |coordinate: fn(&CombinationPoint) -> f64| {
+            points
+                .iter()
+                .map(coordinate)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| {
+                    (min.min(value), max.max(value))
+                })
+        };
+        let (left, right) = extent(|point| point.position.x());
+        let (top, bottom) = extent(|point| point.position.y());
+        RegionBounds {
+            min: Point::new(left - 0.5, top - 0.5).unwrap(),
+            max: Point::new(right + 0.5, bottom + 0.5).unwrap(),
+        }
     }
 
     fn baseline(points: &[CombinationPoint], ids: Vec<usize>, padding: u32) -> Candidate {
@@ -228,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn searches_every_global_subset_in_the_exact_size_range_and_enrolled_frame() {
+    fn a_single_circle_searches_every_subset_in_the_exact_size_range_and_enrolled_frame() {
         let mut source = points(6);
         // Equal priorities exercise source-ID ties; zero remains searchable.
         source[0].priority = source[1].priority;
@@ -259,6 +418,7 @@ mod tests {
         for padding in 0..=3 {
             source.reverse();
             let mut actual = search(source.clone(), config(2, padding));
+            assert_eq!(actual.subsets.regions.len(), 1);
             for (ranks, _) in &expected {
                 let ids = ranks.iter().map(|&rank| ranked[rank].id).collect();
                 assert_eq!(
@@ -267,6 +427,84 @@ mod tests {
                 );
             }
             assert!(actual.next().is_none());
+            assert!(actual.next().is_none());
+        }
+    }
+
+    #[test]
+    fn merges_the_exhaustive_regional_union_in_priority_order_without_global_fallback() {
+        for priority_case in 0..3 {
+            let mut source = points(8);
+            for (index, point) in source.iter_mut().enumerate() {
+                point.priority = match priority_case {
+                    0 => point.priority,
+                    1 => (index / 2) as f64 / 4.0,
+                    _ => 0.0,
+                };
+            }
+            source.sort_unstable_by(|a, b| b.priority.total_cmp(&a.priority).then(a.id.cmp(&b.id)));
+            let controls = SigningSearchConfig {
+                radius_units: 10.0,
+                ..config(2, 1)
+            };
+            let circles = regions::circular_regions(
+                &source,
+                bounds(&source),
+                2.3,
+                controls.radius_units,
+                4,
+                &mut WorkBudget::new(1_000_000),
+            )
+            .unwrap();
+            assert!(circles.len() > 1);
+            let mut expected = BTreeSet::new();
+            let mut occurrences = 0;
+            for circle in &circles {
+                for mask in 1_usize..1 << circle.indices.len() {
+                    if !(2..=4).contains(&(mask.count_ones() as usize)) {
+                        continue;
+                    }
+                    let ranks: Vec<_> = circle
+                        .indices
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(offset, &rank)| (mask & (1 << offset) != 0).then_some(rank))
+                        .collect();
+                    expected.insert(ranks);
+                    occurrences += 1;
+                }
+            }
+            let score = |ranks: &[usize]| {
+                0.1 + 0.9
+                    * (ranks
+                        .iter()
+                        .map(|&rank| source[rank].priority.powi(2))
+                        .sum::<f64>()
+                        / ranks.len() as f64)
+            };
+            let mut expected: Vec<_> = expected.into_iter().collect();
+            expected.sort_unstable_by(|a, b| score(b).total_cmp(&score(a)).then(a.cmp(b)));
+            assert!(
+                expected.len() < occurrences,
+                "overlap must exercise deduplication"
+            );
+            // A global search of 8 points would yield C(8,2)+C(8,3)+C(8,4)=154.
+            assert!(
+                expected.len() < 154,
+                "remote-only subsets must stay excluded"
+            );
+            let mut shuffled = source.clone();
+            shuffled.reverse();
+            let mut actual = search(shuffled, controls);
+            for ranks in &expected {
+                let ids = ranks.iter().map(|&rank| source[rank].id).collect();
+                assert_eq!(
+                    actual.next().unwrap().unwrap().as_bytes(),
+                    baseline(&source, ids, 1).as_bytes()
+                );
+            }
+            assert!(actual.next().is_none());
+            assert_eq!(actual.subsets.seen.len(), expected.len());
             assert!(actual.next().is_none());
         }
     }
@@ -291,11 +529,11 @@ mod tests {
     }
 
     #[test]
-    fn first_result_does_not_enumerate_the_global_space_or_enrollment_neighbors() {
+    fn first_result_does_not_enumerate_the_regional_space_or_enrollment_neighbors() {
         let mut large = search(
             points(299),
             SigningSearchConfig {
-                max_work: 10_000,
+                max_work: 20_000,
                 ..config(3, 1)
             },
         );
@@ -328,9 +566,13 @@ mod tests {
 
     #[test]
     fn cumulative_work_limit_and_late_descriptor_failure_terminate_the_stream() {
-        let source = points(5);
-        let controls = config(2, 1);
+        let source = points(8);
+        let controls = SigningSearchConfig {
+            radius_units: 10.0,
+            ..config(2, 1)
+        };
         let mut measured = search(source.clone(), controls);
+        assert!(measured.subsets.regions.len() > 1);
         measured.next().unwrap().unwrap();
         let first_work = controls.max_work - measured.work.remaining;
         let mut bounded = search(
@@ -389,6 +631,18 @@ mod tests {
                 enrollment_padding: u32::MAX,
                 ..config(2, 1)
             },
+            SigningSearchConfig {
+                radius_units: 0.0,
+                ..config(2, 1)
+            },
+            SigningSearchConfig {
+                radius_units: f64::NAN,
+                ..config(2, 1)
+            },
+            SigningSearchConfig {
+                radius_units: f64::INFINITY,
+                ..config(2, 1)
+            },
         ] {
             assert!(matches!(
                 invalid.validate(),
@@ -396,7 +650,13 @@ mod tests {
             ));
         }
         assert!(matches!(
-            SigningSearch::new(points(2), 2.3, config(3, 1), WorkBudget::new(100)),
+            SigningSearch::new(
+                points(2),
+                bounds(&points(2)),
+                2.3,
+                config(3, 1),
+                WorkBudget::new(100)
+            ),
             Err(CombinationError::InsufficientPoints {
                 required: 3,
                 available: 2

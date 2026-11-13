@@ -1,12 +1,27 @@
-//! Confirmed-pattern bounds and priority-ranked circular pools.
+//! Shared adaptive circles, followed by bounded enrollment pool selection.
+
+mod layout;
+
+#[cfg(test)]
+mod tests;
 
 use super::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, Fingerprint,
     FingerprintError, Point, RegionBounds, WorkBudget,
 };
 
+pub(super) struct RegionCandidates {
+    pub id: usize,
+    pub center: Point,
+    pub initial_radius: f64,
+    pub radius: f64,
+    /// All in-circle indices into the source point slice, ranked by priority/ID.
+    pub indices: Vec<usize>,
+}
+
 pub(super) fn pattern_bounds(
     fingerprint: &Fingerprint,
+    points: &[CombinationPoint],
     work: &mut WorkBudget,
 ) -> Result<RegionBounds, CombinationError> {
     let map = &fingerprint.scale.skeleton;
@@ -21,7 +36,8 @@ pub(super) fn pattern_bounds(
             ),
         ));
     }
-    support_bounds(support, map.width(), work)
+    let bounds = support_bounds(support, map.width(), work)?;
+    cover_points(bounds, points, work)
 }
 
 fn support_bounds(
@@ -50,157 +66,170 @@ fn support_bounds(
     })
 }
 
+fn cover_points(
+    bounds: RegionBounds,
+    points: &[CombinationPoint],
+    work: &mut WorkBudget,
+) -> Result<RegionBounds, CombinationError> {
+    work.spend(points.len())?;
+    let mut min = [bounds.min.x(), bounds.min.y()];
+    let mut max = [bounds.max.x(), bounds.max.y()];
+    for point in points {
+        min[0] = min[0].min(point.position.x());
+        min[1] = min[1].min(point.position.y());
+        max[0] = max[0].max(point.position.x());
+        max[1] = max[1].max(point.position.y());
+    }
+    Ok(RegionBounds {
+        min: Point::new(min[0], min[1]).expect("finite source bounds"),
+        max: Point::new(max[0], max[1]).expect("finite source bounds"),
+    })
+}
+
 pub(super) fn select(
     points: &[CombinationPoint],
     bounds: RegionBounds,
+    unit_px: f64,
     config: &CombinationConfig,
     work: &mut WorkBudget,
 ) -> Result<Vec<CombinationRegion>, CombinationError> {
-    let width = bounds.max.x() - bounds.min.x();
-    let height = bounds.max.y() - bounds.min.y();
-    let initial_radius = config.diameter_fraction * width.min(height) / 2.0;
-    if !initial_radius.is_finite() || initial_radius <= 0.0 {
-        return Err(CombinationError::InvalidConfig(
-            "circle radius is not finite and positive",
-        ));
-    }
-    let target = (config.min_points * config.pool_multiplier).min(points.len());
-    (0..9)
-        .map(|id| {
-            let center = Point::new(
-                bounds.min.x() + width * (f64::from(id % 3) + 0.5) / 3.0,
-                bounds.min.y() + height * (f64::from(id / 3) + 0.5) / 3.0,
-            )
-            .expect("finite region center");
-            select_pool(points, id, center, initial_radius, target, work)
+    let target = config
+        .min_points
+        .checked_mul(config.pool_multiplier)
+        .ok_or(CombinationError::InvalidConfig("point pool size overflows"))?
+        .min(points.len());
+    circular_regions(points, bounds, unit_px, config.radius_units, target, work)?
+        .into_iter()
+        .map(|region| {
+            work.spend(target)?;
+            Ok(CombinationRegion {
+                id: region.id,
+                center: region.center,
+                initial_radius: region.initial_radius,
+                radius: region.radius,
+                available_points: region.indices.len(),
+                pool: region
+                    .indices
+                    .into_iter()
+                    .take(target)
+                    .map(|index| points[index].id)
+                    .collect(),
+                combination_count: 0,
+            })
         })
         .collect()
 }
 
-fn select_pool(
+/// Keep every in-circle point for signing. Enrollment alone truncates this list
+/// to its target pool. Sparse circles grow just enough to reach the shared target.
+pub(super) fn circular_regions(
     points: &[CombinationPoint],
-    id: u8,
+    bounds: RegionBounds,
+    unit_px: f64,
+    radius_units: f64,
+    target: usize,
+    work: &mut WorkBudget,
+) -> Result<Vec<RegionCandidates>, CombinationError> {
+    let radius = measured_radius(unit_px, radius_units)?;
+    if target == 0 || points.is_empty() {
+        return Err(CombinationError::InvalidConfig(
+            "circle point target must be nonzero",
+        ));
+    }
+    let target = target.min(points.len());
+    let width = bounds.max.x() - bounds.min.x();
+    let height = bounds.max.y() - bounds.min.y();
+    let layout = layout::covering_grid(width, height, radius, work)?;
+    // Every circle must visit the source points and retain at least its target.
+    // Reject an impossible budget before reserving the whole region vector.
+    let minimum_work = points
+        .len()
+        .checked_add(target)
+        .and_then(|count| count.checked_add(1))
+        .and_then(|count| count.checked_mul(layout.count()))
+        .ok_or(CombinationError::WorkLimit)?;
+    if minimum_work > work.remaining {
+        return Err(CombinationError::WorkLimit);
+    }
+    work.spend(layout.count())?;
+    let mut regions = Vec::with_capacity(layout.count());
+    for id in 0..layout.count() {
+        let center = Point::new(
+            bounds.min.x() + width * ((id % layout.columns) as f64 + 0.5) / layout.columns as f64,
+            bounds.min.y() + height * ((id / layout.columns) as f64 + 0.5) / layout.rows as f64,
+        )
+        .map_err(|_| {
+            CombinationError::InvalidFingerprint(FingerprintError::InvalidMap(
+                "region center is not finite",
+            ))
+        })?;
+        regions.push(circle_candidates(points, id, center, radius, target, work)?);
+    }
+    Ok(regions)
+}
+
+fn measured_radius(unit_px: f64, radius_units: f64) -> Result<f64, CombinationError> {
+    if !unit_px.is_finite() || unit_px <= 0.0 {
+        return Err(CombinationError::InvalidFingerprint(
+            FingerprintError::ScaleUnavailable("ridge width must be finite and positive"),
+        ));
+    }
+    let radius = radius_units * unit_px;
+    if !radius_units.is_finite() || radius_units <= 0.0 || !radius.is_finite() || radius <= 0.0 {
+        return Err(CombinationError::InvalidConfig(
+            "circle radius must be finite and positive",
+        ));
+    }
+    Ok(radius)
+}
+
+fn circle_candidates(
+    points: &[CombinationPoint],
+    id: usize,
     center: Point,
     initial_radius: f64,
     target: usize,
     work: &mut WorkBudget,
-) -> Result<CombinationRegion, CombinationError> {
+) -> Result<RegionCandidates, CombinationError> {
     work.spend(points.len())?;
     let mut distances: Vec<_> = points
         .iter()
-        .map(|point| {
+        .enumerate()
+        .map(|(index, point)| {
             (
                 (point.position.x() - center.x()).hypot(point.position.y() - center.y()),
-                point,
+                index,
             )
         })
         .collect();
-    distances.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+    distances.sort_unstable_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then(points[a.1].id.cmp(&points[b.1].id))
+    });
     let radius = initial_radius.max(distances[target - 1].0);
-    let mut inside: Vec<_> = distances
-        .iter()
-        .take_while(|(distance, _)| *distance <= radius)
-        .map(|(_, point)| *point)
-        .collect();
-    let available_points = inside.len();
-    inside.sort_by(|a, b| b.priority.total_cmp(&a.priority).then(a.id.cmp(&b.id)));
-    let pool = inside.iter().take(target).map(|point| point.id).collect();
-    Ok(CombinationRegion {
+    if !radius.is_finite() {
+        return Err(CombinationError::InvalidFingerprint(
+            FingerprintError::InvalidMap("point distance from circle center is not finite"),
+        ));
+    }
+    let inside = distances.partition_point(|(distance, _)| *distance <= radius);
+    work.spend(inside)?;
+    let mut indices = distances
+        .into_iter()
+        .take(inside)
+        .map(|(_, index)| index)
+        .collect::<Vec<_>>();
+    indices.sort_unstable_by(|&a, &b| {
+        points[b]
+            .priority
+            .total_cmp(&points[a].priority)
+            .then(points[a].id.cmp(&points[b].id))
+    });
+    Ok(RegionCandidates {
         id,
         center,
         initial_radius,
         radius,
-        available_points,
-        pool,
-        combination_count: 0,
+        indices,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::biometrics::fingerprint::FeatureKind;
-
-    fn point(id: usize, x: f64, priority: f64) -> CombinationPoint {
-        CombinationPoint {
-            id,
-            kind: FeatureKind::Ending,
-            position: Point::new(x, 0.0).unwrap(),
-            priority,
-        }
-    }
-
-    #[test]
-    fn grows_to_target_and_ranks_all_points_on_inclusive_boundary() {
-        let points = vec![point(5, -3.0, 0.9), point(3, 1.0, 0.0), point(2, 3.0, 0.8)];
-        let pool = select_pool(
-            &points,
-            0,
-            Point::new(0.0, 0.0).unwrap(),
-            1.0,
-            2,
-            &mut WorkBudget::new(100),
-        )
-        .unwrap();
-        assert_eq!(pool.radius, 3.0);
-        assert_eq!(pool.available_points, 3);
-        assert_eq!(pool.pool, vec![5, 2]);
-    }
-
-    #[test]
-    fn retains_initial_radius_and_uses_ids_to_break_equal_priority_ties() {
-        let points = vec![point(8, 1.0, 0.2), point(2, 2.0, 0.2), point(3, 4.0, 1.0)];
-        let pool = select_pool(
-            &points,
-            0,
-            Point::new(0.0, 0.0).unwrap(),
-            5.0,
-            2,
-            &mut WorkBudget::new(100),
-        )
-        .unwrap();
-        assert_eq!(pool.radius, 5.0);
-        assert_eq!(pool.pool, vec![3, 2]);
-    }
-
-    #[test]
-    fn bounds_use_confirmed_pixel_edges_and_centers_visit_nine_cells() {
-        let mut mask = vec![false; 100];
-        mask[22] = true;
-        mask[77] = true;
-        let bounds = support_bounds(&mask, 10, &mut WorkBudget::new(100)).unwrap();
-        assert_eq!(bounds.min, Point::new(1.5, 1.5).unwrap());
-        assert_eq!(bounds.max, Point::new(7.5, 7.5).unwrap());
-        let config = CombinationConfig {
-            min_points: 1,
-            pool_multiplier: 1,
-            diameter_fraction: 0.5,
-            combinations_per_region: 1,
-            max_work: 100,
-        };
-        let result = select(
-            &[point(0, 4.0, 1.0)],
-            bounds,
-            &config,
-            &mut WorkBudget::new(100),
-        )
-        .unwrap();
-        assert_eq!(result.len(), 9);
-        assert_eq!(result[0].center, Point::new(2.5, 2.5).unwrap());
-        assert_eq!(result[4].center, Point::new(4.5, 4.5).unwrap());
-        assert_eq!(result[8].center, Point::new(6.5, 6.5).unwrap());
-        assert!(result.iter().all(|r| r.initial_radius == 1.5));
-    }
-
-    #[test]
-    fn missing_pattern_and_exhausted_work_are_explicit() {
-        assert_eq!(
-            support_bounds(&[false; 4], 2, &mut WorkBudget::new(4)),
-            Err(CombinationError::PatternUnavailable)
-        );
-        assert_eq!(
-            support_bounds(&[true; 4], 2, &mut WorkBudget::new(3)),
-            Err(CombinationError::WorkLimit)
-        );
-    }
 }

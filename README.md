@@ -15,7 +15,7 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Architecture](docs/architecture.md) describes component responsibilities, the user/verifier boundary, independent library and NEAR integration.
 - [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
 - [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
-- [Fingerprint signing](docs/fingerprint-signing.md) covers global point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
+- [Fingerprint signing](docs/fingerprint-signing.md) covers regional point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
 
 ## Development
 

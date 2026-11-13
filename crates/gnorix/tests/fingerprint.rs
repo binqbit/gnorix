@@ -213,7 +213,7 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     let config = fingerprint::CombinationConfig {
         min_points: 3,
         pool_multiplier: 2,
-        diameter_fraction: 0.5,
+        radius_units: 30.0,
         combinations_per_region: 12,
         max_work: 10_000_000,
     };
@@ -223,7 +223,7 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
         fingerprint::generate_combinations(result, &config).unwrap()
     );
     assert!(selected.work_used > 0 && selected.work_used <= config.max_work);
-    assert_eq!(selected.regions.len(), 9);
+    assert_eq!(selected.regions.len(), 4);
     assert!(selected.points.len() >= config.min_points * config.pool_multiplier);
     assert!(
         selected
@@ -247,11 +247,11 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
 
     assert_combination_subsets(&selected, &config);
     for (id, region) in selected.regions.iter().enumerate() {
-        assert_eq!(usize::from(region.id), id);
+        assert_eq!(region.id, id);
         assert_combination_region(&selected, region, &config);
     }
     assert_combination_failures(result, &selected, config);
-    assert_overlapping_region_deduplication(result, config);
+    assert_single_region_selection(result, config);
 
     // Source IDs, rather than incidental storage order, define the output.
     result.feature_strength.candidates.reverse();
@@ -260,18 +260,19 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     assert_eq!(selected, reordered);
 }
 
-fn assert_overlapping_region_deduplication(
+fn assert_single_region_selection(
     result: &fingerprint::Fingerprint,
     config: fingerprint::CombinationConfig,
 ) {
     let selected = fingerprint::generate_combinations(
         result,
         &fingerprint::CombinationConfig {
-            diameter_fraction: 10.0,
+            radius_units: 1000.0,
             ..config
         },
     )
     .unwrap();
+    assert_eq!(selected.regions.len(), 1);
     assert_eq!(selected.combinations.len(), config.combinations_per_region);
     for region in &selected.regions {
         assert_eq!(region.available_points, selected.points.len());
@@ -279,7 +280,7 @@ fn assert_overlapping_region_deduplication(
         assert_eq!(region.combination_count, config.combinations_per_region);
     }
     for combination in &selected.combinations {
-        assert_eq!(combination.regions, (0..9).collect::<Vec<_>>());
+        assert_eq!(combination.regions, [0]);
     }
 }
 
@@ -302,7 +303,7 @@ fn assert_combination_subsets(
         assert!(!combination.regions.is_empty());
         assert!(combination.regions.windows(2).all(|pair| pair[0] < pair[1]));
         for &id in &combination.regions {
-            let region = &selected.regions[usize::from(id)];
+            let region = &selected.regions[id];
             assert!(combination.feature_ids.len() <= region.pool.len());
             assert!(
                 combination

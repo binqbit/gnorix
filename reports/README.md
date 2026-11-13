@@ -21,10 +21,10 @@ The nine PNG figures include [local clarity](fingerprint/clarity-analysis.png), 
 
 See the [tool guide](../tools/fingerprint-reports/README.md) for setup, opacity, PNG resolution and recovery behavior.
 
-The separate [regional-combinations example](../docs/feature-combinations.md) writes its unified point-subset list to `fingerprint/feature-combinations.json`. An optional `fingerprint/feature-combinations.png` can illustrate the nine selected pools. These outputs belong to one capture and its explicit combination settings; refreshing the main report removes them along with the previous analysis. Generate the combinations again after a refresh.
+The separate [regional-combinations example](../docs/feature-combinations.md) writes its unified point-subset list to `fingerprint/feature-combinations.json`. An optional `fingerprint/feature-combinations.png` can illustrate the adaptive selected pools. These outputs belong to one capture and its explicit combination settings; refreshing the main report removes them along with the previous analysis. Generate the combinations again after a refresh.
 
 The next [grid-figure stage](../docs/grid-shapes.md) consumes that JSON and writes `fingerprint/feature-grid.json`: hull orientation, nearest nodes at measured ridge width R, fixed padding, and every positional variant. An optional `fingerprint/feature-grid.png` illustrates the transformation and neighbor choices. These files follow the same report refresh lifecycle.
 
 The [enrollment example](../docs/grx-packages.md) can write `enrollment/<merkle-root>.grx`. This separate package contains context and Merkle leaf hashes for later public-key membership lookup. Fingerprint report refresh does not remove enrollment packages.
 
-The [fresh-image signing example](../docs/fingerprint-signing.md) keeps crop images, public authorizations and its [run record](enrollment/signing/results.json) under `enrollment/signing/`. It extracts each image again and signs with the first key found in the existing package. The current full-image and three crop runs all verified; these are crops of one synthetic fixture, not independent sensor captures. This directory also survives fingerprint report refreshes.
+The [fresh-image signing example](../docs/fingerprint-signing.md) keeps crop images, public authorizations and its [run record](enrollment/signing/results.json) under `enrollment/signing/`. It extracts each image again and signs with the first key found in the existing package. This directory also survives fingerprint report refreshes.

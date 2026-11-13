@@ -22,6 +22,7 @@ pub(super) fn read() -> Result<Controls> {
     Ok(Controls {
         search: SigningSearchConfig {
             min_points: combination.min_points,
+            radius_units: combination.radius_units,
             enrollment_padding: grid.uncertainty_steps,
             max_work: work,
             max_descriptor_bytes: nonzero(1024 * 1024)?,

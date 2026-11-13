@@ -100,7 +100,7 @@ class CommandTests(unittest.TestCase):
         self.output.mkdir(parents=True, exist_ok=True)
         if include_json:
             (self.output / "feature-combinations.json").write_text(
-                json.dumps({"schema": "gnorix.feature-combinations.v1"}), encoding="utf-8"
+                json.dumps({"schema": "gnorix.feature-combinations.v2"}), encoding="utf-8"
             )
         if include_png:
             shutil.copyfile(self.image, self.output / "feature-combinations.png")
@@ -232,10 +232,11 @@ class CommandTests(unittest.TestCase):
 
     def test_unidentified_combination_files_and_symlinks_remain_protected(self):
         outside = self.root / "outside.json"
-        outside.write_text('{"schema":"gnorix.feature-combinations.v1"}')
+        outside.write_text('{"schema":"gnorix.feature-combinations.v2"}')
         for native in (False, True):
             for case in (
                 "wrong-schema",
+                "obsolete-schema",
                 "malformed-json",
                 "non-object",
                 "extra",
@@ -251,6 +252,8 @@ class CommandTests(unittest.TestCase):
                     data = self.output / "feature-combinations.json"
                     if case == "wrong-schema":
                         data.write_text('{"schema":"other"}')
+                    elif case == "obsolete-schema":
+                        data.write_text('{"schema":"gnorix.feature-combinations.v1"}')
                     elif case == "malformed-json":
                         data.write_text("{")
                     elif case == "non-object":
@@ -275,7 +278,7 @@ class CommandTests(unittest.TestCase):
                     run.assert_not_called()
                     self.assertEqual(self.contents(), before)
                     self.assertEqual(
-                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v1"}'
+                        outside.read_text(), '{"schema":"gnorix.feature-combinations.v2"}'
                     )
                     shutil.rmtree(self.output.parent)
 
