@@ -1,0 +1,165 @@
+//! Enroll every imported grid variant using an explicit example crypto suite.
+
+#[path = "support/grid_config.rs"]
+mod grid_config;
+#[path = "feature_grid/input.rs"]
+mod input;
+#[path = "enroll_grid/output.rs"]
+mod output;
+#[path = "enroll_grid/provider.rs"]
+mod provider;
+#[path = "enroll_grid/settings.rs"]
+mod settings;
+
+use std::{
+    env,
+    error::Error,
+    fs::File,
+    path::{Path, PathBuf},
+};
+
+use gnorix::{
+    biometrics::fingerprint::{self, GridShapes},
+    crypto::{CryptoProvider, SecretInput, SignatureVerifier},
+    enrollment::{self, EnrollmentContext},
+    merkle,
+    package::{EnrollmentPackage, PackageLimits},
+    policy::Limits,
+};
+
+use provider::ExampleCrypto;
+
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
+
+fn main() -> Result<()> {
+    let (input_path, context_path, output_directory) = arguments()?;
+    let prepared = prepare(&input_path, &context_path)?;
+    let package = enroll(&prepared)?;
+    let (path, bytes) = publish(&package, &prepared, &output_directory)?;
+    println!(
+        "{} assignments; {} distinct Merkle leaves; {} bytes; membership and signature readback verified\n{}",
+        prepared.grid.variant_count(),
+        package.commitment().leaf_count,
+        bytes,
+        path.display(),
+    );
+    Ok(())
+}
+
+struct PreparedEnrollment {
+    grid: GridShapes,
+    context: EnrollmentContext,
+    secret: Option<SecretInput>,
+    limits: Limits,
+    package_limits: PackageLimits,
+}
+
+fn prepare(input_path: &Path, context_path: &Path) -> Result<PreparedEnrollment> {
+    let config = grid_config::read()?;
+    let limits = settings::limits(&config)?;
+    let package_limits = settings::package_limits(&config)?;
+    let spec = settings::read_context(&mut File::open(context_path)?)?;
+    let secret = settings::read_secret(spec.secret_policy)?;
+    let input = input::read(&mut File::open(input_path)?, MAX_JSON_BYTES)?;
+    let context = EnrollmentContext {
+        spec,
+        profile_id: settings::profile_id(&input.metadata, &config)?,
+        suite_id: ExampleCrypto.suite_id().to_owned(),
+    };
+    context.encode(&limits)?;
+    let grid = fingerprint::prepare_grid_shapes(
+        &input.points,
+        &input.combinations,
+        input.unit_px,
+        &config,
+    )?;
+    Ok(PreparedEnrollment {
+        grid,
+        context,
+        secret,
+        limits,
+        package_limits,
+    })
+}
+
+fn enroll(prepared: &PreparedEnrollment) -> Result<EnrollmentPackage> {
+    let candidates = prepared
+        .grid
+        .candidates(settings::nonzero(settings::MAX_DESCRIPTOR_BYTES)?);
+    let enrollment = enrollment::enroll_candidates(
+        &ExampleCrypto,
+        candidates,
+        prepared.context.clone(),
+        prepared.secret.as_ref(),
+        &prepared.limits,
+    )?;
+    Ok(EnrollmentPackage::from_enrollment(
+        &enrollment,
+        &prepared.limits,
+    )?)
+}
+
+fn publish(
+    package: &EnrollmentPackage,
+    prepared: &PreparedEnrollment,
+    output_directory: &Path,
+) -> Result<(PathBuf, usize)> {
+    let bytes = package.encode(&prepared.package_limits, &prepared.limits)?;
+    let path = output_directory.join(package.filename());
+    output::write_new(&path, &bytes)?;
+    let readback = output::read(&path, prepared.package_limits.max_bytes.get())?;
+    let restored =
+        EnrollmentPackage::decode(&readback, &prepared.package_limits, &prepared.limits)?;
+    if restored.commitment() != package.commitment() {
+        return Err("package readback changed the enrollment commitment".into());
+    }
+    verify_member(
+        &prepared.grid,
+        &restored,
+        prepared.secret.as_ref(),
+        &prepared.limits,
+    )?;
+    Ok((path, bytes.len()))
+}
+
+fn arguments() -> Result<(PathBuf, PathBuf, PathBuf)> {
+    let arguments: Vec<_> = env::args_os().skip(1).collect();
+    if arguments.len() != 3 {
+        return Err(
+            "usage: enroll_grid <combinations.json> <context.json> <output-directory>".into(),
+        );
+    }
+    Ok((
+        PathBuf::from(&arguments[0]),
+        PathBuf::from(&arguments[1]),
+        PathBuf::from(&arguments[2]),
+    ))
+}
+
+fn verify_member(
+    prepared: &GridShapes,
+    package: &EnrollmentPackage,
+    secret: Option<&SecretInput>,
+    limits: &Limits,
+) -> Result<()> {
+    let candidate = prepared
+        .candidates(settings::nonzero(settings::MAX_DESCRIPTOR_BYTES)?)
+        .next()
+        .ok_or("no candidate for package readback")??;
+    let context = package.commitment().context.encode(limits)?;
+    let key = ExampleCrypto.derive_key(&candidate, &context, secret)?;
+    let public = ExampleCrypto.public_key(&key)?;
+    let proof = package.proof_for(&public, limits)?;
+    merkle::verify(
+        package.commitment().root,
+        merkle::leaf_hash(&context, &public),
+        &proof,
+    )?;
+    let message = b"gnorix.example.package-readback.v1";
+    let signature = ExampleCrypto.sign(&key, message)?;
+    if !ExampleCrypto.verify(&public, message, &signature)? {
+        return Err("example signature readback failed".into());
+    }
+    Ok(())
+}

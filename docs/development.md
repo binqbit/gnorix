@@ -74,6 +74,8 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/feature_grid.rs` orchestrates the [complete grid variants](grid-shapes.md) stage and its environment controls. Its `feature_grid/input.rs` module reads the bounded combination export; `feature_grid/output.rs` streams bounded JSON and removes partial outputs if traversal or writing fails. File I/O stays outside the library.
 
+`examples/enroll_grid.rs` consumes that same combination input, streams grid candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. Both grid examples use `examples/support/grid_config.rs` for their controls.
+
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 
 ## Connecting algorithms

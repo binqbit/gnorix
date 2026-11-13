@@ -24,3 +24,5 @@ See the [tool guide](../tools/fingerprint-reports/README.md) for setup, opacity,
 The separate [regional-combinations example](../docs/feature-combinations.md) writes its unified point-subset list to `fingerprint/feature-combinations.json`. An optional `fingerprint/feature-combinations.png` can illustrate the nine selected pools. These outputs belong to one capture and its explicit combination settings; refreshing the main report removes them along with the previous analysis. Generate the combinations again after a refresh.
 
 The next [grid-figure stage](../docs/grid-shapes.md) consumes that JSON and writes `fingerprint/feature-grid.json`: hull orientation, nearest nodes at measured ridge width R, fixed padding, and every positional variant. An optional `fingerprint/feature-grid.png` illustrates the transformation and neighbor choices. These files follow the same report refresh lifecycle.
+
+The [enrollment example](../docs/grx-packages.md) can write `enrollment/<merkle-root>.grx`. This separate package contains context and Merkle leaf hashes for later public-key membership lookup. Fingerprint report refresh does not remove enrollment packages.

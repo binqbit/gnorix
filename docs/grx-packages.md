@@ -48,3 +48,18 @@ leaves:         leaf_count × 32 bytes, strictly increasing
 The context includes the domain, subject, enrollment ID/revision, public salt, secret policy, measurement profile ID and crypto suite ID. Its encoding is the existing `gnorix.enrollment.v1` length-prefixed format. A profile ID identifies the interpretation; this package does not serialize the acquisition/reconstruction model. Applications retain their processing settings separately.
 
 Loading enforces byte, context and leaf-count bounds, validates fields, rejects duplicate/unsorted hashes and trailing data, and checks the rebuilt root. These checks establish consistency of the hash material. They do not independently authenticate the context or establish that the enrollment belongs to a particular user; the full trusted commitment remains application state. The hexadecimal filename is a locator.
+
+## Run the complete example
+
+```sh
+cargo run -p gnorix --example enroll_grid --release --locked -- \
+  reports/fingerprint/feature-combinations.json \
+  crates/gnorix/examples/enroll_grid/context.json \
+  reports/enrollment
+```
+
+The included context has fixed public values for the local test image. The example uses the same `GNORIX_GRID_*` controls as [grid export](grid-shapes.md), with one neighbor step by default. The context JSON explicitly supplies `network`, `verifier`, `subject`, 32-byte hexadecimal `id`, nonzero `revision`, hexadecimal `public_salt`, and `secret_policy` (`absent` or `required`). For `required`, supply `GNORIX_ENROLL_SECRET`; it is not written to the package or logs.
+
+The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`: [HKDF-SHA256](https://www.rfc-editor.org/rfc/rfc5869.html) derives a 32-byte seed, and [ed25519-dalek](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/) handles key generation and signatures. HKDF uses the encoded context as salt; its input frames the domain `gnorix.example.ed25519-input.v1`, candidate digest, secret-presence byte and secret bytes with `u64be` lengths. Expansion info is `gnorix.example.ed25519-seed.v1`. This is an example-selected suite, not a library default or a password-hardening policy.
+
+The command traverses the full configured set, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. This validates the implemented derivation/storage mechanics; fresh-capture correspondence and biometric acceptance remain separate work.
