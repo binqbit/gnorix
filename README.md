@@ -4,7 +4,7 @@ Gnorix is an independent biometric-cryptographic library for signing data and di
 
 Repeated biometric captures are not identical. The native fingerprint path selects features meeting a configurable minimum priority and enrolls one canonical grid position set per selected combination. Reconstruction applies the same minimum and searches bounded positional variations lazily, checking each candidate immediately. A Merkle root, a compact commitment to the enrolled public keys, represents the enrollment without requiring the verifier to hold the entire set.
 
-Each combination must contain a pair spanning at least one third of the enrolled pattern's shorter side. This minimum is retained in ridge-width units and reused when signing from a partial capture.
+Each combination must satisfy the configured anchor count and minimum pairwise separation in ridge-width units R; its other points lie inside the anchors' convex hull. The retained policy is reused when signing from a partial capture.
 
 For a later signature, the library reconstructs one candidate key from a fresh capture and any required PIN or password. The authorization combines that key's public counterpart, evidence that it belongs to the enrolled set, and a signature over the approved action. Verification does not require the raw biometric sample or every other candidate key.
 
