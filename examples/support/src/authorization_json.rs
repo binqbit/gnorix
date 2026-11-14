@@ -4,7 +4,7 @@
 //! A root or replacement context is never accepted from this document. Decoding
 //! checks structure and bounds; cryptographic verification remains a core step.
 
-use std::{error::Error, io::Read, num::NonZeroU64};
+use std::{io::Read, num::NonZeroU64};
 
 use gnorix::{
     authorization::{Action, Authorization},
@@ -13,16 +13,12 @@ use gnorix::{
 };
 use serde_json::{Map, Value, json};
 
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+use crate::Result;
 
 const SCHEMA: &str = "gnorix.authorization.v1";
 const ACTION_FIELDS: &[&str] = &["operation", "payload", "nonce", "expires_at"];
 
-pub(super) fn read_action(
-    reader: &mut impl Read,
-    max_bytes: usize,
-    limits: &Limits,
-) -> Result<Action> {
+pub fn read_action(reader: &mut impl Read, max_bytes: usize, limits: &Limits) -> Result<Action> {
     let read_limit = u64::try_from(max_bytes)?
         .checked_add(1)
         .ok_or("action JSON byte limit overflows")?;
@@ -34,7 +30,7 @@ pub(super) fn read_action(
     parse_action(&serde_json::from_slice(&bytes)?, limits.action_bytes.get())
 }
 
-pub(super) fn encode_authorization(authorization: &Authorization) -> Value {
+pub fn encode_authorization(authorization: &Authorization) -> Value {
     json!({
         "schema": SCHEMA,
         "enrollment_id": hex(&authorization.enrollment_id),
@@ -50,7 +46,7 @@ pub(super) fn encode_authorization(authorization: &Authorization) -> Value {
     })
 }
 
-pub(super) fn decode_authorization(value: &Value, limits: &Limits) -> Result<Authorization> {
+pub fn decode_authorization(value: &Value, limits: &Limits) -> Result<Authorization> {
     let fields = object(
         value,
         &[

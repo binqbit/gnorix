@@ -1,17 +1,8 @@
 //! Local interactive fixture laboratory. Run in release mode for extraction.
 
-#[path = "support/authorization_json.rs"]
-#[allow(
-    dead_code,
-    reason = "HTTP supplies actions; the shared codec also supports CLI action files"
-)]
-mod authorization_json;
-#[path = "support/enrollment_profile.rs"]
-mod enrollment_profile;
-#[path = "support/output.rs"]
-mod output;
-#[path = "support/example_crypto.rs"]
-mod provider;
+use gnorix_example_support::{
+    authorization_json, enrollment_profile, example_crypto as provider, output,
+};
 
 #[path = "fingerprint_lab/api.rs"]
 mod api;

@@ -13,11 +13,11 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
-pub(super) const SUITE_ID: &str = "gnorix.example.hkdf-sha256-ed25519.v1";
+pub const SUITE_ID: &str = "gnorix.example.hkdf-sha256-ed25519.v1";
 const INPUT_DOMAIN: &[u8] = b"gnorix.example.ed25519-input.v1";
 const EXPAND_INFO: &[u8] = b"gnorix.example.ed25519-seed.v1";
 
-pub(super) struct ExampleCrypto;
+pub struct ExampleCrypto;
 
 impl CryptoProvider for ExampleCrypto {
     type SigningKey = SigningKey;

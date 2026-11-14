@@ -1,15 +1,9 @@
 //! Enroll one baseline per imported feature combination with the example crypto suite.
 
-#[path = "support/enrollment_profile.rs"]
-mod enrollment_profile;
 #[path = "feature_grid/input.rs"]
 mod input;
-#[path = "support/output.rs"]
-mod output;
 #[path = "enroll_grid/policy.rs"]
 mod policy;
-#[path = "support/example_crypto.rs"]
-mod provider;
 #[path = "support/secret_input.rs"]
 mod secret_input;
 #[path = "enroll_grid/settings.rs"]
@@ -30,6 +24,7 @@ use gnorix::{
     package::{EnrollmentPackage, PackageLimits},
     policy::Limits,
 };
+use gnorix_example_support::{enrollment_profile, example_crypto as provider, output};
 
 use enrollment_profile::ProfileParameters;
 use provider::ExampleCrypto;

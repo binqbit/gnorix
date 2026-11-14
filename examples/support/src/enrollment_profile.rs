@@ -1,7 +1,5 @@
 //! Canonical, retained fingerprint reconstruction parameters shared by the examples.
 
-use std::error::Error;
-
 use gnorix::{
     biometrics::fingerprint::{CombinationConfig, SpatialPolicy},
     merkle::Hash,
@@ -9,13 +7,14 @@ use gnorix::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+use crate::Result;
+
 const DOMAIN: &str = "gnorix.example.imported-grid-profile.v7";
 const SCHEMA: &str = "gnorix.feature-combinations.v6";
 
 /// Validated public policy and its exact canonical package representation.
 #[derive(Clone, Debug)]
-pub(super) struct ProfileParameters {
+pub struct ProfileParameters {
     record: Record,
     encoded: Vec<u8>,
 }
@@ -56,12 +55,8 @@ impl SpatialRecord {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "Shared enrollment, signing and Lab entry points use different methods."
-)]
 impl ProfileParameters {
-    pub(super) fn new(controls: &CombinationConfig, uncertainty_steps: u32) -> Result<Self> {
+    pub fn new(controls: &CombinationConfig, uncertainty_steps: u32) -> Result<Self> {
         controls.validate()?;
         Self::from_record(Record {
             domain: DOMAIN.into(),
@@ -76,7 +71,7 @@ impl ProfileParameters {
     }
 
     /// Reject unsupported policy, unknown fields and noncanonical serialized bytes.
-    pub(super) fn decode(encoded: &[u8], expected_profile: Hash) -> Result<Self> {
+    pub fn decode(encoded: &[u8], expected_profile: Hash) -> Result<Self> {
         if <Hash>::from(Sha256::digest(encoded)) != expected_profile {
             return Err("fingerprint parameter hash differs from the enrolled profile".into());
         }
@@ -105,7 +100,7 @@ impl ProfileParameters {
         Ok(value)
     }
 
-    pub(super) fn controls(&self, max_work: usize) -> Result<CombinationConfig> {
+    pub fn controls(&self, max_work: usize) -> Result<CombinationConfig> {
         let value = CombinationConfig {
             min_points: self.record.min_points,
             max_points: self.record.max_points,
@@ -118,16 +113,16 @@ impl ProfileParameters {
         Ok(value)
     }
 
-    pub(super) fn encoded(&self) -> &[u8] {
+    pub fn encoded(&self) -> &[u8] {
         &self.encoded
     }
-    pub(super) fn profile_id(&self) -> Hash {
+    pub fn profile_id(&self) -> Hash {
         Sha256::digest(&self.encoded).into()
     }
-    pub(super) fn uncertainty_steps(&self) -> u32 {
+    pub fn uncertainty_steps(&self) -> u32 {
         self.record.uncertainty_steps
     }
-    pub(super) fn spatial(&self) -> SpatialPolicy {
+    pub fn spatial(&self) -> SpatialPolicy {
         self.record.spatial.core()
     }
 }

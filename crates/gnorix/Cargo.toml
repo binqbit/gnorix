@@ -12,16 +12,13 @@ zeroize.workspace = true
 
 [dev-dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
-ed25519-dalek = "3.0.0"
 getrandom = "0.4.1"
-hkdf = "0.13.0"
-hmac = { version = "0.13.0", features = ["zeroize"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
-serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
-serde = { version = "1.0.228", features = ["derive"] }
-sha2 = { workspace = true, features = ["zeroize"] }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tower = { version = "0.5.3", features = ["util"] }
+gnorix-example-support.workspace = true
+image.workspace = true
+serde_json.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

@@ -294,16 +294,28 @@ name = "gnorix"
 version = "0.1.0-dev.1"
 dependencies = [
  "axum",
- "ed25519-dalek",
  "getrandom",
- "hkdf",
- "hmac",
+ "gnorix-example-support",
  "image",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "tower",
+ "zeroize",
+]
+
+[[package]]
+name = "gnorix-example-support"
+version = "0.1.0-dev.1"
+dependencies = [
+ "ed25519-dalek",
+ "gnorix",
+ "hkdf",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
  "zeroize",
 ]
 

@@ -6,9 +6,9 @@ use std::{
     path::Path,
 };
 
-use super::Result;
+use crate::Result;
 
-pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -27,7 +27,7 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let count = u64::try_from(limit)?
         .checked_add(1)
         .ok_or("input byte limit overflow")?;

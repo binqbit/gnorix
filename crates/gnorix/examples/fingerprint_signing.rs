@@ -1,15 +1,7 @@
 //! Sign with the first reconstructed member, or verify a public authorization.
 
-#[path = "support/authorization_json.rs"]
-mod authorization_json;
-#[path = "support/enrollment_profile.rs"]
-mod enrollment_profile;
 #[path = "support/image_input.rs"]
 mod image_input;
-#[path = "support/output.rs"]
-mod output;
-#[path = "support/example_crypto.rs"]
-mod provider;
 #[path = "support/secret_input.rs"]
 mod secret_input;
 #[path = "fingerprint_signing/settings.rs"]
@@ -33,6 +25,9 @@ use gnorix::{
     crypto::SignatureVerifier,
     package::EnrollmentPackage,
     policy::Limits,
+};
+use gnorix_example_support::{
+    authorization_json, enrollment_profile, example_crypto as provider, output,
 };
 
 use provider::ExampleCrypto;
