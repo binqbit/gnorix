@@ -61,7 +61,9 @@ Use `-- --port 8781` to change the web port. For an HTTPS reverse proxy, set
 accepts the explicitly configured Host/Origin. Public visitors share the same
 disposable demo session.
 
-Ctrl+C stops the app and its managed
+Set `GNORIX_DEMO_CONTRACTS_DIR` to a directory containing both prebuilt Wasm
+contracts to skip startup compilation. Without it, the local build behavior is
+unchanged. Ctrl+C stops the app and its managed
 sandbox. Every launch creates fresh disposable accounts, roots and balances;
 this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
 images and signing run locally. Fingerprint extraction can take tens of seconds;

@@ -1,7 +1,8 @@
-//! Prepare the two contracts with the same pinned Rust target and `near` cfg
-//! used by the repository's cargo-near builds. Cargo checks freshness each time.
+//! Use supplied contract artifacts or build them with the repository's pinned
+//! Rust target and `near` cfg. Cargo checks local build freshness each time.
 
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     process::{Output, Stdio},
 };
@@ -11,10 +12,22 @@ use tokio::process::Command;
 
 const TOOLCHAIN: &str = "1.99.1";
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
+const CONTRACT_ARTIFACTS: [&str; 2] = ["gnorix_near_wallet.wasm", "gnorix_near_token.wasm"];
+const WASM_HEADER: [u8; 8] = [0, b'a', b's', b'm', 1, 0, 0, 0];
 
 /// Cancellation kills build processes instead of leaving a blocking startup job.
 /// The returned directory contains both contracts ready for sandbox deployment.
 pub async fn prepare_contracts(progress: impl Fn(&str) + Send + Sync) -> Result<PathBuf> {
+    if let Some(directory) = std::env::var_os("GNORIX_DEMO_CONTRACTS_DIR") {
+        ensure!(
+            !directory.is_empty(),
+            "GNORIX_DEMO_CONTRACTS_DIR must name a directory"
+        );
+        let contracts_dir = validate_contracts_dir(Path::new(&directory))?;
+        progress("Bundled contracts are ready; starting the local NEAR sandbox");
+        return Ok(contracts_dir);
+    }
+
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -31,15 +44,34 @@ pub async fn prepare_contracts(progress: impl Fn(&str) + Send + Sync) -> Result<
     progress("Building the standard token contract");
     build_contract(&root, &target_dir, &rustc, "examples/near/token/Cargo.toml").await?;
 
-    let contracts_dir = target_dir.join(WASM_TARGET).join("release");
-    for artifact in ["gnorix_near_wallet.wasm", "gnorix_near_token.wasm"] {
-        ensure!(
-            contracts_dir.join(artifact).is_file(),
-            "contract build did not produce {artifact}"
-        );
-    }
+    let contracts_dir = validate_contracts_dir(&target_dir.join(WASM_TARGET).join("release"))?;
     progress("Contracts are ready; starting the local NEAR sandbox");
     Ok(contracts_dir)
+}
+
+fn validate_contracts_dir(directory: &Path) -> Result<PathBuf> {
+    let directory = directory
+        .canonicalize()
+        .with_context(|| format!("cannot locate contract directory {}", directory.display()))?;
+    ensure!(directory.is_dir(), "contract path must be a directory");
+    for artifact in CONTRACT_ARTIFACTS {
+        let path = directory.join(artifact);
+        let metadata = std::fs::metadata(&path)
+            .with_context(|| format!("cannot inspect contract {artifact}"))?;
+        ensure!(
+            metadata.is_file(),
+            "contract {artifact} must be a regular file"
+        );
+        let mut header = [0_u8; 8];
+        std::fs::File::open(&path)
+            .and_then(|mut file| file.read_exact(&mut header))
+            .with_context(|| format!("cannot read WebAssembly header of {artifact}"))?;
+        ensure!(
+            header == WASM_HEADER,
+            "contract {artifact} must be a WebAssembly version 1 module"
+        );
+    }
+    Ok(directory)
 }
 
 async fn prepare_wasm_target(progress: &impl Fn(&str)) -> Result<()> {
@@ -181,6 +213,56 @@ mod tests {
     use tokio::time::{sleep, timeout};
 
     use super::*;
+
+    fn contract_fixture() -> Result<PathBuf> {
+        let mut nonce = [0_u8; 8];
+        getrandom::fill(&mut nonce)?;
+        let directory =
+            std::env::temp_dir().join(format!("gnorix-contracts-{}", u64::from_le_bytes(nonce)));
+        std::fs::create_dir(&directory)?;
+        for artifact in CONTRACT_ARTIFACTS {
+            std::fs::write(directory.join(artifact), WASM_HEADER)?;
+        }
+        Ok(directory)
+    }
+
+    #[test]
+    fn supplied_contract_directory_accepts_complete_wasm_bundle() -> Result<()> {
+        let directory = contract_fixture()?;
+        assert_eq!(
+            validate_contracts_dir(&directory)?,
+            directory.canonicalize()?
+        );
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn supplied_contract_directory_rejects_missing_or_nonregular_artifacts() -> Result<()> {
+        let directory = contract_fixture()?;
+        let wallet = directory.join(CONTRACT_ARTIFACTS[0]);
+        std::fs::remove_file(&wallet)?;
+        let error = validate_contracts_dir(&directory).unwrap_err().to_string();
+        assert!(error.contains(CONTRACT_ARTIFACTS[0]));
+        std::fs::create_dir(&wallet)?;
+        let error = validate_contracts_dir(&directory).unwrap_err().to_string();
+        assert!(error.contains("regular file"));
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn supplied_contract_directory_rejects_truncated_or_invalid_wasm() -> Result<()> {
+        let directory = contract_fixture()?;
+        let token = directory.join(CONTRACT_ARTIFACTS[1]);
+        for bytes in [b"\0asm".as_slice(), b"not wasm", b"\0asm\x02\0\0\0"] {
+            std::fs::write(&token, bytes)?;
+            let error = validate_contracts_dir(&directory).unwrap_err().to_string();
+            assert!(error.contains(CONTRACT_ARTIFACTS[1]));
+        }
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn canceling_build_kills_the_child_and_its_descendants() -> Result<()> {
