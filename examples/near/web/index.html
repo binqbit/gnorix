@@ -168,7 +168,10 @@
                             </div>
                             <button id="discard-button" class="text-button discard-button" type="button" hidden>Edit transfer</button>
                         </div>
-                        <p class="approval-note" id="approval-note">Fresh capture per approval. Signs this exact transfer.</p>
+                        <p class="approval-note">
+                            <span id="approval-note">Fresh capture per approval. Signs this exact transfer.</span>
+                            <span id="signing-key-preview" hidden><span class="label">Signing public key:</span> <code id="signing-public-key"></code></span>
+                        </p>
                         <div class="action-status">
                             <span id="execution-badge" class="tag">Ready when you are</span>
                             <div id="status-content" class="status-content" tabindex="0" role="region" aria-label="Transfer status details">
@@ -183,6 +186,7 @@
             <section class="execution-panel panel" aria-labelledby="execution-title">
                 <div class="execution-heading">
                     <h2 id="execution-title">Execution</h2>
+                    <a class="proof-details-link" id="view-proof-link" href="#proof-title" aria-label="View signature and Merkle proof" hidden>View signature &amp; proof <span aria-hidden="true">↓</span></a>
                 </div>
                 <ol class="execution-steps" aria-label="Transfer progress">
                     <li id="phase-sign"><span class="step-number">01</span><div><strong>Reconstruct &amp; sign</strong><span>Fingerprint key</span></div></li>
@@ -201,7 +205,7 @@
 
             <section class="proof-panel panel" id="proof-details" aria-labelledby="proof-title">
                 <div class="proof-heading">
-                    <h2 id="proof-title"><span class="proof-icon" aria-hidden="true">{ }</span> Signature &amp; Merkle proof</h2>
+                    <h2 id="proof-title" tabindex="-1"><span class="proof-icon" aria-hidden="true">{ }</span> Signature &amp; Merkle proof</h2>
                     <span id="proof-hint">Sign a transfer to reveal its membership path</span>
                 </div>
                 <div class="proof-content">

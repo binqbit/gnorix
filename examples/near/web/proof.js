@@ -10,6 +10,10 @@ const GnorixProof = (() => {
     const setText = (id, value) => { element(id).textContent = value; };
     const hex = bytes => Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 
+    function publicKeyHex(prepared) {
+        return prepared ? hex(prepared.authorization.public_key) : "";
+    }
+
     function digestBytes(value) {
         if (!/^[a-f0-9]{64}$/i.test(value ?? "")) throw new Error("Invalid Merkle digest.");
         return Uint8Array.from(value.match(/../g), byte => parseInt(byte, 16));
@@ -140,7 +144,7 @@ const GnorixProof = (() => {
     function renderFields(wallet, prepared, previous) {
         const auth = prepared?.authorization;
         setText("proof-root", wallet?.root ?? "—");
-        setText("proof-public-key", auth ? hex(auth.public_key) : "Available after signing");
+        setText("proof-public-key", auth ? publicKeyHex(prepared) : "Available after signing");
         setText("proof-signature", auth ? hex(auth.signature) : "Available after signing");
         setText("proof-nonce", auth?.action.nonce ?? wallet?.nonce ?? "—");
         setText("proof-depth", auth?.siblings.length ?? "—");
@@ -179,5 +183,5 @@ const GnorixProof = (() => {
         renderPath(wallet, prepared);
     }
 
-    return { render, tracePath, text: () => copyValue };
+    return { render, tracePath, publicKeyHex, text: () => copyValue };
 })();

@@ -386,6 +386,9 @@ function renderForm() {
     $("discard-button").hidden = !prepared || state.server?.phase !== "signed" || busy() || unresolvedSubmission();
     setText("discard-button", "Edit transfer");
     setText("approval-note", prepared && state.server?.phase === "signed" ? "Signature ready. Submit to execute this exact transfer." : "Fresh capture per approval. Signs this exact transfer.");
+    $("approval-note").hidden = Boolean(prepared);
+    $("signing-key-preview").hidden = !prepared;
+    setText("signing-public-key", GnorixProof.publicKeyHex(prepared));
 }
 
 function renderProof() {
@@ -474,6 +477,7 @@ function renderExecution() {
     setText("execution-badge", badge);
     $("transaction-row").hidden = !transaction?.tx_hash;
     setText("transaction-hash", transaction?.tx_hash ?? "");
+    $("view-proof-link").hidden = !prepared;
     const gas = transaction?.gas_burnt;
     $("gas-row").hidden = gas === null || gas === undefined;
     setText("gas-burned", gas === null || gas === undefined ? "" : `${formatUnits(gas, 12)} Tgas`);

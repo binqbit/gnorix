@@ -48,11 +48,15 @@ service or `cargo-near` installation is required for this web demo.
    wallet's read-only verifier. Matched fresh points receive four rounded lime arcs
    with a thin dark outline. Their center color still shows priority;
    the markers keep a readable minimum size on small screens.
-3. Review the public key, signature and Merkle membership path, then submit to NEAR. A separate local relayer sends
+3. Once the capture reconstructs a key, its **Signing public key** appears beside
+   the submission controls. **View signature & proof** jumps to the
+   **Signature & Merkle proof** section immediately, before submission. Review
+   the signature and Merkle membership path, then
+   submit to NEAR. A separate local relayer sends
    one transaction. The page shows its hash, receipt/callback result, gas and
    balances read from the token contract. **Gas limit** is the 100 Tgas attached
    to the transaction; **Gas burned** is its measured consumption, which can be
-   much lower.
+   much lower. The same link remains available for the completed transfer.
 4. A capture can fail. Its image, softly revealed sample and observed features stay visible;
    click **Approve & sign** again to make another independent attempt. The server
    never secretly chooses another crop or falls back to the full image. Reaching
