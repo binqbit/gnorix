@@ -8,10 +8,26 @@ Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` se
 
 ```sh
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+# POSIX shells: keep Cargo and its subcommands on the same pinned toolchain.
+export PATH="$(dirname "$(rustup which --toolchain 1.99.1 rustc)"):${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+rustc --version
+cargo --version
+cargo clippy --version
+cargo fmt --version
 cargo fetch --locked
 ```
 
-On a system-managed toolchain, including NixOS, provide the same tools through the system's package configuration and check `rustc --version` and `cargo --version`. The library needs no scanner, blockchain node, credentials or database to build and test. Keep `Cargo.lock` in version control for reproducible repository checks. Package publication is disabled during this foundation stage.
+On NixOS or another system-managed installation, an earlier `cargo-clippy` on
+`PATH` can come from a different release even when `rustc` is pinned. Use the
+toolchain-bin prefix above for the whole shell, or provide the complete 1.99.1
+toolchain through the system configuration. Check for conflicting `RUSTC` and
+`RUSTDOC` overrides as well. Mixing system 1.100 tools with the pinned 1.99
+compiler can cause incompatible compiler-plugin errors. Once the toolchain-bin
+prefix is active, use plain `cargo`; `cargo +VERSION` requires the rustup proxy.
+
+The library needs no scanner, blockchain node, credentials or database to build
+and test. Keep `Cargo.lock` in version control. Package publication is disabled
+during this prerelease stage.
 
 The core implementation dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
 
@@ -60,6 +76,15 @@ cargo test -p gnorix-near --locked
 cargo run -p gnorix-core --example merkle --locked
 ```
 
+The optional NEAR demo is not enabled by ordinary workspace checks. Check its
+HTTP/session code separately; opt-in real-sandbox commands are in the
+[NEAR example](../examples/near/README.md#verification):
+
+```sh
+cargo clippy -p gnorix-near-wallet --features demo --all-targets --locked -- -D warnings
+cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
+```
+
 Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Cargo writes build output to the ignored root `target/` directory. The GitHub Actions workflow checks formatting, Clippy and documentation, and declares test jobs for Linux, macOS and Windows. A configured workflow does not itself establish that those hosted runs have passed.
 
 ## Implemented responsibilities
@@ -104,29 +129,42 @@ Feature assessment separates local evidence (`features/evidence.rs`), extended s
 
 Failures in requested report diagnostics still fail `extract`. They cannot block `analyze`, which does not run those stages. Errors in the shared source analysis fail both entry points.
 
-The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates input and extraction, `examples/fingerprint/images.rs` exports image stages, and `examples/fingerprint/snapshot.rs` assembles the diagnostic JSON with the stage-specific exporters. Image serialization and report layout remain outside the library.
+### Example and tool entry points
 
-`examples/feature_combinations.rs` runs extraction and [regional subset generation](feature-combinations.md), with explicit example environment controls and JSON output. Both examples use `examples/support/image_input.rs` for bounded opaque-image decoding. Subsets contain capture-local feature IDs; the later grid and enrollment stages encode positions independently of these IDs and derive keys.
+| Entry point | Role and guide |
+| --- | --- |
+| `crates/core/examples/fingerprint.rs` | Full extraction and diagnostic JSON/raster export; [fingerprint processing](fingerprint.md). |
+| `crates/core/examples/feature_combinations.rs` | Compact analysis and regional subset export; [combinations](feature-combinations.md). |
+| `crates/core/examples/feature_grid.rs` | Bounded, streamed grid diagnostics from that export; [grid shapes](grid-shapes.md). |
+| `crates/core/examples/enroll_grid.rs` | Baseline key enrollment and verified package output; [GRX packages](grx-packages.md). |
+| `crates/core/examples/fingerprint_signing.rs` | Fresh-image reconstruction and public authorization verification; [signing](fingerprint-signing.md). |
+| `examples/fingerprint-lab/` | Shared local test workspace; [Lab](fingerprint-lab.md). |
+| `examples/near/` | One sandbox, isolated browser sessions and public-fixture preparation shared across sessions; [NEAR demo](../examples/near/README.md). |
+| `tools/fingerprint-reports/` | Native execution, diagnostic validation and PNG publication; [report tool](../tools/fingerprint-reports/README.md). |
+| `tools/fingerprint-gallery/` | Pixel-preserving import of the optional fixed gallery; [gallery tool](../tools/fingerprint-gallery/README.md). |
 
-`examples/feature_grid.rs` orchestrates the [complete grid variants](grid-shapes.md) stage and its environment controls. Its `feature_grid/input.rs` module reads the bounded combination export; `feature_grid/output.rs` streams bounded JSON and removes partial outputs if traversal or writing fails. File I/O stays outside the library.
+CLI-only modules under `crates/core/examples/support/` own bounded image input,
+combination/grid controls and secret entry. The shared `examples/support/`
+package owns the example crypto provider, enrollment profile, authorization JSON,
+exclusive file output and capture/artifact adapters. File I/O and report layout
+remain outside the library.
 
-`examples/enroll_grid.rs` consumes that same combination input, prepares one rounded baseline per subset with `prepare_grid_baselines`, streams those candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. The grid helpers keep baseline-enrollment limits separate from the full diagnostic variant limit.
-
-`examples/fingerprint_signing.rs` loads the retained public policy, extracts a fresh image and searches ranked subsets within adaptive overlapping regions. It checks the retained anchor count, pairwise distance in R and anchor envelope before grid preparation. Each admitted subset's baseline and neighbor assignments are generated and tested one at a time; the first member of the existing package signs the action. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls and evidence. CLI-only modules under `crates/core/examples/support/` own image decoding, combination/grid controls and secret input. The shared `gnorix-example-support` package at [`examples/support/`](../examples/support/) owns the enrollment profile, crypto provider, bounded authorization JSON and exclusive file output; file I/O remains outside the reusable library.
-
-The [`gnorix-lab` application](../examples/fingerprint-lab/README.md) serves the [local test stand](fingerprint-lab.md). It has its own [`Cargo.toml`](../examples/fingerprint-lab/Cargo.toml), `src/main.rs`, HTTP adapter, typed request/view models, biometric workflows and circular capture adapter. Its `web/` assets and `gallery.json` are embedded at build time. Run `cargo run -p gnorix-lab --release --locked` from the repository root, or `cargo run --release --locked` inside `examples/fingerprint-lab`. The application depends on `gnorix` through its public API and uses `gnorix-example-support` for the shared example adapters. Its single-entry analyzed-capture cache retains only compact features and the crop offset; source revision, circular selection and extraction controls identify a cache entry. Downstream policy changes rebuild selection/search from those features. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
-
-In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
-
-The Lab's `gallery.rs` owns its fixed image catalog and bounded, pixel-verified loading of optional local PNGs. `gallery.json` pins the five SOCOFing sources; `tools/fingerprint-gallery/import_socofing.py` prepares them without changing observed pixels. Source selection is serialized with the other jobs and clears all capture-dependent state. Normal tests use local synthetic inputs and require no dataset download.
+The Lab caches one compact analyzed capture, keyed by source revision, circle and
+extraction controls. Policy changes rebuild selection/search without reprocessing
+pixels; switching gallery inputs clears capture-dependent state. The NEAR demo
+shares immutable public-fixture analysis and baseline descriptors, while each
+session keeps its own accounts, enrollments, balances and approvals. Neither
+application behavior is part of the generic core API.
 
 ## Connecting algorithms
 
-The [fingerprint extractor](fingerprint.md) is available as a per-capture component. Its common length unit is an arithmetic ridge-width mean from a full raw-centerline traversal, with explicit measured/unmeasured coverage. It returns observed ridge geometry, an intermediate graph with source-supported short-branch and narrow-loop decisions, and reconstructed smooth contours with source-pixel coordinates and explicit provenance. Separate fingerprint components select subsets, normalize them to the grid and encode candidates; registration of whole captures and calibrated biometric tolerances remain separate work.
+Use the native [fingerprint components](fingerprint.md) for per-image extraction
+and candidate generation. Multi-capture registration/fusion and calibrated
+biometric acceptance criteria remain separate work.
 
 Implement `MeasurementEngine` for the selected measurement strategy. It supplies a profile identifier, builds its own reconstruction model, enumerates all accepted enrollment candidates, and reconstructs candidates from a new capture under that same model. Its identifier must cover every setting that affects interpretation or candidate bytes.
 
-The engine owns alignment, descriptor extraction, fusion, quantization, local uncertainty, missing-point rules and point ordering. It can organize these internally once the algorithms are selected. The core does not fix whether images are combined before feature extraction or features are extracted before alignment/fusion. It does not derive tolerances from the grid's mathematical spacing.
+A custom engine owns any alignment, fusion, quantization, uncertainty and missing-point rules it requires. The core consumes its candidate stream; it does not infer those algorithms or tolerances from grid spacing.
 
 Implement `CryptoProvider` for the selected KDF and signature suite. Its identifier must cover the algorithms, parameters and key/signature encodings. `derive_key` receives canonical candidate bytes, the full framed enrollment context and the optional independent secret. The implementation must bind all required inputs, deterministically reproduce the same key/public-key encoding for identical inputs, and follow its crypto library's valid-key rules. Signing keys implement `ZeroizeOnDrop`; implementations remain responsible for intermediate buffers and copies. There is no default or placeholder production provider.
 
@@ -144,11 +182,20 @@ Use these public entry points in order:
 
 The [lifecycle integration tests](../crates/core/tests/lifecycle/main.rs) demonstrate this wiring with deliberately nonproduction measurement and crypto doubles. The suite groups enrollment, verification and failure behavior into cohesive modules with shared fixtures. They are test fixtures, not algorithms to copy into an application.
 
-For an existing fingerprint `.grx` package, validate its retained public policy, then call `fingerprint::analyze` → `fingerprint::signing_candidates` → `authorization::sign_candidates`, followed by the same trusted verification. Profile v7 binds the explicit point-count range, shared priority cutoff, direct anchor distance in R, baseline enrollment and shared padding. `CombinationConfig::spatial` and `SigningSearchConfig::spatial` share one `SpatialPolicy`; no fraction-to-R conversion or separate resolved record is needed. All remaining points must lie in the anchor hull. Enrollment considers every eligible regional point, selects automatic priority bands and fails if any point cannot enter a valid subset. Invalid source subsets consume work without yielding keys. Every admitted signing subset retains full Cartesian uncertainty search; signing stops at the first member without changing enrollment. Earlier fingerprint profiles require a new enrollment.
+For an existing fingerprint `.grx` package, validate its retained public policy,
+then call `fingerprint::analyze` → `fingerprint::signing_candidates` →
+`authorization::sign_candidates`, followed by trusted verification. Example
+profile **v9** binds the point-count range, shared priority cutoff, anchor count
+and distance in R, baseline enrollment, grid padding and subset-selection policy.
+Enrollment combines weighted selection with point-coverage witnesses and compact
+local subsets. Signing searches regional subsets lazily and stops at the first
+member. The [combination](feature-combinations.md) and
+[signing](fingerprint-signing.md) guides define the algorithms and failure cases.
+Earlier profiles require a new enrollment.
 
 ## Bounds and failure semantics
 
-`Limits` requires explicit nonzero maxima for candidate attempts, candidate bytes, public-key bytes, signature bytes, framed action bytes and framed context bytes. These are software resource limits, not biometric acceptance criteria. Context/action limits include their domain and length framing. No scanner thresholds, candidate-count defaults or implicit quality cutoffs are embedded in the library; the caller supplies the fingerprint priority cutoff explicitly.
+`Limits` requires explicit nonzero maxima for candidate attempts, candidate bytes, public-key bytes, signature bytes, framed action bytes and framed context bytes. These are software resource limits, not biometric acceptance criteria. Context/action limits include their domain and length framing. Fingerprint callers supply their priority cutoff and search policy explicitly; the examples' defaults are not security guarantees.
 
 Every candidate processed counts toward the attempt limit, including duplicates. Enrollment must exhaust the complete stream before committing it. Exceeding the limit fails the whole enrollment; the library never commits a truncated set. One extra iterator item may be requested to determine that a stream exceeds the limit; it is not passed to key derivation. Algorithm implementations must also bound their own preparation and iterator work, because the core cannot interrupt arbitrary synchronous computation inside a provider.
 
@@ -168,20 +215,22 @@ The core is independent of NEAR. The [NEAR contract integration](near-sdk.md) su
 
 Canonical container-v2 `.grx` persistence covers public context, optional hash-bound profile parameters and retained Merkle hashes. Fingerprint consumers require the canonical parameter record; generic constant profiles may omit it. Protected model storage, encrypted backups and recovery authority remain application work. The package does not serialize an arbitrary `MeasurementEngine` model or captured features. Container-v1 files are unsupported by the current decoder; generic authorization verification with a retained original trusted commitment remains separate from loading an old file.
 
-Core tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy or resistance to biometric attacks. The explicitly enabled NEAR sandbox test additionally exercises contract execution locally; it does not establish production network deployment or production gas limits. Those require separate measurement and integration validation.
+Core tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy or resistance to biometric attacks. See the [recorded descriptor limitation](near-sdk.md#biometric-security-boundary). The explicitly enabled NEAR sandbox test additionally exercises contract execution locally; it does not establish production network deployment or production gas limits. Those require separate measurement and integration validation.
 
 ## Static fingerprint report
 
-The [fingerprint report tool](../tools/fingerprint-reports/README.md) runs the native Rust extractor and publishes its actual measurements and geometry as one PNG report bundle. Install `uv` alongside the pinned Rust toolchain, then run from the repository root:
+Install `uv` alongside the pinned Rust toolchain, then run from the repository root:
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image crates/core/tests/assets/test-fingerprint.png
 ```
 
-The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization, source-based clarity, reconstructed contours and feature strength. Geometry visibility follows the native segment clarity while unsupported measurements remain explicit. `feature-strength.png` shows all primary candidates, including weak ones, using extended source-confirmed context, local source/geometry and eight controlled extraction variants. Intrinsic strength and crowding-adjusted priority are separate; marker brightness follows final priority. These diagnostic ranks do not remove candidates or choose contour repairs. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.
-
-`structure-overlay.png` is the main view after cleanup and reconstruction; `feature-strength.png` retains every original candidate for diagnosis. Surviving unchanged feature types display their original evidence priority, while converted types or degrees remain unassessed. Both figures use the same fixed 0–1 priority color scale: stronger candidates are brighter, with opacity `0.4 + 0.5 × sqrt(priority)` in the 40–90% range. Unknown priority is gray at 40%; the structural overlay preserves hollow markers with × for unknown continuation. Line visibility follows local clarity in its own fixed 40–90% range. Other maps and annotations default to 50% opacity through `--overlay-alpha`; `--dpi` controls PNG resolution. Both options affect presentation only. The tool has a single native pipeline; measurement algorithms remain in Rust. The report guide explains publication safeguards, failures and checks. Generated content is ignored by Git.
+The managed bundle is `reports/fingerprint/`. Start with `overview.png`; detailed
+figures cover width, normalization, clarity, contours and feature evidence.
+The [report guide](../tools/fingerprint-reports/README.md) defines its contents,
+colors, display options and publication safeguards, including the current refresh
+schema limitation. Generated content is ignored by Git.
 
 ## Change discipline
 

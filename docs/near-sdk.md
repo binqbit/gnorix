@@ -9,6 +9,9 @@ action; the SDK registers commitments and verifies authorizations.
 The authorization is an argument to a normal NEAR transaction. A relayer still
 needs a NEAR access key and gas. A Merkle root is not a NEAR account access key,
 and this SDK does not create native transaction signatures from Merkle roots.
+Successful verification proves membership and a signature under the registered
+commitment; see the [biometric security boundary](#biometric-security-boundary)
+before treating that result as identity authentication.
 
 ## Dependencies
 
@@ -173,16 +176,17 @@ The SDK itself remains independent of transfers, custody and retry policy.
 ## Runnable example and evidence
 
 The single [NEAR example](../examples/near/README.md) contains a smart wallet,
-a standard token, a Rust web demo and their local sandbox tests. Run
-`cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked`
-to start the interface and managed chain. Both wallets enroll test
-fingerprint images; each approval takes one new random, lightly altered circular
-capture covering at least a third of the confirmed pattern, then repeats
-extraction and key reconstruction before an actual token transfer. Failed
-captures remain visible and require a new explicit attempt. Run `./examples/near/test.sh` for the contract
-regression suite.
-The tests cover registration, relayed transfers, replay rejection, altered
-requests, expiry, revocation, rotation, storage and asynchronous failure handling.
+a standard token, a Rust web demo and their sandbox tests. Its README owns the
+startup, build, deployment and test commands. Each browser session gets separate
+wallet contracts, balances and fresh roots on one shared private sandbox. Each
+approval analyzes one new random circular crop covering at least a third of the
+confirmed pattern. Its pixels are unchanged; the surrounding blur is visual
+only. Failed captures remain visible and require a new explicit attempt.
+
+Tests cover registration, relayed transfers, replay rejection, altered requests,
+expiry, revocation, rotation, storage, asynchronous failure handling and browser
+session isolation. They execute real contracts on a local sandbox. The hosted
+demonstration also uses a private sandbox, not public testnet or mainnet.
 
 The wallet owns the token balance; an independent controller cannot spend tokens
 belonging to a different account. Gnorix registration lives in the wallet and is
@@ -190,9 +194,23 @@ independent of the token's storage registration. The authorization tests use the
 explicitly named example HKDF-SHA256/Ed25519 provider and synthetic candidate
 digests to isolate protocol behavior from fingerprint repeatability.
 
-The integration is not a claim of biometric security. The current fingerprint
-descriptor has a recorded cross-subject match in local testing; correct Merkle
-and signature verification cannot distinguish that collision from legitimate key
-reconstruction. Real-capture accuracy, descriptor discrimination, secret/KDF
-policy and production security qualification remain separate requirements.
-No testnet or mainnet deployment is part of these local tests.
+## Biometric security boundary
+
+The current coordinate descriptor has a recorded cross-subject match: a
+historical profile-v7 Lab test enrolled SOCOFing **270 / right index** and signed
+with **226 / right middle**, finding a member after **414 candidate checks**.
+Both the signature and Merkle proof verified. This is one observed negative
+control, not a measured false-acceptance rate. Current profile v9 changes subset
+selection, not the coordinate encoding, so the observation cannot be dismissed
+as fixed by the new schedule. Earlier counts are not current-profile benchmarks.
+
+Different point subsets can quantize to the same descriptor. Correct Merkle and
+signature verification then cannot distinguish that collision from reconstruction
+by the enrolled subject. Browser-cookie isolation and contract-bound enrollment
+contexts keep sessions and actions separate; they do not establish that two
+scans belong to the same person or that a live finger was presented.
+
+Independent real captures, descriptor discrimination, liveness, secret/KDF
+policy and cryptographic qualification require separate evaluation. The bundled
+synthetic fingerprints and successful sandbox transfers demonstrate implemented
+software behavior, not fingerprint-only custody suitable for real assets.

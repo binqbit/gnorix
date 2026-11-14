@@ -1,4 +1,4 @@
-# Fingerprint test stand
+# Fingerprint Lab
 
 Run the local web interface from the checkout root:
 
@@ -6,9 +6,16 @@ Run the local web interface from the checkout root:
 cargo run -p gnorix-lab --release --locked
 ```
 
-The stand is an independent Cargo application at [`examples/fingerprint-lab/`](../examples/fingerprint-lab/README.md), with its own manifest, Rust modules and embedded web assets. It is a workspace member named `gnorix-lab`, depending on the local `gnorix` library and shared example adapters. The workspace supplies the lockfile and build directory. You can also run `cargo run --release --locked` from the application directory. Building requires the repository checkout, including the shared test fixture.
+Open **http://127.0.0.1:8765**. This independent Rust application embeds its
+interface and needs no frontend installation or external service. Append
+`-- --port 8766` to choose another port; stop with Ctrl+C. The
+[application README](../examples/fingerprint-lab/README.md) covers setup, optional
+gallery paths and tests.
 
-Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic operations run in Rust. HTML, CSS, JavaScript, the logo and the existing test fingerprint are bundled with the executable; no frontend installation or external services are needed. The first build needs Cargo dependencies. Use `-- --port 8766` after the command to choose another local port. Stop the server with Ctrl+C.
+The Lab is a **single local testing workspace**: tabs and browser profiles share
+its enrollment and current operation. It does not use the NEAR demo's per-browser
+cookies or one-hour sessions. Its adjustable defaults and artifact generator
+are independent of the [NEAR transaction demo](../examples/near/README.md).
 
 ## Choose an image
 
@@ -56,9 +63,33 @@ Public test records include the artifact level, seed, clean ridge-width scale, g
 
 Each number field is paired with a slider, including circle coordinates and computation limits. Sliders use the displayed setting's bounds and step; the priority slider moves in steps of 0.01 while its number field retains exact values. Moving a slider changes only that parameter. The controls share the existing validation and become unavailable during computation; changing them does not automatically launch analysis or generate keys.
 
-The stand exposes minimum and maximum points per combination, minimum feature priority, region radius in R, minimum anchor count, minimum anchor distance in R, grid uncertainty steps, enrollment memory budget and one search-work budget. These determine admission and computation, not cryptographic strength in bits. The initial point-count range is **3–6**. Maximum points limits each combination; it does not discard other eligible regional features.
+The controls determine admission and computation, not cryptographic strength
+in bits. Maximum points limits each combination; it does not discard other
+eligible regional features.
 
-All points meeting the priority cutoff inside a region remain eligible. Sparse circles expand automatically to reach the configured maximum, or all available points if fewer exist. The [absolute priority bands](feature-combinations.md#automatic-weighted-selection) use the strongest included point: H `> 0.9`, M `0.5..=0.9`, L `< 0.5`. With N eligible regional points, enrollment targets 3N distinct valid subsets in H, M, H, L order, skips exhausted bands, then adds coverage witnesses and compact local groups around each point. Signing uses the same cycle without the 3N cap; positional variants of one subset finish before the next subset starts. Shares count subsets, not key attempts or point occurrences. There is no pool multiplier or per-region combination control. Any point unable to enter a valid subset fails the whole generation. A work limit prevents unbounded feasibility searches and reports that selection could not be completed.
+| Control | Lab default |
+| --- | --- |
+| Points per combination | 3–6 |
+| Minimum feature priority | 0.5 |
+| Region radius | 30R |
+| Minimum anchors / pairwise distance | 3 / 6R |
+| Positional tolerance | 1 neighbor step |
+| Enrollment memory estimate | 2 GiB, adjustable from 1 to 10 GiB |
+| Search work limit | 1,000,000,000 |
+
+The NEAR demo's priority 0.1 and deployed five-point profile do not override
+these Lab defaults.
+
+All eligible points in a region remain available. Sparse circles expand
+until they include the configured maximum count, or all available points if
+fewer exist. The shared [weighted selection](feature-combinations.md#automatic-weighted-selection)
+uses absolute priority bands with 2:1:1 group weights, then adds coverage
+witnesses and compact local subsets. It is bounded, not exhaustive. Signing
+keeps the same band preference and finishes a subset's positional neighborhood
+before moving to the next. Any eligible point unable to enter a geometrically
+valid enrollment subset fails preparation; a feasibility-work limit reports
+incomplete selection separately. No pool multiplier or per-region combination
+budget is exposed.
 
 **Enrollment memory budget** defaults to **2 GiB** and accepts **1–10 GiB** under Computation limits. Preparation uses a conservative peak-memory estimate with reserved headroom to derive consistent limits for baseline candidates, retained leaves and package size. It shows the estimated peak and supported candidate limit before key generation. If the complete requested baseline set exceeds these limits, preparation fails; it never silently truncates the set. This is an estimate, not an operating-system memory cap: actual process memory may vary.
 
@@ -81,14 +112,17 @@ The root identifies an enrolled set. It is distinct from the Ed25519 public key 
 
 Successful enrollment writes `<root>.grx` and a public preparation record under **`reports/fingerprint-lab/`**. The package retains canonical public reconstruction settings, including the explicit point-count range, anchor distance in R and anchor count, bound to the context's profile ID. Signing writes its public result record there. These artifacts survive ordinary fingerprint-report refreshes. The active enrollment and preparations are held in server memory; after a server restart, create a new test enrollment. Private keys are transient and are not exported.
 
-The stand binds to loopback and requires its session token for mutations. It accepts catalog image IDs and bounded numeric controls; the HTTP API does not accept filesystem paths. Each enrollment uses a new public context and salt, so its root can differ between runs. The test suite is HKDF-SHA256/Ed25519 with no independent secret. These demonstrations use a synthetic fixture and selected research scans; they do not qualify repeatability across independent scanner captures or biometric key entropy.
+The stand binds to loopback and requires its process-local CSRF token for mutations. All clients of this local process share its state; it is not a public multi-user service. It accepts catalog image IDs and bounded numeric controls; the HTTP API does not accept filesystem paths. Each enrollment uses a new public context and salt, so its root can differ between runs. The test suite is HKDF-SHA256/Ed25519 with no independent secret. These demonstrations use a synthetic fixture and selected research scans; they do not qualify repeatability across independent scanner captures or biometric key entropy.
 
 ## Validation scope
 
-Use the full source as a control, then test smaller circles and altered scans. Inspect the actual eligible features, selected regions, attempted keys and final status; fewer visible points or a changed extraction can prevent a crop from containing an enrolled subset. Profile-v8 enrollments need fresh positive and negative controls; previous leaf counts and crop outcomes do not describe the current schedule.
+Use the full source as a control, then test smaller circles and altered scans.
+Inspect eligible features, regions, attempted keys and the final status. A crop
+may omit every enrolled subset despite showing many features. Test positive and
+negative controls under the actual retained profile; historical v7/v8 leaf
+counts and first-match positions do not describe current profile v9.
 
-A successful signature verifies that the generated key belongs to the retained Merkle set; this alone does not qualify biometric identity verification.
-
-Historical profile-v7 full-source controls verified enrollment, reconstruction and signatures for the synthetic fixture and five gallery images. Those subset/leaf counts and first-match positions, and later profile-v8 figures, must not be treated as current profile-v9 results.
-
-The historical profile-v7 negative control enrolling 270 / right index and signing with 226 / right middle found a member after 414 candidates; both signature and proof verified. Distinct point subsets can quantize to identical descriptors. The new band schedule does not change that encoding, so biometric discrimination still requires separate validation.
+A successful signature proves that a generated key belongs to the retained set.
+It does not establish biometric identity. The [canonical security-boundary
+section](near-sdk.md#biometric-security-boundary) records the observed cross-subject
+descriptor match and the remaining validation requirements.

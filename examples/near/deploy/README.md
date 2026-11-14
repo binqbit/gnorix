@@ -6,16 +6,22 @@ test wallets, token contract, balances, Merkle enrollments and active approval.
 All sessions use one sandbox process. Restarting the service creates a new
 chain and invalidates all sessions; no mainnet or public-testnet account is used.
 
-Sessions have an absolute one-hour lifetime; browser polling does not renew it.
-Access ends at the deadline. Asynchronous cleanup cancels analysis and releases
-enrollment/attempt data at the next worker checkpoint, then revokes enrollments
-and settles accepted transfers before deleting accounts. Unresolved accounts
-are retained if cleanup fails. The next state read starts a fresh session.
-Transaction history remains in the sandbox database until process shutdown.
-The server admits at most 16 sessions and serializes CPU-heavy fingerprint jobs;
-capacity errors do not evict another visitor. Session cookies use `HttpOnly`,
-`SameSite=Strict` and `Secure` for the configured HTTPS origin. Do not configure
-nginx to strip cookies or cache `/api/` responses.
+Sessions have an absolute **3,600-second lifetime**; polling does not renew it.
+Only GET `/api/state` creates or resumes a session. Access ends at expiry;
+teardown cancels work and releases its enrollment/attempt data, with blocking
+computations releasing references at their next cancellation checkpoint.
+Retirement revokes enrollments and resolves accepted transfers before deletion,
+with a **45-second limit**; unresolved cleanup leaves accounts on the private
+chain and logs the failure. Service shutdown gives concurrent session cleanup
+a shared **15-second grace**. Neither expiry nor account deletion reverses a
+submitted transaction or erases its chain history.
+
+The registry admits at most **16 sessions** and one CPU-heavy job at a time;
+capacity returns 503 with `Retry-After: 60`, without evicting an existing visitor.
+Cookies are host-only, scoped to `/api`, `HttpOnly`, `SameSite=Strict`, and
+`Secure` on the configured HTTPS origin. Writes additionally require that
+session's separate CSRF token. Do not strip cookies or cache `/api/` responses
+in nginx. Full lifecycle behavior is in the [demo README](../README.md#browser-sessions-and-data-lifetime).
 
 The supplied service enrolls and searches combinations of **exactly five points**,
 matching the local five-point experiment. It requires at least three anchors,
@@ -30,7 +36,9 @@ works** explanation. The service keeps public enrollment material and the
 current attempt in memory per browser session, without writing signature archives or per-attempt
 metadata files. The sandbox itself retains submitted transactions in its chain
 history. Transfers attach 100 Tgas; the UI shows this limit separately from
-measured gas consumption.
+measured gas consumption. Browser isolation is not biometric authentication;
+the [descriptor limitation](../../../docs/near-sdk.md#biometric-security-boundary)
+also applies to the hosted service.
 
 The backend runs as the dedicated `gnorix` system user. `gnorix-near-demo.service`
 provides automatic restart, protected state storage and a 1,200 MiB memory ceiling.
@@ -44,6 +52,9 @@ On a trusted Linux x86_64 build machine, use the repository's pinned toolchain.
 Python 3.11 or newer is needed only to prepare the bundle:
 
 ```sh
+rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+export PATH="$(dirname "$(rustup which --toolchain 1.99.1 rustc)"):${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+rustup target add --toolchain 1.99.1 wasm32-unknown-unknown
 cargo build -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
 
 RUSTFLAGS='-C link-arg=-s --cfg near' cargo build --locked --release \
@@ -55,7 +66,10 @@ RUSTFLAGS='-C link-arg=-s --cfg near' cargo build --locked --release \
   --manifest-path examples/near/token/Cargo.toml --target-dir target/near-demo/contracts
 ```
 
-The Wasm target must be installed for that toolchain. Obtain the official native
+Use all tools from the selected toolchain; a system `cargo-clippy` from another
+release is not interchangeable with the pinned compiler. See the
+[development setup](../../../docs/development.md#workspace-and-setup).
+Obtain the official native
 NEAR sandbox **2.14.1** binary; starting the local demo once installs it into
 Cargo's build cache. Its ELF interpreter must be `/lib64/ld-linux-x86-64.so.2`.
 
@@ -126,10 +140,16 @@ for a future renewal setup.
 
 ## Verify and operate
 
-Check `https://gnorix.online/api/state` until `phase` is `ready` and both wallets
-are present, retaining the same cookie across readiness requests. Each cookieless
+Open the browser and wait for its `/api/state` to report `phase: ready` with both
+wallets. Automated readiness checks must retain the same cookie; each cookieless
 GET creates a session. Use `HEAD /` for liveness checks that must not allocate
-wallets. HTTP starts before initialization completes; status 200 or an active
+wallets:
+
+```sh
+curl --fail --head https://gnorix.online/
+```
+
+HTTP starts before initialization completes; status 200 or an active
 systemd unit alone does not establish readiness. Keep the session cookie and
 returned CSRF token out of logs. They scope this public demonstration, not
 authenticated access to a real user's wallet.
@@ -137,7 +157,12 @@ authenticated access to a real user's wallet.
 Check normal TLS validation, HTTP-to-HTTPS redirection, static asset hashes and
 a browser transfer in each direction. Confirm the receipt, Merkle path, nonce
 and actual balances. Failed random captures must remain visible as failed
-attempts, without silently replacing them with another sample. Also verify that
+attempts, without silently replacing them with another sample. Check two browser
+profiles have distinct contracts and roots; an action in one must leave the
+other's balances, nonce and capture unchanged. Cross-session CSRF requests must
+return 403 and another visitor's capture ID 404. Expired writes/captures return
+410; a fresh GET `/api/state` renews the session rather than reviving its keys.
+Also verify that
 previously hosted sites still work and that app/RPC/P2P ports remain loopback-only.
 
 ```sh
