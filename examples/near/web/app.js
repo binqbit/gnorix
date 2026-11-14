@@ -235,10 +235,28 @@ function featureColor(priority) {
     return { color: `hsl(${value * 115} 90% 65%)`, opacity: 0.4 + 0.5 * Math.sqrt(value) };
 }
 
-function svgCircle(attributes) {
-    const circle = document.createElementNS(SVG_NS, "circle");
-    for (const [name, value] of Object.entries(attributes)) circle.setAttribute(name, value);
-    return circle;
+function svgElement(tag, attributes) {
+    const element = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+    return element;
+}
+
+function selectionArrows(x, y, radius) {
+    return [0, 1, 2, 3].map((quadrant) => {
+        const angle = quadrant * Math.PI / 2;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const tip = radius * 0.63;
+        const halfWidth = radius * 0.23;
+        return `M ${x + dx * tip} ${y + dy * tip} L ${x + dx * radius - dy * halfWidth} ${y + dy * radius + dx * halfWidth} L ${x + dx * radius + dy * halfWidth} ${y + dy * radius - dx * halfWidth} Z`;
+    }).join(" ");
+}
+
+function featureMarkerSize(source) {
+    const bounds = $("fingerprint").getBoundingClientRect();
+    const scale = Math.min(bounds.width / source.width, bounds.height / source.height) || 1;
+    const dot = Math.max(Math.max(source.width, source.height) * 0.009, 2.25 / scale);
+    return { dot, selection: Math.max(dot * 2.8, 10 / scale) };
 }
 
 function insideCapture(point, capture) {
@@ -270,26 +288,28 @@ function renderFeaturePoints(wallet, capture, prepared) {
     const source = capture ?? wallet.fingerprint;
     const matches = new Set(prepared ? capture.matched_feature_ids : []);
     const points = (source.points ?? []).filter((point) => insideCapture(point, capture));
-    const radius = Math.max(source.width, source.height) * 0.0045;
-    const pointsKey = JSON.stringify([wallet.id, capture?.id, prepared?.id, points, [...matches]]);
+    const size = featureMarkerSize(source);
+    const pointsKey = JSON.stringify([wallet.id, capture?.id, prepared?.id, points, [...matches], size]);
     if (state.pointsKey !== pointsKey) {
-        const nodes = [];
+        const markers = [];
+        const dots = [];
         for (const point of points) {
             const appearance = featureColor(point.priority);
-            nodes.push(svgCircle({
-                cx: point.x, cy: point.y, r: radius,
-                fill: appearance.color, opacity: appearance.opacity,
+            dots.push(svgElement("circle", {
+                cx: point.x, cy: point.y, r: size.dot,
+                fill: appearance.color, "fill-opacity": appearance.opacity,
+                class: "feature-point",
                 "data-feature-id": point.id,
             }));
             if (matches.has(point.id)) {
-                nodes.push(svgCircle({
-                    cx: point.x, cy: point.y, r: radius * 2.1,
-                    fill: "none", stroke: "#d3ff8f", "stroke-width": 1.6,
-                    "vector-effect": "non-scaling-stroke",
+                markers.push(svgElement("path", {
+                    d: selectionArrows(point.x, point.y, size.selection),
+                    class: "matched-feature-marker",
+                    "data-feature-id": point.id,
                 }));
             }
         }
-        $("matched-points").replaceChildren(...nodes);
+        $("matched-points").replaceChildren(...markers, ...dots);
         state.pointsKey = pointsKey;
     }
     return points.filter((point) => matches.has(point.id)).length;
@@ -325,7 +345,7 @@ function renderFingerprint() {
         featureLabel = analyzing ? "Analyzing capture" : "Capture retained";
         pointStatus = analyzing ? "Extracting features from the captured region…" : "Feature analysis was not completed";
     } else if (capture) {
-        pointStatus = matched ? `${matched} matched signing points outlined` : `${source.feature_count} fresh features · no signing match outlined`;
+        pointStatus = matched ? `${matched} matched signing points · green pointers` : `${source.feature_count} fresh features · no signing match highlighted`;
     } else if (analyzing) {
         pointStatus = "Preparing a fresh random capture…";
     }
@@ -592,4 +612,5 @@ $("copy-proof").addEventListener("click", () => {
 $("copy-transaction").addEventListener("click", () => {
     void copyText($("copy-transaction"), state.server?.transaction?.tx_hash, "Copy");
 });
+new ResizeObserver(renderFingerprint).observe($("fingerprint"));
 void poll();
