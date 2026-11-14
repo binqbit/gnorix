@@ -253,7 +253,7 @@ function featureMarkerSize(source) {
     const bounds = $("fingerprint").getBoundingClientRect();
     const scale = Math.min(bounds.width / source.width, bounds.height / source.height) || 1;
     const dot = Math.max(Math.max(source.width, source.height) * 0.009, 2.25 / scale);
-    return { dot, selection: Math.max(dot * 2.8, 10 / scale) };
+    return { dot, selection: Math.max(dot * 2.8, 10 / scale) / 1.5 };
 }
 
 function insideCapture(point, capture) {
