@@ -1,26 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="55 30 1144 1144" fill="none">
+  <title>Gnorix fingerprint key</title>
   <defs>
     <linearGradient id="ridge-color" x1="625" y1="90" x2="625" y2="1100" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#e0fc6c"/>
-      <stop offset=".14" stop-color="#c7fb63"/>
-      <stop offset=".26" stop-color="#affc6d"/>
-      <stop offset=".36" stop-color="#8cfb7a"/>
-      <stop offset=".56" stop-color="#5bfb97"/>
-      <stop offset=".75" stop-color="#49fbb6"/>
-      <stop offset="1" stop-color="#3afbd1"/>
+      <stop stop-color="#79ff9b"/>
+      <stop offset=".26" stop-color="#39ff75"/>
+      <stop offset=".56" stop-color="#20ff6a"/>
+      <stop offset=".8" stop-color="#00ef70"/>
+      <stop offset="1" stop-color="#00cf64"/>
     </linearGradient>
     <linearGradient id="key-color" x1="618" y1="465" x2="618" y2="898" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#e5fccb"/>
-      <stop offset="1" stop-color="#d6fcd0"/>
+      <stop stop-color="#d2ffdf"/>
+      <stop offset="1" stop-color="#79ffab"/>
     </linearGradient>
     <filter id="neon" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="soft"/>
-      <feComponentTransfer in="soft" result="halo"><feFuncA type="linear" slope=".45"/></feComponentTransfer>
-      <feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="edge"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="soft"/>
+      <feComponentTransfer in="soft" result="halo"><feFuncA type="linear" slope=".65"/></feComponentTransfer>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="edge"/>
       <feMerge><feMergeNode in="halo"/><feMergeNode in="edge"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <path fill="#030807" d="M0 0H1254V1254H0Z"/>
   <g filter="url(#neon)" fill-rule="evenodd">
     <path fill="url(#ridge-color)" d="M591.50,92.50
       Q610.00,90.50 638.00,90.50
