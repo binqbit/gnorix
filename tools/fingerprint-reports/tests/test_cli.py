@@ -192,6 +192,9 @@ class CommandTests(unittest.TestCase):
 
     def test_optional_combinations_survive_failures_and_expire_on_successful_refresh(self):
         for native, include_json, include_png, schema in (
+            (False, True, False, "gnorix.feature-combinations.v7"),
+            (False, True, True, "gnorix.feature-combinations.v7"),
+            (True, True, True, "gnorix.feature-combinations.v7"),
             (False, True, False, "gnorix.feature-combinations.v5"),
             (False, True, True, "gnorix.feature-combinations.v5"),
             (True, True, True, "gnorix.feature-combinations.v5"),
@@ -248,6 +251,7 @@ class CommandTests(unittest.TestCase):
         for native in (False, True):
             for case in (
                 "wrong-schema",
+                "future-schema",
                 "obsolete-v1-schema",
                 "malformed-json",
                 "non-object",
@@ -264,6 +268,8 @@ class CommandTests(unittest.TestCase):
                     data = self.output / "feature-combinations.json"
                     if case == "wrong-schema":
                         data.write_text('{"schema":"other"}')
+                    elif case == "future-schema":
+                        data.write_text('{"schema":"gnorix.feature-combinations.v8"}')
                     elif case == "obsolete-v1-schema":
                         data.write_text('{"schema":"gnorix.feature-combinations.v1"}')
                     elif case == "malformed-json":

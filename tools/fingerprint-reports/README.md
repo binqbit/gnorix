@@ -51,7 +51,7 @@ A run extracts, validates and renders in a temporary sibling directory before re
 
 The tool refuses symlink destinations, unrelated files and unrecognized schemas. Keep personal files outside `reports/fingerprint/`. An exclusive `reports/.fingerprint.lock` prevents simultaneous writers; remove a stale lock only after confirming its process is no longer running. Other report directories are not replaced.
 
-Recognized combination/grid exports inside the managed directory are removed on refresh because they belong to the previous capture. **Current limitation:** the refresh guard does not recognize the current `gnorix.feature-combinations.v7` export, so a directory containing that file is rejected before replacement. This is a report-refresh schema mismatch, not an extraction failure.
+Recognized combination/grid exports inside the managed directory, including the current `gnorix.feature-combinations.v7` export, are removed on refresh because they belong to the previous capture. Unknown export schemas remain protected from replacement.
 
 ## Implementation and checks
 

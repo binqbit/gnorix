@@ -50,7 +50,7 @@ The output must not exist. The command reads measured R and the selected subsets
 | `GNORIX_GRID_MAX_VARIANTS` | 1000000 | Complete assignment limit across all subsets. |
 | `GNORIX_GRID_MAX_WORK` | 10000000 | Preparation and traversal work. |
 
-The JSON includes hulls, frames, signed snapped nodes, padded baselines, phase, variants and collisions. Input and output are bounded to 64 MiB; a failed write removes its new partial file. Regenerate these results when the source capture changes; see the report tool's [refresh boundary and current schema limitation](../tools/fingerprint-reports/README.md#refresh-and-recovery).
+The JSON includes hulls, frames, signed snapped nodes, padded baselines, phase, variants and collisions. Input and output are bounded to 64 MiB; a failed write removes its new partial file. Regenerate these results when the source capture changes; see the report tool's [refresh boundary](../tools/fingerprint-reports/README.md#refresh-and-recovery).
 
 ## Interpretation
 

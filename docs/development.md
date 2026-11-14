@@ -233,8 +233,9 @@ uv run --project tools/fingerprint-reports --locked gnorix-report \
 The managed bundle is `reports/fingerprint/`. Start with `overview.png`; detailed
 figures cover width, normalization, clarity, contours and feature evidence.
 The [report guide](../tools/fingerprint-reports/README.md) defines its contents,
-colors, display options and publication safeguards, including the current refresh
-schema limitation. Generated content is ignored by Git.
+colors, display options and publication safeguards. Refresh removes recognized
+combination and grid exports from the previous capture. Generated content is
+ignored by Git.
 
 ## Change discipline
 

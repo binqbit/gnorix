@@ -24,6 +24,7 @@ _STAGE_SCHEMAS = {
         "gnorix.feature-combinations.v4",
         "gnorix.feature-combinations.v5",
         "gnorix.feature-combinations.v6",
+        "gnorix.feature-combinations.v7",
     ),
     "feature-grid.json": ("gnorix.feature-grid.v1",),
 }
