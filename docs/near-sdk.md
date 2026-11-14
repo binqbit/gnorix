@@ -173,8 +173,14 @@ The SDK itself remains independent of transfers, custody and retry policy.
 ## Runnable example and evidence
 
 The single [NEAR example](../examples/near/README.md) contains a smart wallet,
-a standard token and their local sandbox tests. Run `./examples/near/test.sh`
-from the repository root to build the contracts and exercise the complete flow.
+a standard token, a Rust web demo and their local sandbox tests. Run
+`cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked`
+to start the interface and managed chain. Both wallets enroll test
+fingerprint images; each approval takes one new random, lightly altered circular
+capture covering at least a third of the confirmed pattern, then repeats
+extraction and key reconstruction before an actual token transfer. Failed
+captures remain visible and require a new explicit attempt. Run `./examples/near/test.sh` for the contract
+regression suite.
 The tests cover registration, relayed transfers, replay rejection, altered
 requests, expiry, revocation, rotation, storage and asynchronous failure handling.
 

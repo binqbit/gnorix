@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#030807" />
+        <title>GNORIX · NEAR demo</title>
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+        <link rel="stylesheet" href="/app.css" />
+        <script src="/app.js" defer></script>
+    </head>
+    <body>
+        <header class="topbar">
+            <a class="brand" href="/" aria-label="Gnorix NEAR demo">
+                <img src="/logo.svg" alt="" />
+                <span>GNORIX<small>NEAR TRANSACTION DEMO</small></span>
+            </a>
+            <div class="connection" id="connection" data-state="connecting">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="connection-label">Connecting to local node</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="intro" aria-labelledby="page-title">
+                <div>
+                    <p class="eyebrow"><span></span> BIOMETRICS → SIGNATURE → NEAR</p>
+                    <h1 id="page-title">Your fingerprint.<br /><span>Your transaction.</span></h1>
+                    <p class="intro-description">Choose a wallet, approve a transfer, and follow its signature to the chain.</p>
+                </div>
+                <div class="environment-card">
+                    <span class="environment-icon" aria-hidden="true">↗</span>
+                    <div><strong>Local NEAR sandbox</strong><span>Real transactions. Test tokens.</span></div>
+                </div>
+            </section>
+
+            <section class="wallet-section" aria-labelledby="wallets-title">
+                <div class="section-heading">
+                    <h2 id="wallets-title">Choose your wallet</h2>
+                    <button class="text-button" id="refresh-state" type="button" disabled>
+                        <span aria-hidden="true">↻</span><span id="refresh-label">Refresh balances</span>
+                    </button>
+                </div>
+                <div id="wallets" class="wallets" role="group" aria-label="Active wallet">
+                    <div class="wallet-placeholder">Loading registered wallets…</div>
+                </div>
+            </section>
+
+            <div class="workspace">
+                <section class="fingerprint-panel panel" aria-labelledby="fingerprint-title">
+                    <div class="panel-heading">
+                        <div><p class="eyebrow">SIGNING SOURCE</p><h2 id="fingerprint-title">Your fingerprint</h2></div>
+                        <span id="fingerprint-tag" class="tag">Awaiting wallet</span>
+                    </div>
+                    <div class="fingerprint-stage" id="fingerprint-stage">
+                        <div class="stage-grid" aria-hidden="true"></div>
+                        <svg id="fingerprint" viewBox="0 0 1 1" role="img" aria-label="Selected wallet fingerprint and matched signing points" hidden>
+                            <defs>
+                                <filter id="outside-blur" x="-10%" y="-10%" width="120%" height="120%">
+                                    <feGaussianBlur id="outside-blur-radius" stdDeviation="0" />
+                                </filter>
+                                <clipPath id="capture-clip" clipPathUnits="userSpaceOnUse"><circle id="capture-clip-circle" /></clipPath>
+                            </defs>
+                            <image id="fingerprint-image" x="0" y="0" width="1" height="1" />
+                            <image id="capture-image" x="0" y="0" width="1" height="1" clip-path="url(#capture-clip)" hidden />
+                            <circle id="capture-boundary" fill="none" vector-effect="non-scaling-stroke" hidden />
+                            <g id="matched-points"></g>
+                            <g id="capture-activity" clip-path="url(#capture-clip)" aria-hidden="true"></g>
+                        </svg>
+                        <p class="image-placeholder" id="image-placeholder">The wallet’s test fingerprint will appear here.</p>
+                        <span class="stage-corner top-left" aria-hidden="true"></span>
+                        <span class="stage-corner top-right" aria-hidden="true"></span>
+                        <span class="stage-corner bottom-left" aria-hidden="true"></span>
+                        <span class="stage-corner bottom-right" aria-hidden="true"></span>
+                    </div>
+                    <div class="fingerprint-footer">
+                        <span><i class="point-legend" aria-hidden="true"></i><span id="point-status">Signing points appear after reconstruction</span></span>
+                        <span id="source-size" class="mono"></span>
+                    </div>
+                    <p id="capture-description" class="capture-description">Each approval analyzes a new random circular capture with mild image artifacts. Minimum feature priority: 0.3.</p>
+                    <div class="enrollment-summary">
+                        <span class="label">REGISTERED MERKLE ROOT</span>
+                        <code id="enrollment-root">—</code>
+                    </div>
+                </section>
+
+                <section class="transfer-panel panel" aria-labelledby="transfer-title">
+                    <div class="panel-heading">
+                        <div><p class="eyebrow">SIGNED TRANSFER</p><h2 id="transfer-title">Send test tokens</h2></div>
+                        <span class="token-badge">GXT</span>
+                    </div>
+                    <form id="transfer-form" novalidate>
+                        <fieldset id="transfer-fields" disabled>
+                            <legend class="sr-only">Transfer recipient and amount</legend>
+                            <label for="recipient-address">Recipient</label>
+                            <div id="recipient-name" class="recipient-name">Other demo wallet</div>
+                            <input id="recipient-address" class="account-input" name="recipient" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="recipient account" readonly />
+                            <p class="field-note" id="recipient-note">The other demo wallet is registered to receive GXT.</p>
+
+                            <div class="amount-heading"><label for="amount">Amount</label><span id="available-balance">Available —</span></div>
+                            <div class="amount-input">
+                                <input id="amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="64" placeholder="0.00" aria-describedby="amount-note" />
+                                <span>GXT</span>
+                            </div>
+                            <p class="field-note" id="amount-note">Up to 24 decimal places. No transfer fee in GXT.</p>
+                        </fieldset>
+
+                        <div class="transfer-review" id="transfer-review">
+                            <span class="label">YOU APPROVE</span>
+                            <p id="review-amount">Enter an amount</p>
+                            <span id="review-recipient">Choose the recipient before signing.</span>
+                        </div>
+                        <p id="form-error" class="form-error" role="alert" hidden></p>
+                        <button id="sign-button" class="primary-button" type="submit" disabled>
+                            <span id="sign-label">Approve &amp; sign</span><span aria-hidden="true">↗</span>
+                        </button>
+                        <button id="submit-button" class="primary-button submit-button" type="button" hidden disabled>
+                            <span>Submit to NEAR</span><span aria-hidden="true">→</span>
+                        </button>
+                        <button id="discard-button" class="text-button discard-button" type="button" hidden>Edit transfer</button>
+                        <p class="approval-note" id="approval-note">Each approval uses a fresh capture and signs this exact transfer.</p>
+                    </form>
+                </section>
+            </div>
+
+            <section class="execution-panel panel" aria-labelledby="execution-title">
+                <div class="execution-heading">
+                    <div><p class="eyebrow">LIVE EXECUTION</p><h2 id="execution-title">From approval to receipt</h2></div>
+                    <span id="execution-badge" class="tag">Ready when you are</span>
+                </div>
+                <ol class="execution-steps" aria-label="Transfer progress">
+                    <li id="phase-sign"><span class="step-number">01</span><div><strong>Reconstruct &amp; sign</strong><span>Find an enrolled fingerprint key</span></div></li>
+                    <li id="phase-submit"><span class="step-number">02</span><div><strong>Submit to NEAR</strong><span>Verify proof and consume nonce</span></div></li>
+                    <li id="phase-receipt"><span class="step-number">03</span><div><strong>Confirm transfer</strong><span>Read the token receipt and balances</span></div></li>
+                </ol>
+                <div class="execution-message" id="execution-message" role="status" aria-live="polite" aria-atomic="true">No transfer submitted.</div>
+                <div class="transaction-row" id="transaction-row" hidden>
+                    <span class="label">TRANSACTION HASH</span><code id="transaction-hash"></code>
+                    <button id="copy-transaction" class="text-button" type="button">Copy</button>
+                </div>
+                <div class="transaction-gas" id="gas-row" hidden>
+                    <span class="label">GAS BURNED</span><code id="gas-burned" title="Total gas reported for the transaction and its receipts."></code>
+                </div>
+            </section>
+
+            <details class="proof-panel panel" id="proof-details">
+                <summary><span><span class="proof-icon" aria-hidden="true">⌘</span> Inspect the signature &amp; Merkle proof</span><span class="summary-hint" id="proof-hint">No signature yet</span></summary>
+                <div class="proof-content">
+                    <p class="proof-description">Public evidence included when you submit to the wallet contract. The private signing key is not part of this authorization.</p>
+                    <dl class="proof-fields">
+                        <div><dt>Merkle root</dt><dd><code id="proof-root">—</code></dd></div>
+                        <div><dt>Public key</dt><dd><code id="proof-public-key">—</code></dd></div>
+                        <div><dt>Signature</dt><dd><code id="proof-signature">—</code></dd></div>
+                        <div class="compact-proof"><dt>Nonce</dt><dd id="proof-nonce">—</dd><dt>Merkle siblings</dt><dd id="proof-depth">—</dd></div>
+                    </dl>
+                    <div class="raw-heading"><h3>Authorization JSON</h3><button class="text-button" id="copy-proof" type="button" disabled>Copy JSON</button></div>
+                    <pre id="proof-json" tabindex="0" aria-label="Public authorization JSON">Sign a transfer to inspect its public evidence.</pre>
+                </div>
+            </details>
+            <noscript><p class="form-error">JavaScript is required to use this local demonstration.</p></noscript>
+        </main>
+        <footer><span>GNORIX <span class="footer-divider">/</span> NEAR</span><span>Local demonstration · Test fingerprints · Test tokens</span></footer>
+    </body>
+</html>

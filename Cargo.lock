@@ -1261,10 +1261,18 @@ name = "gnorix-near-wallet"
 version = "0.1.0-dev.1"
 dependencies = [
  "anyhow",
+ "axum",
+ "getrandom 0.4.3",
  "gnorix",
  "gnorix-example-support",
+ "image",
+ "near-crypto",
+ "near-jsonrpc-client",
+ "near-primitives",
  "near-sdk",
  "near-workspaces",
+ "rustix",
+ "serde",
  "serde_json",
  "tokio",
 ]

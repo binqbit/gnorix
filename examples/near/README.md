@@ -1,4 +1,4 @@
-# NEAR example: smart wallet and standard token
+# NEAR transaction signing demo
 
 This example keeps a standard NEP-141 token balance on a NEAR smart-wallet
 account. Its owner registers a Gnorix Merkle commitment and approves each exact
@@ -12,15 +12,74 @@ by verifying that account's signature. Funding this wallet moves tokens into its
 own balance. The included token demonstrates this without adding delegation
 methods to the token.
 
-This is one runnable example, organized around the two contracts it exercises:
+## Open the demo
+
+From the repository root, run:
+
+```sh
+cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
+```
+
+Open **http://127.0.0.1:8780**. Rust starts the web server immediately and the page
+shows preparation progress. It builds both contracts, starts a private NEAR
+sandbox, deploys the token and two smart wallets, analyzes the two bundled test
+fingerprints and registers their Merkle commitments. Each wallet starts with
+**1,000 GXT**, checked against the token contract's actual state.
+
+The machine needs Rust/rustup and a native build environment. The repository pins
+Rust 1.99.1; the app installs its missing Wasm target automatically. The first run
+needs internet access for Cargo dependencies, the Wasm target and the sandbox
+binary. Use Linux or macOS with a supported NEAR sandbox binary; native Windows
+users should run this example in WSL. No Docker, Compose, Node.js, separate RPC
+service or `cargo-near` installation is required for this web demo.
+
+1. Select **Wallet 1** or **Wallet 2**. Its fingerprint, eligible feature points,
+   Merkle root, nonce and on-chain token balance appear in the page.
+2. Enter the amount and approve signing. Each click selects a **new random
+   circular capture** and adds light image artifacts. The circle covers at least
+   one third of the clean enrollment's confirmed pattern pixels. Everything
+   outside it is blurred in the page and excluded from analysis. The backend
+   extracts fresh features only from this altered partial capture, reconstructs
+   a signing key, and checks the signature and Merkle proof through the deployed
+   wallet's read-only verifier. Matched fresh points receive outer rings.
+3. Review the authorization and submit it to NEAR. A separate local relayer sends
+   one transaction. The page shows its hash, receipt/callback result, gas and
+   balances read from the token contract.
+4. A capture can fail. Its image, circle and observed features stay visible;
+   click **Approve & sign** again to make another independent attempt. The server
+   never secretly chooses another crop or falls back to the full image. Reaching
+   the search budget means the search is incomplete, not a confirmed mismatch.
+5. Switch wallets and send tokens back. Editing the transfer after signing
+   requires a new signature; an accepted authorization cannot be reused.
+
+Use `-- --port 8781` to change the web port. Ctrl+C stops the app and its managed
+sandbox. Every launch creates fresh disposable accounts, roots and balances;
+this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
+images and signing run locally. Fingerprint extraction can take tens of seconds;
+use the documented release build. The HTTP page remains responsive during it.
+
+If a transaction result cannot be observed, **Check transaction status** queries
+the same hash. It does not resend, and another transfer is blocked until that
+outcome is resolved. A failed token call consumes its accepted nonce, so retrying
+requires a new approval and signature. A successful transfer with an unavailable
+balance refresh is reported separately from confirmed balance data.
+
+The app listens only on loopback, restricts requests to its local origin and
+requires a per-session token for mutations. It is a local demonstration with
+public test fingerprints and temporary NEAR keys, not a hosted wallet service.
+
+This is one example with a single entry point:
 
 ```text
 examples/near/
+├── demo/                        Rust HTTP service, fingerprint adapter, managed chain
+├── web/                         English UI and embedded local assets
+├── assets/                      Second scanner-style synthetic fingerprint fixture
 ├── src/                         Smart wallet and canonical transfer payload
 ├── token/src/                   Standard token, without a Gnorix dependency
 ├── tests/                       Wallet and token sandbox scenarios
 │   └── contracts/ft-receiver/    Test-only transfer-call callback receiver
-└── test.sh                      Build all Wasm artifacts and run the scenarios
+└── test.sh                      Contract regression suite
 ```
 
 The token is **Gnorix Test Token (GXT)** with **24 decimals**, implemented using
@@ -32,7 +91,7 @@ transfer-call refunds use the standard resolver; forced storage unregistration
 burns the account's remaining tokens and emits a burn event. The receiver under
 `tests/` exists only to exercise successful, partial, full and failed refunds.
 
-## Build and run locally
+## Run the contract regression suite
 
 Install the pinned tools once:
 
@@ -42,7 +101,7 @@ rustup target add --toolchain 1.99.1 wasm32-unknown-unknown
 cargo +1.99.1 install cargo-near --version 0.23.0 --locked
 ```
 
-Then run the entire example from the repository root:
+Then run the contract regression suite from the repository root:
 
 ```sh
 ./examples/near/test.sh
@@ -200,8 +259,55 @@ The example exposes no automatic pending-state reset. Revoking an enrollment
 prevents new requests but cannot undo an already dispatched transfer. Replacement
 waits until no transfer is pending.
 
-The sandbox tests use synthetic candidate bytes to isolate signing and contract
-behavior from fingerprint recognition. Read the [NEAR SDK documentation and
+The contract regression suites use synthetic candidate bytes to isolate signing
+and contract behavior from fingerprint recognition. The web demo uses real
+extraction and reconstruction from its two bundled synthetic fingerprint images. Read the [NEAR SDK documentation and
 recorded biometric limitations](../../docs/near-sdk.md) before adapting this
 example for real funds. Successful protocol tests do not establish biometric
 security.
+
+## Demo verification
+
+```sh
+cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
+cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --ignored --nocapture --test-threads=1
+```
+
+The opt-in tests exercise the complete application path: startup, both source
+images, enrollment, fresh reconstruction, deployed signature verification and
+real transfers in both directions. Additional checks cover failed calls, retained nonces and uncertain transaction
+observation without rebroadcasting. The contract Wasm is
+built automatically for these demo tests. Ordinary unit tests cover exact token
+amounts and request validation.
+
+## Fingerprint fixtures
+
+Wallet 1 uses the existing [core test fingerprint](../../crates/core/tests/assets/README.md).
+Wallet 2 uses [a scanner-style synthetic variation](assets/wallet-2-fingerprint.png);
+its [fixture notes](assets/README.md) record provenance and format.
+The second image uses the original as a visual reference; these related synthetic
+fixtures are not evidence of different real identities. Both are software-test inputs, with no claimed real person, sensor calibration
+or biometric uniqueness. The web demo applies the same explicit policy to both:
+3–6 points per combination, priority at least 0.3, three anchors separated by
+at least 6R, region radius 30R, and one neighbor step during key reconstruction.
+Here R is the measured average dark-ridge thickness. Enrollment keeps only grid
+baselines; signing checks variants lazily and stops at the first matching key.
+
+The public enrollment packages stay in memory; private keys and extracted
+candidate descriptors are not cached for subsequent signatures. Each signature
+binds the exact transfer, chain, wallet, owner, revision, nonce and expiry.
+
+For the precise biometric limits, including the recorded cross-subject descriptor
+match, see [the SDK guide](../../docs/near-sdk.md#runnable-example-and-evidence).
+These local transfers demonstrate working software and contract authorization;
+they do not qualify fingerprint-only custody of real assets.
+
+For sampling, the backend chooses a center uniformly from the confirmed pattern
+pixels and computes the smallest pixel radius containing at least a third of
+those pixels. Coverage includes ties at the boundary and counts confirmed pattern,
+not frame area or anatomical finger area. The artifact level is chosen from
+6–10 on the Lab's existing 0–100 scale, with a fresh seed for every click. Only
+that one crop is analyzed. The preview PNG contains exactly the altered pixels
+used inside the circle; decorative particles are a separate visual overlay.
+Fresh feature IDs belong to this capture, never to the enrollment's point list.
+The 0.3 priority threshold is shared by registration and reconstruction.

@@ -53,9 +53,13 @@ jobs:
       - name: Install pinned NEAR build tool
         run: cargo install cargo-near --version 0.23.0 --locked
       - name: Check sandbox test code
-        run: cargo clippy -p gnorix-near-wallet --features sandbox --all-targets --locked -- -D warnings
+        run: cargo clippy -p gnorix-near-wallet --features demo --all-targets --locked -- -D warnings
       - name: Build and test the NEAR example in sandbox
         run: ./examples/near/test.sh
+      - name: Check the fingerprint transaction demo
+        run: |
+          cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
+          cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --ignored --nocapture --test-threads=1
 
   fingerprint-reports:
     runs-on: ubuntu-latest
