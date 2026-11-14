@@ -1,6 +1,6 @@
 [package]
-name = "gnorix-near-counter"
-description = "NEAR contract demonstrating Gnorix-authorized application actions"
+name = "gnorix-ft-test-receiver"
+description = "Test-only NEAR receiver for standard fungible token callback scenarios"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,6 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-gnorix = { workspace = true, default-features = false, features = ["near"] }
 near-sdk = "=5.30.2"
 
 [lints]

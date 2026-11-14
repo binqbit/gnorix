@@ -1211,6 +1211,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gnorix-ft-test-receiver"
+version = "0.1.0-dev.1"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "gnorix-lab"
 version = "0.1.0-dev.1"
 dependencies = [
@@ -1241,20 +1248,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "gnorix-near-counter"
+name = "gnorix-near-token"
 version = "0.1.0-dev.1"
 dependencies = [
- "gnorix",
+ "near-contract-standards",
  "near-sdk",
 ]
 
 [[package]]
-name = "gnorix-near-integration-tests"
+name = "gnorix-near-wallet"
 version = "0.1.0-dev.1"
 dependencies = [
  "anyhow",
  "gnorix",
  "gnorix-example-support",
+ "near-sdk",
  "near-workspaces",
  "serde_json",
  "tokio",
@@ -2097,6 +2105,15 @@ dependencies = [
  "json_comments",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "near-contract-standards"
+version = "5.30.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff06657a4f2c530c00a81b130b3660433d5f133922e1ea808deacc56791bbded"
+dependencies = [
+ "near-sdk",
 ]
 
 [[package]]

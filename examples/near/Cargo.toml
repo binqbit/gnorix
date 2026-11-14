@@ -1,26 +1,40 @@
 [package]
-name = "gnorix-near-integration-tests"
-description = "Core-to-contract authorization tests in a local NEAR sandbox"
+name = "gnorix-near-wallet"
+description = "NEAR smart wallet authorizing standard token transfers with Gnorix"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-autolib = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-sandbox = ["dep:anyhow", "dep:gnorix", "dep:gnorix-example-support", "dep:near-workspaces", "dep:serde_json", "dep:tokio"]
+sandbox = [
+    "gnorix/core",
+    "dep:anyhow",
+    "dep:gnorix-example-support",
+    "dep:near-workspaces",
+    "dep:serde_json",
+    "dep:tokio",
+]
 
 [dependencies]
+gnorix = { workspace = true, default-features = false, features = ["near"] }
+near-sdk = "=5.30.2"
 anyhow = { version = "1", optional = true }
-gnorix = { workspace = true, features = ["near"], optional = true }
 gnorix-example-support = { workspace = true, optional = true }
 near-workspaces = { version = "=0.24.0", optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"], optional = true }
 
 [[test]]
-name = "authorization"
+name = "wallet"
+required-features = ["sandbox"]
+
+[[test]]
+name = "fungible_token"
 required-features = ["sandbox"]
 
 [lints]

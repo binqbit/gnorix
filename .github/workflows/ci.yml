@@ -52,10 +52,10 @@ jobs:
         run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
       - name: Install pinned NEAR build tool
         run: cargo install cargo-near --version 0.23.0 --locked
-      - name: Build the example contract
-        run: cargo near build non-reproducible-wasm --no-abi --manifest-path examples/near-contract/Cargo.toml --out-dir target/near
-      - name: Verify core signatures in NEAR sandbox
-        run: cargo test -p gnorix-near-integration-tests --features sandbox --locked --test authorization -- --ignored --nocapture
+      - name: Check sandbox test code
+        run: cargo clippy -p gnorix-near-wallet --features sandbox --all-targets --locked -- -D warnings
+      - name: Build and test the NEAR example in sandbox
+        run: ./examples/near/test.sh
 
   fingerprint-reports:
     runs-on: ubuntu-latest

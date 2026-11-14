@@ -24,8 +24,9 @@ members = [
     "crates/near",
     "examples/fingerprint-lab",
     "examples/support",
-    "examples/near-contract",
-    "examples/near-integration-tests",
+    "examples/near",
+    "examples/near/token",
+    "examples/near/tests/contracts/ft-receiver",
 ]
 resolver = "3"
 

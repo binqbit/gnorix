@@ -150,6 +150,10 @@ This interface covers actions within the verifying contract. Cross-contract
 promises need a separate pending/execution/failure design: NEAR does not roll
 back a successful caller when a later receipt fails. See
 [NEAR cross-contract semantics](https://docs.near.org/smart-contracts/anatomy/crosscontract).
+The [NEAR example](../examples/near/README.md) supplies that
+application policy for standard token transfers: consume once when accepted,
+retain a pending result, then record the token receipt's success or failure.
+The SDK itself remains independent of transfers, custody and retry policy.
 
 ## Formats and verification policy
 
@@ -168,12 +172,17 @@ back a successful caller when a later receipt fails. See
 
 ## Runnable example and evidence
 
-The [counter contract](../examples/near-contract/README.md) and
-[core-to-contract test](../examples/near-integration-tests/README.md) show owner
-registration, relayed signing, execution, replay rejection, altered requests,
-expiry, revocation, rotation and application bounds on a local NEAR sandbox.
-They use the explicitly named example HKDF-SHA256/Ed25519 provider and synthetic
-candidate digests to isolate protocol behavior from fingerprint repeatability.
+The single [NEAR example](../examples/near/README.md) contains a smart wallet,
+a standard token and their local sandbox tests. Run `./examples/near/test.sh`
+from the repository root to build the contracts and exercise the complete flow.
+The tests cover registration, relayed transfers, replay rejection, altered
+requests, expiry, revocation, rotation, storage and asynchronous failure handling.
+
+The wallet owns the token balance; an independent controller cannot spend tokens
+belonging to a different account. Gnorix registration lives in the wallet and is
+independent of the token's storage registration. The authorization tests use the
+explicitly named example HKDF-SHA256/Ed25519 provider and synthetic candidate
+digests to isolate protocol behavior from fingerprint repeatability.
 
 The integration is not a claim of biometric security. The current fingerprint
 descriptor has a recorded cross-subject match in local testing; correct Merkle

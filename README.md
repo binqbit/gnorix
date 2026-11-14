@@ -20,6 +20,7 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Fingerprint signing](docs/fingerprint-signing.md) covers regional point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
 - [Fingerprint test stand](docs/fingerprint-lab.md) provides a local Rust web interface for preparing regions, selecting circular captures, testing spatially varying capture artifacts and inspecting real signatures and matching feature points.
 - [NEAR contract integration](docs/near-sdk.md) covers owner-controlled enrollment, contract verification, core authorization conversion and the runnable local sandbox example.
+- [NEAR example](examples/near/README.md) demonstrates Gnorix-authorized transfers of a standard fungible token through a smart wallet, with one command to build and test the complete flow.
 
 ## Development
 
