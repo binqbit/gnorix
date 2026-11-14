@@ -36,3 +36,13 @@ cargo run -p gnorix-core --example merkle --locked
 ```
 
 The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. The optional `near` feature adds contract verification and enrollment lifecycle management, with a separate local sandbox test; signing uses the existing core API. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection and protected persistence remain development work. See [Development](docs/development.md) for the complete workflow and test scope.
+
+## License
+
+Gnorix is available under the [MIT License](LICENSE). You may use, modify,
+redistribute and sell the software, including in proprietary products, provided
+you retain the copyright and license notice. The software is provided without
+warranty.
+
+Third-party dependencies and externally downloaded datasets retain their own
+licenses; the Gnorix license does not replace their terms.
