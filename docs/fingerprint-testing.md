@@ -1,6 +1,6 @@
 # Fingerprint testing with SOCOFing
 
-[SOCOFing on Kaggle](https://www.kaggle.com/datasets/ruizgara/socofing) is an approved external input for local research on ridge clarity, illumination normalization and feature extraction. Keep the dataset and converted captures outside tracked project files. Normal builds and tests must not require a Kaggle download.
+[SOCOFing on Kaggle](https://www.kaggle.com/datasets/ruizgara/socofing) provides external research inputs for ridge clarity, local normalization and feature extraction. Keep the dataset and converted captures outside tracked project files. Normal builds and tests must not require a Kaggle download.
 
 For interactive demonstrations, the [Fingerprint Lab gallery](fingerprint-lab.md#choose-an-image) imports five pinned originals into an ignored local directory. Its visually curated examples are separate from the stratified comparison set described below. The manifest records source and decoded-pixel hashes; neither importing nor viewing resizes the analysis input.
 
@@ -8,7 +8,7 @@ For interactive demonstrations, the [Fingerprint Lab gallery](fingerprint-lab.md
 
 Shehu, Ruiz-Garcia, Palade and James published SOCOFing in 2018: 6,000 originals from 600 adults, with ten fingers per subject. Images carry subject, gender-label, hand and finger labels. STRANGE-generated obliteration (`Obl`), central rotation (`CR`) and `Zcut` variants have Easy, Medium and Hard settings. The paper identifies Hamster plus HSDU03PTM and SecuGen SDU03PTM scanners. See the [dataset publication](https://arxiv.org/abs/1807.10609).
 
-Kaggle's version-2 metadata lists the license as **Other (specified in description)** and refers to that publication. Its usage section restricts the data to noncommercial, not-for-profit research and requires both citations below in resulting publications, technical reports and manuals. This is not a general commercial-use or redistribution license.
+The version-2 metadata inspected for this project lists **Other (specified in description)**. The paper's [usage section](https://arxiv.org/pdf/1807.10609) limits use to noncommercial, not-for-profit research and requires both citations below in resulting publications, technical reports and manuals. Do not infer commercial or redistribution permission from public download access.
 
 - Shehu et al., [Sokoto Coventry Fingerprint Dataset](https://arxiv.org/abs/1807.10609), 2018.
 - Shehu et al., [Detection of Fingerprint Alterations Using Deep Convolutional Neural Networks](https://doi.org/10.1007/978-3-030-01418-6_6), ICANN 2018.
@@ -33,7 +33,7 @@ The paper describes 500 dpi, whereas BMP headers declare approximately 96 dpi fo
 
 ## Retrieve a pinned copy
 
-The official [KaggleHub client](https://github.com/Kaggle/kagglehub) downloaded version 2 without authentication during verification. Select a local data directory outside the checkout or an explicitly ignored location:
+Use the official [KaggleHub client](https://github.com/Kaggle/kagglehub/tree/v1.0.3) with an explicit version and a directory outside the checkout or in an ignored location:
 
 ```sh
 export SOCOFING_DOWNLOAD=/absolute/path/to/local-data/socofing
@@ -48,7 +48,7 @@ print(kagglehub.dataset_download(
 PY
 ```
 
-Use `$SOCOFING_DOWNLOAD/SOCOFing` as the source tree. Record dataset version, relative input paths, source SHA-256 values, conversion details and extractor revision with an evaluation. Downloaded inputs are not repository fixtures.
+Use `$SOCOFING_DOWNLOAD/SOCOFing` as the source tree. The recorded download required no authentication; follow Kaggle's access requirements if they change. Record dataset version, relative input paths, source SHA-256 values, conversion details and extractor revision with each evaluation.
 
 ## Convert without inventing scanner evidence
 
@@ -87,18 +87,16 @@ uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image "$SOCOFING_DOWNLOAD/13__F_Right_little_finger.png"
 ```
 
-The final command refreshes the single `reports/fingerprint/` bundle. A run can fail explicitly when the source does not provide sufficient supported ridge measurements; retain that failure in evaluation records.
+The final command writes the single `reports/fingerprint/` bundle; see the [report refresh boundary](../tools/fingerprint-reports/README.md#refresh-and-recovery). Insufficient supported ridge measurements produce an explicit failure. Retain failures in evaluation records.
 
-## Initial comparison set
+## Reproducible comparison set
 
-The first inspection set contains 22 originals and 36 matched alterations. Choose the smallest SHA-256 of the UTF-8 relative path `Real/<filename>` in each gender-label × hand × finger group, then add the smallest per gender-label among the larger originals. This gives 20 stratified originals plus two larger-image controls. Selection precedes processing and does not depend on successful extraction.
+The recorded development set contains 22 originals and 36 matched alterations. Choose the smallest SHA-256 of the UTF-8 relative path `Real/<filename>` in each gender-label × hand × finger group, then add the smallest per gender-label among the larger originals. This gives 20 stratified originals plus two larger-image controls. Selection precedes processing and does not depend on successful extraction.
 
 For alteration comparisons, choose the smallest selected standard original per gender-label and the two larger controls. Version 2 yields `13__F_Right_little_finger`, `333__M_Left_thumb_finger`, `560__F_Left_little_finger` and `590__M_Left_ring_finger`; each has all nine alteration combinations. These 58 inputs exercise distinct source conditions. They are a development sample, not a population-representative accuracy benchmark.
 
 Compare original source intensities, local dark/light references, supported coverage, measured widths, clarity diagnostics and inferred geometry. Preserve input failures and unsupported areas rather than replacing them with a successful example. Synthetic alteration severity is not a calibrated scan-quality score, and smoother output alone does not establish more accurate biometric features.
 
-The first local-clarity implementation processed all 58 selected inputs successfully. Compared with the previous extractor, every pre-existing JSON field and all 696 processing-stage PNGs remained identical; clarity was added without changing measurements or geometry. This verifies execution and isolation of the diagnostic, not biometric accuracy.
+For paired clarity comparisons, use the intersection of both clarity-support masks and the original's confirmed-pattern region. Keep that original region fixed: an alteration must not improve its measured result merely by changing which pixels count as pattern. Record the common pixel count alongside each mean. Prefer native floating-point maps/segment values; exported PNG scores are quantized to `1/255`, so paired means have a worst-case rounding uncertainty of `±1/255`.
 
-For the 36 original/altered comparisons, use the intersection of both clarity-support masks and the original's confirmed-pattern region. Keep this original region fixed so an alteration cannot improve its result merely by changing which pixels are classified as pattern. Record the common pixel count alongside each mean. In the first run, 34 altered images had a lower mean on this region and two had a higher mean. Synthetic modifications can sharpen or regularize local structure, so the clarity index cannot by itself establish that an image or feature is authentic.
-
-Those paired means use PNG maps rounded to `1/255`: 22 decreases and both increases exceed the worst-case paired rounding bound of `±1/255`; the other 12 changes are too small to resolve from these PNGs. Native segment values and supported-pixel summary means retain floating-point precision.
+Higher clarity after a synthetic alteration can reflect sharpened or regularized local structure; it does not establish authenticity. Test repeat captures and unrelated subjects separately for key recovery and false matches. The current descriptor's [known cross-subject limitation](fingerprint-signing.md) is not resolved by successful extraction or a valid signature proof.

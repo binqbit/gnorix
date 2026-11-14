@@ -1,58 +1,57 @@
 # Grid figures and positional variants
 
-`fingerprint::prepare_grid_baselines(points, combinations, R, &config)` prepares one normalized, snapped baseline for each [selected point combination](feature-combinations.md). Point priority, subset size and anchor geometry are checked before this stage. Enrollment hashes only these baselines. R is the measured **mean dark-ridge width from the same capture**. It is the distance between neighboring triangular-grid nodes; there is no independent pixel-spacing setting.
+`fingerprint::prepare_grid_baselines(points, combinations, R, &config)` prepares one normalized, snapped baseline per [selected point subset](feature-combinations.md). Enrollment uses those baselines; signing searches nearby positions. R is the same capture's measured mean dark-ridge width and the distance between adjacent triangular-grid nodes.
 
 ## One fixed frame per combination
 
-1. Construct the convex hull, like a band around the exterior points. Keep every interior point for the remaining stages.
-2. Rotate the longest boundary edge horizontally above the figure, without reflection. Its two endpoints establish the top boundary. Set `Y = 0` there and `X = 0` at the rightmost point of the entire rotated figure. This virtual top-right corner need not be an actual feature.
-3. Snap every point to its Euclidean-nearest triangular-grid node. Signed axial coordinates `(q, r)` remain allowed. The basis is `(R, 0)` and `(R/2, √3 R/2)`; exact floating-point distance ties choose the smaller `(q, r)` lexicographically.
-4. Align the snapped figure's top and right extrema. Preserve the alternating half-step between rows through an explicit `phase` bit. This is a change of the grid's coordinate frame, not independent deformation of its points.
-5. For uncertainty level L, add **L rows downward and L full horizontal steps leftward**. This fixed margin accommodates every allowed movement. Variants keep that frame: they are not individually rotated or recentered.
+1. Construct the convex hull, retaining interior points for later stages.
+2. Rotate its longest edge horizontally above the figure, without reflection. Set Y to zero at that edge and X to zero at the rightmost point of the entire rotated figure. This virtual top-right corner need not be a feature.
+3. Snap every point to its Euclidean-nearest node on the signed axial lattice `(q, r)`, with basis `(R, 0)` and `(R/2, √3 R/2)`. Exact distance ties choose the smaller `(q, r)` lexicographically.
+4. Align the snapped top and right extrema, preserving the alternating half-step between rows through a `phase` bit.
+5. Add L rows downward and L full horizontal steps leftward, where L is the uncertainty level. All later variants keep this padded frame: no individual recentering or rotation.
 
-Output cells use nonnegative `(column, row)` indices: columns grow **left** from the right boundary and rows grow **down**. For a shape's `phase` (0 or 1):
+Output cells have nonnegative `(column, row)` indices. Columns grow **left**; rows grow **down**. Their positions are:
 
 ```text
 leftward distance / R = column + ((row + phase) mod 2) / 2
 downward distance / R = √3 × row / 2
 ```
 
-Thus the two Cartesian boundaries can both be zero before padding even when the top-right corner is between grid nodes. Subtracting the independent axial minima would not accomplish this.
+Equal longest edges are compared by normalized, sorted grid geometry, independent of priority and source IDs. Arithmetic guards handle floating-point collinearity and equal lengths; they do not add biometric tolerance. Point and collinear inputs remain representable, and snapping may collapse a thin polygon into a line. Coincident features retain their multiplicity and explicit collision groups.
 
-Equal longest edges are compared by their normalized, sorted grid geometry, without using priority or capture-local IDs. Machine-rounding guards cover arithmetic collinearity and equal lengths; they are not extra biometric tolerances. A point or collinear subset remains a point/line rather than disappearing. Rounding can also turn a thin polygon into a line. Coincident features keep their separate IDs and appear in explicit collision groups.
-
-`GridBaselineConfig` supplies `padding_steps`, `max_baselines` and `max_work`. `GridBaselines::baseline_count()` counts the prepared subsets, and `GridBaselines::candidates(...)` hashes one baseline per subset. Baseline preparation does not enumerate or preflight a Cartesian uncertainty product. The same L-step frame is reused when [signing](fingerprint-signing.md) lazily searches nearby positions.
+`GridBaselineConfig` controls `padding_steps`, `max_baselines` and `max_work`. `GridBaselines::candidates(...)` hashes one baseline per prepared subset. It does not preflight or enumerate a Cartesian uncertainty product.
 
 ## Complete positional traversal
 
-Level L includes every node at most L steps away through the six nearest neighbors. Each point has `1 + 3L(L + 1)` choices: 1, 7, 19 and 37 at levels 0–3. These are hexagonal graph neighborhoods, not Euclidean circular cutoffs.
+Level L contains every node reachable in at most L steps through the six nearest neighbors: `1 + 3L(L + 1)` positions per point. Levels 0–3 therefore have 1, 7, 19 and 37 positions. These are graph neighborhoods, not Euclidean circular cutoffs.
 
-For n points the complete Cartesian product contains `(1 + 3L(L + 1))^n` assignments. Every point moves independently, including points that established the frame. Neighborhood order is center first, then successive rings ordered by `(q, r)`; the last source-ID-ordered feature varies fastest. Collisions, common translations and repeated unlabeled geometries remain in the traversal. No extra subset omission or geometry deduplication occurs here.
+For n points, the full product has `(1 + 3L(L + 1))^n` assignments. Every point can move independently, including the points that determined the frame. Offsets are center first, then rings ordered by `(q, r)`; the last source-ID-ordered feature varies fastest. Collisions, common translations and repeated unlabeled geometries remain present.
 
-The signing iterator expands this product only for its current admitted ranked subset and tests each candidate immediately. It does not need the full product to fit a counter before beginning its bounded search. Source-space spatial admission does not prune individual snapped or moved assignments from this product.
+The generic signing search streams this product for its current subset and tests each candidate immediately, without requiring the full count to fit a counter. `prepare_baseline_signing_search` additionally skips assignments whose top/right boundaries cannot equal a canonical enrolled baseline. This saves hashing and key derivation without changing possible-match order; it is valid only for baseline-only enrollments. See [candidate search](fingerprint-signing.md#candidate-search).
 
-For an explicit diagnostic export, `fingerprint::prepare_grid_shapes(...)` and `GridShapes::variants()` retain complete-traversal behavior. The fallible iterator does not hold the product in memory, but a checked total rejects diagnostic requests exceeding `max_variants` before traversal. Preparation and iteration share a work allowance. Exhausting it yields an error rather than reporting a partial export as complete. These diagnostic limits do not multiply the keys registered by baseline enrollment.
+For a complete diagnostic, `prepare_grid_shapes(...)` and `GridShapes::variants()` calculate a checked total and reject requests above `max_variants` before traversal. The fallible iterator streams output; preparation and iteration share `max_work`. Exhaustion is an error, never a successful partial export. These diagnostic limits do not determine enrollment size.
 
 ## Run on the existing combinations
 
+After [exporting combinations](feature-combinations.md#run-the-small-example), inspect their snapped shapes with a small level-0 export:
+
 ```sh
+GNORIX_GRID_UNCERTAINTY_STEPS=0 \
 cargo run -p gnorix-core --example feature_grid --release --locked -- \
   reports/fingerprint/feature-combinations.json \
   reports/fingerprint/feature-grid.json
 ```
 
-The output file must not already exist. The adapter reads the combination export, including its measured R; it does not repeat image extraction. Its example controls are:
+The output must not exist. The command reads measured R and the selected subsets from JSON; it does not repeat image analysis. Omit the environment override to include the default level-1 neighborhoods. This diagnostic command does not change an enrolled package's policy.
 
 | Environment variable | Example default | Meaning |
 |---|---:|---|
-| `GNORIX_GRID_UNCERTAINTY_STEPS` | 1 | Number of neighbor steps L. |
-| `GNORIX_GRID_MAX_VARIANTS` | 1000000 | Maximum complete assignment count across all combinations. |
-| `GNORIX_GRID_MAX_WORK` | 10000000 | Preparation and traversal work entries. |
+| `GNORIX_GRID_UNCERTAINTY_STEPS` | 1 | Neighbor steps L. |
+| `GNORIX_GRID_MAX_VARIANTS` | 1000000 | Complete assignment limit across all subsets. |
+| `GNORIX_GRID_MAX_WORK` | 10000000 | Preparation and traversal work. |
 
-The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
-
-The selected subset count depends on the current absolute-band selection, available geometry and coverage witnesses. Recreate combination JSON v7 and profile-v9 enrollments before measuring counts; previous profiles' figures are historical. A complete positional diagnostic sums `(1 + 3L(L + 1))^n` over the selected subsets and may exceed its export limit even when baseline enrollment fits. That count describes positional alternatives searched later, not registered keys.
+The JSON includes hulls, frames, signed snapped nodes, padded baselines, phase, variants and collisions. Input and output are bounded to 64 MiB; a failed write removes its new partial file. Regenerate these results when the source capture changes; see the report tool's [refresh boundary and current schema limitation](../tools/fingerprint-reports/README.md#refresh-and-recovery).
 
 ## Interpretation
 
-This is per-subset geometric normalization, not registration of whole captures. The [candidate and package stage](grx-packages.md) canonically hashes the baseline integer positions and commits caller-selected public keys. Near-equal longest edges can switch under measurement noise; local neighbor movements do not cover an arbitrary frame rotation. Symmetric or equally quantized figures can have ambiguous source-ID correspondences despite identical unlabeled geometry. Boundary rounding and changes in measured R remain sources of variability that require repeated-capture evaluation.
+This normalizes individual subsets, not entire captures. Near-equal longest edges can switch under measurement noise; neighbor movements do not cover arbitrary frame changes. Changes in measured R, boundary rounding and symmetric figures remain sources of variability. [Coordinate encoding](grx-packages.md#coordinates-to-a-candidate) deliberately ignores source IDs and feature kinds, so successful normalization alone does not establish biometric identity.

@@ -1,5 +1,7 @@
 # Test assets
 
-`test-fingerprint.png` is a synthetic scanner-style image generated with `imagegen`, not a capture from a real device. No real biometric reference was supplied.
+[test-fingerprint.png](test-fingerprint.png) is a synthetic scanner-style image generated with ImageGen. No real biometric reference was supplied; it is not a capture from a physical sensor.
 
-The original image is preserved as a 1086 × 1448, 8-bit RGB PNG. Physical resolution is unspecified. Decode and convert it to single-channel grayscale before supplying pixels to `Capture::new`.
+The original is preserved as a 1086 × 1448, 8-bit RGB PNG with unspecified physical resolution. Decode it to single-channel grayscale before supplying pixels to `Capture::new`. The report example performs this conversion.
+
+Use it for repeatable [extraction diagnostics](../../../../docs/fingerprint.md), not recognition-accuracy or biometric-independence claims. External research inputs and their separate provenance are described in the [SOCOFing testing guide](../../../../docs/fingerprint-testing.md).

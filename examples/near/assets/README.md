@@ -1,6 +1,6 @@
 # Demo fingerprint fixtures
 
-The NEAR demo uses two independently generated synthetic grayscale fingerprints:
+The [NEAR demo](../README.md) embeds two separately generated synthetic grayscale fingerprints. Their pixels and dimensions are fixed inputs to the [fingerprint adapter](../demo/fingerprint.rs):
 
 | Wallet | Asset | Pattern | Dimensions | PNG size |
 | --- | --- | --- | --- | --- |
@@ -14,11 +14,10 @@ compact scan dimensions. Those gallery images were **not** supplied to the
 generator; both patterns were generated independently from the prompts below.
 No SOCOFing scan is bundled in these files.
 
-Each native output was 1128 × 1394 pixels. The final asset was converted to
-8-bit grayscale and resized to 241 × 298 using Lanczos resampling, then saved as
-an optimized PNG. This matches the gallery's dimensions without retaining HD
-image data. No hand-authored ridge edits or synthetic feature overlays were
-added after generation. The core test fingerprint is unchanged.
+Each native output was 1128 × 1394 pixels. Conversion used 8-bit grayscale,
+Lanczos resampling to 241 × 298 and optimized PNG encoding. No hand-authored
+ridge edits or feature overlays were added. The larger [core fixture](../../../crates/core/tests/assets/README.md)
+is a separate input.
 
 The two files are software-test fixtures, not scans of identified people.
 Physical resolution and sensor calibration are unspecified. Distinct generated
@@ -30,7 +29,7 @@ SHA-256 of the files consumed by the demo:
 - Wallet 1: `aea2bb054f6b83a6fa313605e06d41a6c2933d8ca02a7b9c7f6a88f20fe240bc`
 - Wallet 2: `07978c10378ff65e4e410d484db6d8e71dd474b6ca96becce383111f4438a6e5`
 
-SHA-256 of the native generated outputs before conversion:
+Recorded SHA-256 of the native generated outputs before conversion (not bundled here):
 
 - Wallet 1: `80c059a6499ce023ef02579fe45e40240d883fff9d78ff1d7f5344f7524534bd`
 - Wallet 2: `1be3f34c260175c766dd0421fd12e631c7bc6c8eebae7159e9b41c063b460b8f`

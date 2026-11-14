@@ -1,58 +1,51 @@
 # Regional feature combinations
 
-`fingerprint::generate_combinations(&features, &config)` turns a compact `FingerprintFeatures` analysis into a deterministic list of point subsets. Obtain it with `fingerprint::analyze`, or project an existing full report with `Fingerprint::features()`. The [fingerprint analysis](fingerprint.md) does not need to create report-only maps for this operation. Each subset records original feature IDs, a ranking score and the regions that selected it.
+`fingerprint::generate_combinations(&features, &config)` selects deterministic point subsets from `FingerprintFeatures`. Obtain them with `fingerprint::analyze`, or project a full analysis with `Fingerprint::features()`. Each subset retains capture-local feature IDs, a score and the regions that selected it. It is input to [grid normalization](grid-shapes.md), not yet a key.
 
 ## Regions and eligible points
 
-Keep surviving feature identities with known final `priority >= min_priority`; equality is included. The examples use 0.5. Unknown priorities and weaker points never refill a region. Bound the confirmed pattern, extending it to include eligible point centers, and cover that rectangle with a regular grid of overlapping circles. A small capture can need one circle; nine is neither mandatory nor a maximum.
+Only surviving features with a known final `priority >= min_priority` participate. Equality is included; unknown scores and weaker points never refill a region. Priority is an algorithmic ranking, not a measured probability of correct recognition.
 
-The initial radius is `radius_units × R`, where R is the measured mean dark-ridge width. If a circle contains fewer than `max_points` eligible points, expand directly to the required nearest point. If the entire capture has fewer than that maximum, use all available points. Fewer than `max(min_points, min_anchor_points)` is an explicit error. There is no expansion-step setting and no truncated point pool: every eligible point inside the effective circle participates in selection.
+R is the capture's measured **mean dark-ridge width**. The initial radius is `radius_units × R`. A rectangular grid of overlapping circles covers the confirmed-pattern bounds, extended to include eligible point centers. The layout minimizes the required cell count; it does not assume nine regions or a fixed full-finger size.
 
-Both enrollment and signing admit subset sizes from **min_points through max_points**, capped by the available point count. The maximum limits a single combination, not the number of eligible regional points.
+If a circle contains fewer than `max_points` eligible points, it expands directly to the nearest point needed to reach that count. If fewer exist in the entire capture, it uses all available points. Every eligible point inside the effective circle participates; `max_points` limits subset size, not the regional point pool. Fewer than `max(min_points, min_anchor_points)` eligible points is an explicit error.
+
+Subset sizes run from `min_points` through `min(max_points, regional_point_count)`, also satisfying the minimum anchor count. Enrollment and signing use the same retained size range.
 
 ## Spatial policy
 
-`SpatialPolicy` has two controls:
+Each subset must admit at least `min_anchor_points` anchors, with **every anchor pair** separated by at least `min_anchor_distance_units × R`. All remaining points must lie inside or on the anchors' convex hull. More anchors are allowed; the setting is a minimum, not an exact hull-vertex count. Every extreme hull vertex is therefore mandatory, and compatible interior points can complete the required count.
 
-- **min_anchor_points:** at least this many anchor points must exist in the subset.
-- **min_anchor_distance_units:** every pair of anchors must be separated by at least this distance, measured in R.
+Admission uses observed coordinates before rotation or snapping. Signing applies the saved distance in R to the fresh capture's measured R. Neighbor movements are not checked against the spatial policy again. Anchor roles do not enter the coordinate hash.
 
-Every other point must lie inside or on the anchors' convex hull. Anchor count is a minimum: a polygon may require more anchors; two anchors enclose only their line segment. No extra containment margin is added. Every extreme hull vertex must be an anchor, and compatible interior points can complete the required count.
-
-The examples start with three anchors separated by at least **6R**. Enrollment retains this policy; signing multiplies the same distance by the fresh capture's R. There is no fraction of image bounds, separate overall diameter, or second derived spatial-policy record. These settings govern geometry, not measured cryptographic strength.
-
-Check source coordinates before rotation, snapping or hashing. An admitted subset retains its complete configured Cartesian uncertainty search; neighbor movements are not filtered again. Anchor roles do not add identities to the coordinate hash.
+These are geometric constraints, not a cryptographic strength estimate. A valid local subset need not be one of the subsets selected during enrollment.
 
 ## Automatic weighted selection
 
-Sort the N eligible regional points by descending priority, using source ID to break ties. Assign each valid subset to an **absolute band by its strongest included point**:
+Order regional points by descending priority, breaking ties by source ID. A valid subset belongs to the absolute priority band of its **strongest included point**:
 
-| Band | Strongest included priority | Share while all bands remain available |
+| Band | Strongest priority | Relative weight |
 |---|---|---:|
-| H | `> 0.9` | 50% |
-| M | `0.5..=0.9` | 25% |
-| L | `< 0.5` | 25% |
+| H | `> 0.9` | 2 |
+| M | `0.5..=0.9` | 1 |
+| L | `< 0.5` | 1 |
 
-These are fixed priority thresholds, not percentiles of the current image. The minimum-priority cutoff is unchanged: excluded points do not become eligible to fill a band. For example, a cutoff of 0.5 leaves L empty.
+Select distinct valid subsets in the cycle **H, M, H, L**. Empty or exhausted bands release their turns. Geometry rejections and duplicates do not consume a turn. Within each band, order subsets by mean `0.1 + 0.9 × priority²`; ties use lexicographic point-rank order. The cutoff still applies: with `min_priority = 0.5`, band L is empty.
 
-Cycle **H, M, H, L**, skipping exhausted bands so available bands use the remaining turns. A turn selects one valid, distinct point subset; rejected geometry and duplicates do not consume its allocation. Within each band, use descending score:
+For N regional points, enrollment targets **3N subsets**, or all admissible subsets if fewer exist. It then adds:
 
-```text
-point weight = 0.1 + 0.9 × priority²
-subset score = mean(point weights)
-```
+- Coverage witnesses for any regional point not represented yet. If a point cannot belong to any valid subset in the configured size range, the entire operation fails with its region and source ID.
+- At most one compact valid group around each regional point. The group includes that point and prefers the smallest farthest-neighbor distance, then the smallest total distance. Its nearest-neighbor search expands until the same spatial constraints can be met.
 
-Ties use lexicographic point-rank order. Enrollment targets **3N subsets per region**, or all admissible subsets if fewer exist. This target is automatic, not a user-controlled per-region budget. The shares describe subset selection, not point occurrence, key attempts or random probabilities; a subset may contain weaker points alongside its strongest point.
+These additions improve point coverage and partial-capture coverage; they can exceed 3N and change the overall band proportions. They do not guarantee a match for every crop. Selection and feasibility checks share the work budget; exhaustion is an incomplete computation, not proof that a point is geometrically unusable.
 
-After band selection, add valid coverage witnesses for any still-unrepresented regional points. If a point cannot participate in **any** admissible subset within the configured size range, fail the whole preparation with its region and source ID. Do not silently drop it. If the work budget prevents proving coverage or completing selection, report budget exhaustion instead of claiming geometric impossibility. Coverage witnesses can increase the output beyond 3N.
+Identical point sets selected by overlapping regions merge into one entry retaining all contributing regions. The exported list uses descending score, then ascending feature IDs. The 2:1:1 weights describe subset allocation, not the frequency of individual points or key attempts.
 
-Also retain at most one compact valid group per regional point. Keep that point in the group, expand its nearest-neighbor frontier until the spatial policy can be met, and prefer the smallest farthest-neighbor distance, then the smallest total distance. Priority and source ID settle neighbor ties. This adds local groups that can survive a partial scan even when stronger points elsewhere disappear. These additions retain their original quality scores and share the same work budget. They supplement the existing selections; they do not replace priority bands or weaken anchor spacing. They can increase the output beyond 3N, and do not guarantee a match for every possible crop.
-
-Merge identical point sets from overlapping regions, retaining all contributing region IDs. IDs inside each entry are ascending; the final exported list is ordered by descending score, then IDs. Coverage additions, overlap deduplication, exhausted bands and a final partial cycle can change the output's overall percentages. Identical inputs and controls reproduce the same list.
-
-Signing uses the same absolute bands and H, M, H, L schedule, but searches admissible regional subsets lazily without enrollment's 3N selection target. It searches every positional variant of the current subset before scheduling another subset. The [search work budget](fingerprint-signing.md#candidate-search) still applies.
+[Signing](fingerprint-signing.md#candidate-search) uses the same band schedule, but traverses admissible regional subsets lazily without the 3N enrollment target. It completes the current subset's positional search before scheduling another subset.
 
 ## Run the small example
+
+From the repository root:
 
 ```sh
 cargo run -p gnorix-core --example feature_combinations --release --locked -- \
@@ -60,28 +53,20 @@ cargo run -p gnorix-core --example feature_combinations --release --locked -- \
   reports/fingerprint/feature-combinations.json
 ```
 
-Choose an output file that does not already exist. The adapter reads environment variables; the library receives an explicit `CombinationConfig` and does not read the environment. The canonical report folder can contain this JSON and an optional `feature-combinations.png` inspection figure. Refreshing the main fingerprint report replaces the folder and removes these previous-capture outputs; rerun this example for the new capture.
+The output must not already exist. This adapter reads the environment; the library receives an explicit `CombinationConfig`.
 
 | Environment variable | Example default | Meaning |
 |---|---:|---|
 | `GNORIX_COMBINATION_MIN_POINTS` | 3 | Minimum subset size. |
 | `GNORIX_COMBINATION_MAX_POINTS` | 6 | Maximum subset size and sparse-circle expansion target. |
 | `GNORIX_COMBINATION_MIN_PRIORITY` | 0.5 | Inclusive minimum final feature priority. |
-| `GNORIX_COMBINATION_MIN_ANCHOR_POINTS` | 3 | Minimum number of pairwise-separated anchors. |
-| `GNORIX_COMBINATION_MIN_ANCHOR_DISTANCE_UNITS` | 6 | Minimum distance between every anchor pair, in R. |
+| `GNORIX_COMBINATION_MIN_ANCHOR_POINTS` | 3 | Minimum pairwise-separated anchor count. |
+| `GNORIX_COMBINATION_MIN_ANCHOR_DISTANCE_UNITS` | 6 | Minimum anchor-pair distance in R. |
 | `GNORIX_COMBINATION_RADIUS_UNITS` | 30 | Initial circle radius in R. |
-| `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative validation, selection and geometry work budget. |
+| `GNORIX_COMBINATION_MAX_WORK` | 10000000 | Cumulative validation, selection and geometry work. |
 
-The library receives an explicit `CombinationConfig`; these defaults belong to the examples. Counts must be positive with `min_points <= max_points` and an anchor count that fits the maximum. Priority is finite in `[0, 1]`; distance is finite and nonnegative; radius is finite and positive. Changing the retained selection policy requires a new enrollment.
+These are CLI example defaults, not library defaults; the [NEAR demo](../examples/near/README.md) has its own explicit profile. Counts must be positive and ordered, and the anchor count must fit the maximum. Priority must be finite in `[0, 1]`, distance finite and nonnegative, and radius finite and positive.
 
-The export uses `gnorix.feature-combinations.v7`. It records controls, the direct spatial policy, eligible points, actual circles with their `feature_ids`, unique combinations and occurrence diagnostics. Imported enrollment validates these records before hashing. Old combination exports and fingerprint profiles require regeneration.
+The `gnorix.feature-combinations.v7` export records controls, measured R, eligible points, actual circles, selected subsets and occurrence counts. [Enrollment](grx-packages.md) validates the imported geometry and retains the reconstruction policy. Regenerate this export when the capture changes. The report tool's [refresh boundary](../tools/fingerprint-reports/README.md#refresh-and-recovery) describes replacement behavior and its current v7 schema limitation.
 
-## Scale and coverage
-
-R is the thickness of a dark ridge, not the period from one ridge to the next. The same radius multiplier is used for enrollment and reconstruction. The algorithm does not assume a fixed “full-finger ridge count”: ridge dimensions vary by person and location, and plain versus rolled acquisition covers different skin areas. See the [NIST-hosted ridge-width discussion](https://www.nist.gov/system/files/documents/2016/12/19/p19_jain_chen_nistlevel3.pdf) and [FBI acquisition definitions](https://le.fbi.gov/science-and-lab/biometrics-and-fingerprints/biometrics/recording-legible-fingerprints).
-
-Circle coverage ensures that this rectangle, including every eligible point, is covered. It does not ensure that every previously enrolled multi-point subset lies together inside one circle of a new crop. [Signing](fingerprint-signing.md) deliberately searches only its regional subsets; a spatially excluded combination is not recovered by a global fallback.
-
-## Scope
-
-This stage supplies point subsets for later encoding. [Grid figures](grid-shapes.md) apply hull-based orientation and measured-R snapping to those subsets. [Enrollment](grx-packages.md) encodes one baseline per subset independently of source IDs; [signing](fingerprint-signing.md) searches the local uncertainty variants on demand. Original IDs and region bounds belong to this capture. Repeated identical input and settings reproduce the output; partial new captures still require correspondence and evaluated biometric acceptance criteria.
+Circle coverage covers the pattern rectangle; it cannot guarantee that every enrolled multi-point subset lies together inside a circle of a new crop. Signing deliberately has no global fallback. Source IDs are local to a capture; deterministic output for identical inputs does not establish correspondence across independent scans.

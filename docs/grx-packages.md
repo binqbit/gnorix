@@ -1,63 +1,58 @@
 # Grid candidates and `.grx` packages
 
-Enrollment turns the normalized, snapped baseline of each selected point subset into one candidate digest. The caller's `CryptoProvider` derives a private/public key pair; the shared enrollment pipeline commits the public-key hashes to a Merkle tree. Positional uncertainty is searched lazily during signing and does not multiply the enrolled set. The resulting `<merkle-root>.grx` stores the context and hashes needed to find a member and reconstruct its proof later.
+Enrollment encodes one normalized, snapped baseline per selected point subset. A caller-selected `CryptoProvider` derives its signing key and public key; the enrollment pipeline commits context-bound public-key hashes to a Merkle tree. Signing searches positional uncertainty later, without enlarging the enrolled set. The package is named `<merkle-root>.grx`.
 
 ## Coordinates to a candidate
 
-`fingerprint::grid_candidate(positions, phase, max_descriptor_bytes)`:
+`fingerprint::grid_candidate(positions, phase, max_descriptor_bytes)` sorts integer nodes by `(row, column)`, preserves repeated coordinates, encodes them and hashes the complete descriptor with SHA-256. The resulting 32-byte digest is a sensitive `Candidate`.
 
-1. Sort the final integer nodes by `(row, column)`: top to bottom, then right to left under our grid convention.
-2. Preserve repeated coordinates when features coincide. Keep the previously aligned and padded frame.
-3. Encode phase, point count and consecutive `(column, row)` records with the versioned framing below.
-4. Hash the entire descriptor with SHA-256. The 32-byte digest becomes a sensitive `Candidate`.
+Under the grid convention, sorting visits rows from top to bottom and columns from right to left. The aligned, padded frame stays intact. Feature IDs, kinds, priorities, source pixels, R and hull diagnostics do not enter the descriptor. Equal coordinate multisets and phase produce the same digest regardless of extraction numbering.
 
-Feature IDs, kinds, priorities, original pixels, R and hull diagnostics do not enter this descriptor. Equal positional multisets with the same phase produce the same digest regardless of their extraction numbering.
-
-Every field below, including the domain, has an unsigned 64-bit big-endian byte-length prefix:
+Each of these **four fields** has its own unsigned 64-bit big-endian byte-length prefix:
 
 ```text
 "gnorix.grid-candidate.v1"
 phase:u8
 point_count:u64be
-(column:u64be, row:u64be) repeated in sorted order
+consecutive (column:u64be, row:u64be) pairs in sorted order
 ```
 
-The complete descriptor occupies `65 + 16 × point_count` bytes. Its size is checked before sorting/allocation. `GridBaselines::candidates(...)` applies this operation once per prepared baseline and propagates failures; it does not silently truncate the enrolled set. The separate `GridShapes` API remains available for complete diagnostic exports of positional variants.
+The descriptor occupies `65 + 16 × point_count` bytes. Phase must be 0 or 1; the point list must be nonempty. The complete size is checked before sorting/allocation. `GridBaselines::candidates(...)` encodes each baseline and propagates errors rather than silently truncating enrollment.
 
 ## Keys and membership
 
-`enrollment::enroll_candidates(...)` accepts an existing candidate stream and an explicit `EnrollmentContext`. It shares context validation, secret policy, resource limits and key/Merkle construction with `enrollment::enroll(...)`. The supplied provider must deterministically bind the candidate, context and any required independent secret. Transient candidates and private keys are not retained by enrollment.
+`enrollment::enroll_candidates(...)` accepts a candidate stream and an explicit `EnrollmentContext`. It shares validation, secret policy, resource limits and key/Merkle construction with `enrollment::enroll(...)`. The provider must deterministically bind the candidate, context and any required independent secret. The enrollment retains no candidate list or private keys.
 
-Each leaf is the existing context-bound `merkle::leaf_hash(context, public_key)`. The tree sorts and deduplicates these hashes. Equal baselines can therefore produce fewer distinct leaves; each supplied baseline still counts toward enrollment limits.
+Leaves are `merkle::leaf_hash(context, public_key)`. The tree sorts and deduplicates them; repeated baseline keys can therefore yield fewer leaves than input candidates. Every supplied candidate still counts toward the enrollment limit. The root binds the tree's top hash and distinct leaf count; it is a set commitment, not the signature algorithm's public key.
 
-For a later public key, `EnrollmentPackage::proof_for(public_key, &limits)` computes the same leaf hash, searches the sorted leaves, and constructs the membership path. Verify it with `merkle::verify` against the application's trusted root. An absent leaf is an explicit error.
-
-[Fresh-image signing](fingerprint-signing.md) generates candidate keys from newly extracted point subsets and searches this retained tree. It signs with the first member and returns its public key, membership proof and action signature; it does not modify or extend the package.
+`EnrollmentPackage::proof_for(public_key, &limits)` computes the leaf, searches retained hashes and reconstructs its membership path. An absent leaf is an error. [Fresh-image signing](fingerprint-signing.md) signs with the first reconstructed member; it neither modifies nor extends the package.
 
 ## Retained package
 
-`EnrollmentPackage` contains the full enrollment context, optional public profile parameters, Merkle root, leaf count and retained hash tree. Its tree representation stores only canonical leaf hashes: all internal nodes and paths are rebuilt on load. It contains no public-key list, private keys, candidate digests, feature coordinates, source image or independent secret.
+In memory, `EnrollmentPackage` holds the context, optional public profile parameters, root, leaf count and all Merkle levels. Its **serialized form stores only the sorted leaf hashes**; decoding rebuilds internal nodes and paths:
 
 ```text
 magic/version:    "GNORIX-GRX" || 0x00 || 0x02
 context_length:   u64be
 context:          exact EnrollmentContext::encode bytes
 parameter_length: u64be
-parameters:       exact public profile parameter bytes; zero length means absent
+parameters:       exact public profile bytes; zero length means absent
 root:             32 bytes
 leaf_count:       u64be
 leaves:           leaf_count × 32 bytes, strictly increasing
 ```
 
-The context includes the domain, subject, enrollment ID/revision, public salt, secret policy, measurement profile ID and crypto suite ID. Its encoding remains the existing `gnorix.enrollment.v1` length-prefixed format. Context and signature framing have not changed.
+Neither form retains a public-key list, private keys, candidate digests, feature coordinates, source images or an independent secret. The context identifies network/verifier, subject, enrollment ID/revision, public salt, secret policy, profile ID and crypto suite. It uses the length-prefixed `gnorix.enrollment.v1` encoding.
 
-`EnrollmentPackage::with_profile_parameters(...)` attaches a nonempty public record. SHA-256 of its exact bytes must equal `context.profile_id`; attachment, encoding and decoding check this binding. The record has its own `Limits::context_bytes` bound. Generic constant profiles can omit the record. Fingerprint reconstruction requires it and rejects absence.
+`with_profile_parameters(...)` attaches a nonempty public record whose SHA-256 equals `context.profile_id`. Attachment, encoding and decoding check this binding and the parameter byte limit. Generic profiles may omit it; the fingerprint examples require it.
 
-The fingerprint examples use canonical compact JSON with domain `gnorix.example.imported-grid-profile.v9`, combination schema v7, explicit minimum/maximum point counts, priority cutoff, radius in R, one `spatial` record and uncertainty steps. The spatial record contains minimum anchor count and pairwise anchor distance in R; remaining points must lie in their hull. Signing reuses these direct ridge units on fresh captures. The consumer rejects unknown fields and noncanonical bytes. The profile version also fixes compact local coverage additions, the absolute H/M/L subset bands and H, M, H, L schedule described in [feature combinations](feature-combinations.md#automatic-weighted-selection); changing it requires new enrollment. These are public reconstruction settings, not captured features or a serialized biometric model.
+Their canonical compact JSON uses domain `gnorix.example.imported-grid-profile.v9` and combination schema `gnorix.feature-combinations.v7`. It retains minimum/maximum point counts, priority cutoff, radius in R, anchor count/distance and uncertainty steps. The domain fixes the [selection policy](feature-combinations.md#automatic-weighted-selection), including local coverage additions. Unknown fields, unsupported domains and noncanonical bytes are rejected. Work budgets are local execution controls and do not enter the profile.
 
-Loading enforces byte, context, parameter and leaf-count bounds, validates fields, rejects duplicate/unsorted hashes and trailing data, and checks the rebuilt root. These checks establish consistency of the hash material and its parameter binding. They do not independently authenticate the context or establish that the enrollment belongs to a particular user; the full trusted commitment remains application state. The hexadecimal filename is a locator.
+Core decoding checks byte and leaf bounds, canonical context encoding, parameter hash binding, sorted unique leaves, absence of trailing data and the rebuilt root. The fingerprint adapter additionally validates its supported profile domain and canonical JSON. These establish internal consistency, not ownership or trust. Applications must obtain the trusted enrollment commitment independently; the hexadecimal filename is only a locator.
 
 ## Run the complete example
+
+First [export feature combinations](feature-combinations.md#run-the-small-example), then run:
 
 ```sh
 cargo run -p gnorix-core --example enroll_grid --release --locked -- \
@@ -66,10 +61,18 @@ cargo run -p gnorix-core --example enroll_grid --release --locked -- \
   reports/enrollment
 ```
 
-The included context has fixed public values for the local test image. The combination export records the inclusive `min_priority` cutoff (default 0.5) and the configurable [spatial policy](feature-combinations.md#spatial-policy): at least three anchors and pairwise separation of 6R by default. Signing loads this policy from the package; changing it requires a new enrollment. `GNORIX_GRID_UNCERTAINTY_STEPS` selects the shared L-step padding and later signing neighborhood (default 1). `GNORIX_ENROLLMENT_MAX_CANDIDATES` limits baseline candidates (default 1,000,000); `GNORIX_GRID_MAX_WORK` limits preparation/iteration work (default 10,000,000). The diagnostic `GNORIX_GRID_MAX_VARIANTS` setting does not control enrollment. The context JSON explicitly supplies `network`, `verifier`, `subject`, 32-byte hexadecimal `id`, nonzero `revision`, hexadecimal `public_salt`, and `secret_policy` (`absent` or `required`). For `required`, supply `GNORIX_ENROLL_SECRET`; it is not written to the package or logs.
+The example validates imported subset sizes, eligibility and source-space anchor geometry before preparing baselines. It writes a new package, reloads it and checks a member's Merkle proof and signature. Existing files are not overwritten. `reports/enrollment/` is separate from the fingerprint report refresh.
 
-Imported combinations must use `gnorix.feature-combinations.v7`. Enrollment checks the declared cutoff, explicit subset-size bounds, the anchor distance in R, the anchor count, and every selected subset's source-space spatial admission. An inconsistent imported selection is rejected instead of silently repairing it. All validation shares a bounded work allowance.
+| Environment variable | Example default | Meaning |
+|---|---:|---|
+| `GNORIX_GRID_UNCERTAINTY_STEPS` | 1 | Shared padding and later signing neighborhood L. |
+| `GNORIX_ENROLLMENT_MAX_CANDIDATES` | 1000000 | Maximum baseline candidates; also the package leaf cap. |
+| `GNORIX_GRID_MAX_WORK` | 10000000 | Baseline preparation and iteration work. |
 
-The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`: [HKDF-SHA256](https://www.rfc-editor.org/rfc/rfc5869.html) derives a 32-byte seed, and [ed25519-dalek](https://docs.rs/ed25519-dalek/3.0.0/ed25519_dalek/) handles key generation and signatures. HKDF uses the encoded context as salt; its input frames the domain `gnorix.example.ed25519-input.v1`, candidate digest, secret-presence byte and secret bytes with `u64be` lengths. Expansion info is `gnorix.example.ed25519-seed.v1`. This is an example-selected suite, not a library default or a password-hardening policy.
+The combination controls come from the input export. `GNORIX_GRID_MAX_VARIANTS` belongs only to the full positional diagnostic, not enrollment. Descriptors are bounded to 1 MiB; context JSON and encoded context/profile records are each bounded to 64 KiB. Package capacity is `32 × max_candidates + 2 × 64 KiB + 128` bytes.
 
-The command traverses every selected baseline, writes a new package exclusively, reloads it and verifies a reconstructed member's Merkle proof and Ed25519 signature. Existing files are not overwritten. Package files stay separate from the fingerprint report refresh. The [signing example](fingerprint-signing.md#run-the-example) uses container v2, profile v9 and the same crypto suite. Earlier fingerprint profiles require a new enrollment; container v1 is rejected by the current decoder. Existing authorizations can still be checked through the generic verifier against their retained original trusted commitment; the current CLI does not load their old `.grx` files. Repeatability on independent sensor captures and biometric acceptance remain separate work.
+The context JSON supplies `network`, `verifier`, `subject`, a 32-byte hexadecimal `id`, nonzero `revision`, hexadecimal `public_salt` and `secret_policy` (`absent` or `required`). The included file has fixed public values for a local fixture. Required-secret enrollment also reads `GNORIX_ENROLL_SECRET`; it is not written to the package or logs and must be supplied again during signing.
+
+The explicit example suite is `gnorix.example.hkdf-sha256-ed25519.v1`, implemented in [example_crypto.rs](../examples/support/src/example_crypto.rs). HKDF-SHA256 uses the encoded context as salt. Its input separately length-prefixes `gnorix.example.ed25519-input.v1`, the candidate digest, a secret-presence byte and secret bytes. Expansion info is `gnorix.example.ed25519-seed.v1`; the 32-byte output seeds Ed25519 through `ed25519-dalek`. This is an example provider, not a library default or password-hardening policy. Hashing and key derivation do not establish biometric entropy.
+
+[Signing](fingerprint-signing.md#run-the-example) loads the retained policy automatically. Changing that policy requires a new enrollment; the current decoder accepts only the format shown here.

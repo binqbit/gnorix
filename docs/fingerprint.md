@@ -1,41 +1,27 @@
 # Fingerprint extraction
 
-`gnorix::biometrics::fingerprint` processes one grayscale capture into a ridge skeleton, an observed graph, a graph with short terminal artifacts removed, reconstructed smooth contours and geometric measurements. It is implemented in native Rust. It does not call Python, SourceAFIS, a scanner SDK or a network service. Its output is sensitive biometric information intended for local inspection and later measurement-engine development.
+`gnorix::core::biometrics::fingerprint` turns a grayscale `Capture` into measured ridge structure and ranked feature candidates. Processing is native Rust and local; it does not call Python, a scanner SDK or a network service. Source pixels, coordinates and extracted measurements are sensitive biometric data.
 
 ## Feature summary
 
-We record **endings, bifurcations, other junctions, isolated nodes and isolated cycles**. Each candidate retains its ID, type, source-image `(x, y)`, original graph references, arm measurements, observed coverage, weakness/stop reasons and stress-test matches in `data/features.json`. The common geometric unit **R** is the length-weighted mean dark-ridge thickness.
+The extractor records **endings, bifurcations, other junctions, isolated nodes and isolated cycles**. Each original candidate has an ID, source-image position, graph references, evidence scores, coverage, stop reasons and stress-test correspondences. A bifurcation has three incident arms; higher-degree junctions remain distinct.
 
-1. Measure R, normalize local dark/light levels, denoise and trace the ridge skeleton into a graph.
-2. Correct source-confirmed short spurs and duplicate ridge arms, then smooth contours and join source-supported gaps.
-3. Assess candidate geometry and original-image evidence at local and extended scales; compare extraction across eight threshold variants.
+The common geometric unit **R** is the length-weighted mean dark-ridge thickness. It scales cleanup, contour reconstruction and feature assessment. Ridge period, including the light gap, is measured separately.
 
-| Metric | What it measures |
-|---|---|
-| P | Local source support: ridge continuity and feature-specific separation or termination. |
-| G | Local geometry over 2R: arm extent, separation and possible continuation. |
-| C | Extended source-confirmed structure over 4R; sustained, separated branches or a supported ending. |
-| T | Stability across eight threshold variants of this capture. |
-| N | Neighborhood factor in a 3R radius; crowding and incomplete coverage lower it within 0.5–1. |
+There are two entry points, sharing the same analysis:
 
-Intrinsic strength **Q** gives extended context the main weight; final **priority** also accounts for the neighborhood:
+| API | Result and use |
+| --- | --- |
+| `analyze(&capture, &config)` | `FingerprintFeatures`: dimensions, R, confirmed-pattern bounds and type-preserved candidates surviving cleanup/reconstruction. Used by enrollment and signing. |
+| `extract(&capture, &config)` | `Fingerprint`: all intermediate rasters, observed/reconstructed graphs, source measurements, clarity maps and candidate diagnostics. Used by reports. |
 
-```text
-Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5 × T)
-priority = Q × N
-```
-
-Missing required evidence is `null`, distinct from measured zero. These scores describe evidence on one capture; they are not calibrated recognition probabilities. [Detailed scoring rules](#feature-strength-scale-context-and-priority) follow below.
+`analyze` skips report-only clarity maps and curve descriptors, but still performs the full width pass, contour reconstruction and eight stress cases. It releases the diagnostic rasters and graphs before returning. `Fingerprint::features()` projects the full result into the same compact representation. Unknown priority is `None`, not measured zero; scores from a removed or reclassified feature are not assigned to its replacement.
 
 ### Example: priority above 30%
 
-![Cleaned fingerprint contours with surviving feature priorities strictly above 0.30](assets/fingerprint-priority-over-30.png)
+![Cleaned contours with surviving feature priorities strictly above 0.30](assets/fingerprint-priority-over-30.png)
 
-On the [checked-in test image](../crates/core/tests/assets/test-fingerprint.png), **41 surviving features** have `priority > 0.30`: **35 endings and 6 bifurcations**, with R = 16.82 px. Circles mark endings; triangles mark bifurcations. Color progresses from red through orange and yellow to bright green as priority increases, with 40–90% opacity. Three markers retain hollow × notation for unknown continuation. The 30% cutoff filters this illustration only; the full report retains all candidates and their scores.
-
-For example, ending **#160 at (466, 535)** has P = 0.829, G = 0.683, C = 0.989 and T = 1. With N = 1, its strength and priority are both **0.911**.
-
-The next stage builds [regional feature combinations](feature-combinations.md): adaptive circles with radius measured in ridge widths R, explicit minimum/maximum subset sizes, and automatic priority-weighted selection with point coverage and shared-region provenance.
+This saved illustration uses the [synthetic test fixture](../crates/core/tests/assets/README.md) and filters surviving candidates to `priority > 0.30`. Circles mark endings and triangles mark bifurcations. Red → orange → yellow → bright green indicates increasing priority; hollow × markers retain uncertain continuation. The cutoff belongs to this illustration, not to extraction. Regenerate the report to inspect the current implementation rather than treating this snapshot as a benchmark.
 
 ## Run on an image
 
@@ -46,250 +32,112 @@ uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image crates/core/tests/assets/test-fingerprint.png
 ```
 
-The report command requires an opaque PNG and a Gnorix checkout with the pinned Rust toolchain. It runs the native extractor and refreshes the single `reports/fingerprint/` directory after extraction, validation and rendering succeed. It estimates ridge thickness and period from the image before scale-dependent extraction; there is no manual period argument or fallback to a sample-specific value. Transparent input is rejected instead of interpreting hidden RGB as scanner evidence; applications with missing pixels should supply a `Capture` validity mask. The PNG adapter and JSON export use development-only `image` and `serde_json` dependencies; the library itself accepts an existing `Capture` and adds no runtime dependencies.
+The command runs the Rust extractor and writes nine PNG figures plus native measurements under `reports/fingerprint/`. See the [report tool](../tools/fingerprint-reports/README.md) for requirements, display controls and refresh boundaries, or the [SOCOFing testing guide](fingerprint-testing.md) for external inputs.
 
-The bundle keeps the source grayscale image, local dark/light references, raw measurement skeleton, confirmed-pattern support, final image stages and `features.json` in `reports/fingerprint/data/`. The report root contains a generated `README.md` and nine PNG figures: `overview.png`, a structural overlay, primary `scale-analysis.png`, provisional `bootstrap-analysis.png`, `normalization-analysis.png`, `clarity-analysis.png`, `contour-comparison.png`, `contour-overlay.png` and `feature-strength.png`. The contour comparison shows the same source and crop before and after reconstruction. Overlay geometry is semitransparent and retains source pixel coordinates. The JSON retains every full-pass width observation, its represented length and original grayscale mean, plus reconstructed paths, their provenance, local segment clarity and evidence ranks for all primary feature candidates.
-
-## Full-source measurement and common unit
-
-`estimate_scale(&capture, &config)` performs a full raster-based measurement pass before final directional enhancement. Local source grayscale and the adaptive palette form a raw dark mask. That mask is thinned without the final denoising or directional ridge filter. Every unique undirected link of the resulting measurement skeleton is visited once, including links inside junction clusters and cycle-closing links. No final observation budget selects a subset of these links.
-
-Each link represents its actual raster length: one source pixel for an orthogonal link, or `sqrt(2)` for a diagonal. A transverse profile of the original image measures only the dark span containing that link's midpoint. Its normal comes from the local axial orientation field, not the stair-step direction of a digital skeleton link. A nearby ridge never replaces a missing own-ridge span.
-
-Three complete dark ridges establish a local pattern region. The region extends across the measured triple and half its measured period along the tangent on each side; overlapping regions form a union, clipped by the acquisition validity mask. Confirmation does not flood an entire connected component. Once its region is confirmed, a visible own-ridge width can contribute even when that individual cross-section has fewer than three complete neighboring ridges. Both skeleton-link endpoint pixels must be inside confirmed support. Raw width sampling independently requires observed source pixels.
-
-The common unit is the arithmetic mean over measurable ridge length:
-
-```text
-unit_px = sum(own_width_px × represented_length_px) / sum(represented_length_px)
-length_in_units = source_length_px / unit_px
-```
-
-This is equivalent to equal weighting of equal-length portions along all measured lines. Long lines contribute in proportion to their length; graph-edge or connected-component counts do not determine their weight. Neighboring ridges confirm context without adding repeated width votes. No median, dominant-mode selection or post-mean width rejection changes this unit.
-
-`FullScale.coverage` reports all traversed link length/count and the measured subset. Unreliable normals, missing width boundaries, unsupported source pixels and unconfirmed regions remain in the unmeasured length. Isolated skeleton pixels have no defined arc length and are counted separately. Complete traversal is not a claim that every physical ridge in an imperfect capture is observable. No measurable length produces an explicit failure rather than substituting the provisional scale.
-
-`Fingerprint.scale.unit_px` is the final common unit. Curve sampling uses one quarter of this unit and smoothing sigma one half. Source coordinates remain in pixels for image overlays; exported geometric lengths also include `arc_length_units` and `chord_length_units`. Pattern period remains a separately measured dimension; the implementation does not assume `period = 2 × dark width`.
-
-After the unit is known, `scale.width_consistency()` counts all full-pass own widths within 10%, 20% and 30% of it, with inclusive endpoints and only a floating-point arithmetic allowance. Fractions count observations; the separate coverage fields measure source length. These are descriptive consistency diagnostics, not recognition probabilities or a calibrated capture-quality score.
-
-## Provisional bootstrap diagnostics
-
-The bootstrap works directly from grayscale and the validity mask. A deterministic initial grid searches for transverse profiles with three complete dark ridges and intervening light valleys. If this grid misses every valid patch, an exhaustive source-site fallback searches for initial support; a small pattern between grid nodes is not rejected solely because the grid missed it. Its provisional period initializes raw normalization and orientation windows. Bootstrap observations never contribute directly to the final common-unit mean.
-
-On the original image, refinement uses a short tangent projection and one-dimensional Gaussian smoothing with sigma equal to one thirty-second of the coarse period. Each dark ridge is bounded by subpixel crossings at half of its local contrast against the adjacent light maxima. This makes the operational definition of width explicit for blurred grayscale boundaries. It measures the sampled image; very narrow subpixel ridges do not reveal their exact latent physical width. A triple yields three ridge widths, two valley widths and two distances between ridge centers. Clipped ridges and invalid mask crossings cannot supply a complete width.
-
-`Fingerprint.bootstrap` retains independent medians of its ridge widths, valley widths and center-to-center periods, plus unscaled median absolute deviations. These remain provisional diagnostics for comparing the initialization with the full measurement. They do not become the final unit.
-
-Arithmetic mean ridge and valley widths are reported alongside these medians. Each width contributes once to its corresponding arithmetic mean. Each triple also retains three mean dark-span intensities and two mean light-gap intensities from the original capture, on the scale `0 = black`, `255 = white`. These are grayscale brightness measurements, not physical color temperatures. The intensity measurement integrates the bilinear source image along each complete span, including its half-contrast boundaries. Splitting at pixel-cell boundaries and applying Simpson integration within each cell makes the integral exact for that interpolant. It does not use normalized, denoised or binary image values.
-
-Global dark and light brightness means weight each span mean by that span's source-pixel length. This gives the mean over the observed cross-sections, rather than giving a short and a long span equal brightness weight. Only dark spans and the two intervening light gaps of confirmed triples contribute; exterior blank background is excluded. Revisited physical ridges remain repeated observations, so these are profile statistics rather than averages over unique fingerprint pixels.
-
-The bootstrap report labels its own width-consistency fractions around its provisional median. Its profile intersections are repeated source observations, not unique biological ridge identities. The primary scale report instead uses the complete raw measurement pass and the final arithmetic mean.
-
-## Local dark and light levels
-
-Normalization uses overlapping windows centered at each source pixel, with radius `ceil(provisional period / 2)`. Period selects image-filter support; R remains the common geometric measurement unit. The image is not partitioned into independent rectangular tiles. Each location has its own dark and light reference, allowing the references to follow gradual illumination changes.
-
-The first pass calculates masked local mean and variance. A pixel with sufficient contrast and a complete validity-mask window supplies a dark seed when it is below its own local mean, or a light seed when it is above it; equality supplies neither class. The second pass averages original grayscale values of each seed class in each window. These two local class means define the dark reference `D` and the light reference `L`. A supported center requires both classes and `D < L`. Missing references remain unsupported rather than borrowing a distant zone's palette.
-
-The detection intensity is `(I - (D + L) / 2) / ((L - D) / 2)`, clipped to `[-3, 3]`. Thus the measured local dark reference maps to `-1`, the light reference to `+1`, and their midpoint to zero. The same absolute grayscale value can be dark in one zone and light in another. This corrects local brightness and contrast without changing the source-coordinate system. Orientation tensors continue to use the first-pass standardized intensity; spatial denoising and ridge detection use the palette-normalized intensity.
-
-`Fingerprint.palette` retains floating-point reference values in `0..255` and an explicit support mask. Exported `ridge-level.png` and `valley-level.png` round the references to 8-bit grayscale; `normalization-support.png` is `255` for supported pixels and `0` elsewhere. Unsupported reference slots are stored as zero and must be interpreted with that mask. The report masks them visually. Palette support indicates sufficient local normalization evidence, not fingerprint segmentation or anatomical certainty.
+The PNG example rejects transparency. Applications with missing source pixels should use `Capture`'s validity mask; replacing unknown pixels with black invents evidence. The core API accepts decoded grayscale pixels. Image decoding and JSON export are example dependencies, not runtime requirements of the extraction API.
 
 ## Processing stages
 
-1. Validate controls and source budget; obtain a provisional period from raw profiles, with exhaustive fallback if the initial grid misses all support.
-2. Build the raw adaptive measurement mask, traverse its entire skeleton, confirm local regions and compute the length-weighted arithmetic width unit and its coverage.
-3. Estimate local mean and variance using masked summed-area statistics. Form local dark/light classes, measure their original brightness means, and normalize around their midpoint and contrast.
-4. Estimate ridge orientation and coherence from locally averaged first-pass standardized image-gradient tensors. Exclude unsupported and low-contrast regions.
-5. Apply a spatial Gaussian to normalized intensity with sigma equal to one twentieth of the measured ridge period. Exclude unusable samples and renormalize supported weights. This suppresses fine grain before thresholding; it does not change the contrast, orientation or coherence assessments or introduce new usable pixels.
-6. Densely average along the local ridge direction with quadrature spacing at most one source pixel and compare the center with two parallel lines offset across the ridge. This is an explicit three-line contrast filter, not a Gabor implementation or an exact reproduction of SourceAFIS.
-7. Thin the binary ridges using Zhang–Suen iterations with a safeguard against deleting an entire component. Transfer clipped-boundary provenance to its nearest retained support rather than spreading it along a connected ridge.
-8. Trace the skeleton deterministically. Preserve disconnected components, merge acyclic adjacent junction pixels, suppress redundant diagonal/cell links, and separately trace isolated degree-two cycles. A filled 2x2 pixel cell is not a hole; junction clusters containing genuine holes retain their individual vertices.
-9. Measure each path's length, endpoint distance and half-length point. Resample by arc length, apply Gaussian smoothing and calculate an unwrapped tangent-turning profile.
-10. Check terminal spurs shorter than 1.2 times the measured ridge width R and narrow split/rejoin loops against the original image. Remove confirmed artifacts in one pass over the observed graph and reclassify the remaining junction structure using its observed pixel connections.
-11. Construct constrained smooth paths from the cleaned graph, evaluate short endpoint continuations against the original image, merge accepted joins and measure the resulting contours. Preserve the observed graph, cleanup provenance and rejected proposals separately.
-12. Independently rank all original node and isolated-cycle candidates using source evidence, local geometry and eight threshold stress variants. Keep every candidate and each component score; assessment does not feed back into the preceding stages.
+[The pipeline](../crates/core/src/biometrics/fingerprint/pipeline.rs) composes these stages:
 
-Local normalization and orientation estimation follow established fingerprint-enhancement ideas, including [Hong, Wan and Jain](https://doi.org/10.1109/34.709565). The directional filter is our own implementation. Thinning derives from [Zhang and Suen](https://doi.org/10.1145/357994.358023), with the documented component-preservation and provenance additions. These references do not establish the biometric accuracy of this pipeline.
+1. **Bootstrap:** find repeated dark/light profiles and estimate a provisional ridge period.
+2. **Source preparation:** compute local dark/light references and an orientation field once, sharing them with measurement and enhancement.
+3. **Full width measurement:** trace a raw adaptive dark mask and measure all supported ridge links to obtain R.
+4. **Enhancement and tracing:** normalize, denoise, apply directional contrast filtering, thin and trace the observed graph.
+5. **Reconstruction:** remove source-confirmed artifacts, constrain contour smoothing and join supported short gaps.
+6. **Assessment:** rank original candidates from source evidence, geometry, wider context and threshold repeatability; project surviving candidates for downstream use.
 
-Enhancement and thresholding can alter connectivity, so the extracted graph is evidence from the processed image, not verified anatomy. The separate contour stages below remove short terminal spurs and repair supported short gaps. Closed loops, short links between junctions and isolated ridge fragments are not classified as spurs. Invalid acquisition-mask regions are not bridged or filled with inferred pixels.
+Full extraction additionally describes curves and computes an independent clarity map. Neither clarity nor a low candidate rank changes the preceding topology.
+
+`ExtractionConfig` defaults are `min_contrast = 0.035` (local grayscale standard deviation divided by 255), `min_coherence = 0.2`, `max_pixels = 4_000_000` and `bootstrap_grid_locations = 4096`. These are processing controls, separate from combination/signing tolerances. The bootstrap location count bounds its initial grid, not the exhaustive fallback or full width traversal. Unsupported scale or exhausted work limits return an explicit error; no sample-specific R is substituted.
+
+## Full-source measurement and common unit
+
+The bootstrap searches deterministic transverse profiles containing three complete dark ridges separated by light valleys. If the initial grid finds no support, it searches source sites exhaustively. Width boundaries use subpixel half-contrast crossings; clipped ridges and invalid mask crossings cannot provide complete widths. Independent medians of ridge width, valley width and center-to-center period initialize processing and remain diagnostics; they do not determine final R.
+
+The full measurement pass thins a raw mask formed from original grayscale and local dark/light references, before the final denoising/directional filter. It visits every unique undirected skeleton link, including junction-cluster and closing-cycle links. Each link represents one pixel of length, or `sqrt(2)` diagonally. The local orientation field supplies its normal; only the dark span containing its midpoint can contribute a width.
+
+A complete three-ridge profile confirms a local ribbon of pattern support. The union of those ribbons is clipped by acquisition validity; it does not flood an entire connected component. Inside confirmed support, a measurable ridge section may contribute without independently seeing three complete neighbors. Both link endpoints and the measured source span must be supported.
+
+```text
+R = sum(own_ridge_width_px × represented_length_px) / sum(represented_length_px)
+length_in_units = source_length_px / R
+```
+
+Equal portions of measured ridge length therefore have equal weight. Neighboring ridges confirm context rather than adding repeated width votes. No median, dominant-mode selection or width trimming replaces this mean. Coverage records traversed versus measured links/length and isolated pixels; missing boundaries or normals remain unmeasured. Complete traversal does not mean that every physical ridge was observable.
+
+Width-consistency diagnostics count observations within ±10%, ±20% and ±30% of R. The bootstrap separately retains arithmetic means, medians and deviations for ridge/gap widths, plus original grayscale brightness over confirmed dark spans and intervening light gaps. Brightness uses `0 = black`, `255 = white`, weighted by span length; it is not physical color temperature. These cross-section statistics can revisit the same physical ridge.
+
+## Normalization, enhancement and graph geometry
+
+Overlapping windows of radius `ceil(bootstrap_period / 2)` estimate masked local mean/variance. Pixels below or above their local mean seed dark or light classes. The original grayscale means of these classes give local references D and L. A supported location requires both classes, sufficient contrast and D < L.
+
+```text
+normalized_intensity = clamp((I - (D + L) / 2) / ((L - D) / 2), -3, 3)
+```
+
+Thus D maps to −1 and L to +1. The same absolute brightness can be dark in one zone and light in another. Unsupported references remain masked, not borrowed from another zone. Palette support is normalization evidence, not anatomical segmentation.
+
+Orientation/coherence comes from gradient tensors of the first-pass standardized image. Detection uses palette-normalized intensity, Gaussian denoising with sigma `bootstrap_period / 20`, and a three-line directional contrast filter. This is not a Gabor filter or an exact SourceAFIS port.
+
+Zhang–Suen thinning includes component-preservation and clipped-boundary provenance safeguards. Deterministic graph tracing preserves disconnected components and isolated degree-two cycles, merges acyclic junction clusters and suppresses redundant raster links. Genuine holes are retained; a filled 2×2 raster cell is not a hole. Filtering can still alter connectivity, so this graph is observed processing output, not verified anatomy.
+
+Full diagnostics measure path arc length, endpoint distance, half-length position and tangent-turning profiles. Observed descriptors sample at R/4 with Gaussian sigma R/2; reconstructed descriptors use the already smoothed paths. A half-length position is not a fitted circle center. Junction representative positions can differ from the actual ports where arms leave the cluster. An ending may indicate missing signal rather than a biological ridge termination.
 
 ## Source-supported ridge cleanup
 
-The cursor diameter is the measured ridge width R, the same common unit used by the geometry pipeline. Cleanup allows a fixed relative width tolerance of 20%, describing the band [0.8R, 1.2R]. A candidate must connect a junction to an ending, and its complete observed arc length from the junction port to that ending must be strictly less than the upper bound 1.2R. A branch exactly at 1.2R is retained. The lower bound describes the allowed deviation from the mean; it is not a minimum artifact length and does not exclude smaller candidates. This tolerance does not trim measurements, change the global mean or introduce separate thin/thick means. This compares length along the path with the cursor diameter; it is not an endpoint-distance or circle-containment test. A long curved branch remains a branch even if its tip returns close to its attachment.
+Cleanup examines the observed graph once and retains the original graph, decisions and provenance. The ±20% width allowance leaves R unchanged.
 
-Every short candidate is checked against the original grayscale and floating-point local dark/light references. The observed `touches_unobserved` flag includes enhancement exclusions and inherited thinning boundaries, so it does not alone veto a correction. Missing capture pixels, missing local references and an unconfirmed termination still prevent removal. `spur_assessments` retains the evidence for each short original branch; `retained_unobserved_edges` identifies missing source support, `retained_unconfirmed_edges` identifies candidates whose source termination is unconfirmed, and `retained_ambiguous_edges` identifies the all-short components described below. Cleanup does not use a clarity threshold: the clarity map retains its diagnostic role. The size rule is an explicit processing policy, not proof that every small anatomical structure is noise.
+| Candidate | Required source confirmation |
+| --- | --- |
+| Junction-to-ending spur with complete arc length **< 1.2R** | Visible termination without a supported continuation. Acquisition gaps, ambiguous continuation and component-preservation safeguards retain the branch. |
+| Two arms splitting and rejoining two degree-three junctions, transverse width **< 1.2R** | Original pixels support one ridge rather than two separated ridges. An interior light valley extending at least **R/3** protects the loop. |
 
-Termination verification follows the branch's terminal direction, estimated over up to R/2 of its arc, for at most 1.2R. It looks for an observed light barrier of width R and depth at least R/4, sampled at steps no larger than 0.5 source pixels. Darkness uses `(L - I)/(L - D)` from the original source and local references, with 0.5 separating dark and light. A dark continuation without a complete light barrier remains unconfirmed. The enclosing source rectangle must have valid capture pixels and local references, including interpolation corners between sampling stations. This conservative check may retain a branch when nearby source support is incomplete.
+A collapsed loop keeps the source-preferred observed arm; cleanup does not invent a midpoint curve. Strict source checks govern automatic changes. They are separate from the gradual evidence scores used for ranking.
 
-A forward barrier alone is insufficient when source-dark pixels continue out through the side of the inspected corridor. A separate continuation guard inspects source-connected continuations around the terminal part of the observed branch, including backward bends and the observed prefix. If the processed tip overshot into light pixels, this guard starts from the last source-dark part of the observed branch, anchored to a contributing dark raster pixel. Diagonal connectivity must remain continuously dark between pixels; touching dark endpoints alone does not establish a connection.
+## Contour smoothing and gap reconstruction
 
-An incoming ridge can cross the inspection boundary without contradicting its ending. Its explanatory footprint checks the observed segment endpoints and nearest interior stations, with a tangent measured over R/2 on either side of each station. Assigning separate half-arc regions to raster vertices can leave gaps at turns and falsely reject the ridge's own source pixels; replacing vertices with only one interior projection can also discard a valid explanation. Segment projections retain the existing endpoint-extension bounds and must still prove continuous source-dark support and observed light boundaries on both sides. This correction applies to cleanup and feature assessment; it does not relax cap, width or continuation thresholds.
+Smoothing uses arc-length stations spaced at `min(R/8, 1 px)`, sigma R/2 and displacement bounded by R/4. Endpoints, observed support, crossings, separation and cycle shape constrain the proposal. Backoff reduces displacement when constraints fail; otherwise the original path and a retention reason remain.
 
-Escaped source support must fit a source-confirmed normal profile of the retained backbone in the same graph component. Its local tangent uses R/2 of arc support; at an observed endpoint, the evidence reach is R plus the distance from the inspected source anchor to that endpoint, capped at 2R. This accounts for the different origins of the inspected region and the retained path. The complete prefix to that axis and the normal span to the escaped point must remain dark in the original bilinear image, with an observed light boundary on each side within 1.2R. This measures the local ridge boundaries rather than assuming a fixed half-width. Explaining one exit pixel does not excuse a later departure from the footprint, and the evidence axis never becomes an invented output contour.
+Gap repair considers endings at most R apart, with enough incident ridge length to estimate direction and facing angles within 30°. Cubic bridges follow endpoint tangents, bound curvature by `1/R` and keep at least R/4 clearance from unrelated paths. Only mutually unique, nonconflicting partners can join.
 
-Short terminal candidates and discarded loop arms do not supply backbone profiles or extensions. Exact pixels of another cap-confirmed short path are known finite geometry when its whole path lies inside the inspected region. Traversal continues through those pixels, so continuation beyond them still needs independent support; this exception never excuses a boundary crossing. Missing source support or an unexplained curved continuation keeps the branch unresolved, even if the forward light barrier was measured successfully.
-
-Decisions use the original graph in one pass. Cleanup does not repeatedly shorten a line by treating newly created endings as new removal candidates. If every edge of a component qualifies for removal, all are retained as ambiguous; the stage does not erase the entire component or choose a main arm arbitrarily.
-
-Narrow split/rejoin loops are checked separately. Two distinct original paths must connect the same two junctions, with one external arm at each junction. Width across the paths must be strictly less than 1.2R; their arc lengths may exceed R. The source must support a single dark ridge between light outer flanks, without a resolved light valley separating the arms. A pair of genuinely separated ridges, unsupported source, wider geometry or an ambiguous multi-branch structure is retained. Isolated cycles and self-loops are outside this two-arm rule.
-
-Loop cross-sections pair equal fractions of the two observed arc lengths, include their original vertices and use at most 0.5-pixel longitudinal steps. Each source profile runs perpendicular to the common local tangent of both arms. A common-track reversal is resolved only when both incoming and outgoing displacements reach the 0.5-pixel sampling resolution. Smaller endpoint hooks do not veto source verification; a sustained reversal or an undefined overall tangent remains ambiguous. Within the projected arm interval, a separating valley requires ordered dark–light–dark source support; an outer shoulder or a neighboring ridge outside that interval does not establish separation. The first light boundary on each outward side must be found within 1.2R. R is the global mean ridge width; its half is not an upper bound on local half-width, so this search follows the actual source transition rather than assuming a fixed flank location. Confirmation requires mean interior darkness at least 0.5, light outer boundaries, and no separating interior valley reaching R/3 along the loop. This length scales with the measured ridge width rather than using a fixed pixel count. A shorter brightness excursion can be tolerated; a resolved valley remains a reason to retain both arms. The exported policy records these processing thresholds, including `relative_width_tolerance = 0.2` and `max_ridge_width_px = 1.2R`. Nominal tangent support, cap width/depth, source brightness thresholds and downstream smoothing/gap repair retain their existing definitions. They are not calibrated anatomical tolerances.
-
-A confirmed duplicate is reduced to the observed arm best supported by the source ridge center; cleanup does not draw a replacement chord. `loops` records both original arms, the source evidence, the preferred arm and the removed arm, or an explicit retention decision. Each accepted collapse reduces graph cycle rank by one. Connected components are preserved.
-
-After removal, two continuing arms become one path; one remaining arm becomes an ending. A node with three or more remaining arms remains a junction. Connections through a contracted junction use its actual observed pixel links, including the path between distinct edge ports. No straight segment is invented between a representative node coordinate and a port.
-
-`Fingerprint.graph` remains the original observation. `Fingerprint.contours.cleanup` retains the cleaned intermediate graph, source policy, assessments and provenance; subsequent smoothing, join indices and final path origins refer to this cleaned graph. JSON exports this intermediate stage as the top-level `cleanup` object with method `source-supported-ridge-cleanup`. Each original path occurs exactly once as a retained path or an explicitly recorded removal. The comparison report marks removals against the original image, while the final contour overlay displays the retained and reconstructed paths.
-
-## Smooth contours and short continuations
-
-`Fingerprint.contours.graph` contains the reconstructed geometry after cleanup, smoothing and gap repair. Full-source width measurement and its common unit R happen before these stages, so removing a spur or adding an inferred bridge does not alter the measured ridge-width mean.
-
-Smoothing samples each observed path uniformly along its arc, with spacing at most `min(R/8, 1 px)` and Gaussian sigma `R/2`. The target is interpolated back at the original vertices' arc positions. Open endpoint ports stay fixed; closed paths use periodic support, and a loop attached at a junction keeps its attachment port. A blend with the original path limits movement to `R/4`. The complete swept corridor must remain inside usable dark binary support, and checks reject new crossings, overlaps and jumps across another contour. Closed paths retain winding and at least half their original enclosed area. When a candidate violates these constraints, the blend is reduced; if no supported candidate is found, the original path and a retention reason remain in the result. These constraints preserve small loops rather than treating them as disposable noise.
-
-Gap reconstruction considers two ending nodes with enough incident length to estimate stable directions over R and R/2. The gap must be at most R and both ends must face the continuation within 30 degrees. A cubic bridge follows the local endpoint tangents, with forward motion and curvature bounded by `1/R`. Existing paths and isolated nodes obstruct a bridge; unrelated paths must stay at least `R/4` away. Only mutually unique source-supported partners can merge, and conflicting proposed bridges are both rejected. This is an explicit processing policy, not a learned or calibrated biometric tolerance.
-
-Source support is measured from the original grayscale and floating-point local references. Darkness is `(L - I)/(L - D)`, where D and L are the local dark and light levels. Bridge quadrature uses steps no longer than half a pixel. Acceptance requires length-weighted mean darkness at least 0.5, at least 70% dark length, mean darkness advantage over flanks at least 0.25, and no sampled light run longer than `R/4`. Brightness, dark fraction and light-run lengths use midpoint quadrature; exact cell traversal guarantees source validity rather than exact brightness-threshold crossings. Flanks lie `3R/4` to each side. Every source interpolation cell must have valid capture pixels and local palette support. These values describe image evidence; darkness can lie outside `[0, 1]` and is not a confidence probability.
-
-The observed node's `touches_unobserved` flag also includes regions excluded by enhancement. It therefore does not alone prohibit a source-supported repair. Actual acquisition validity and local source support govern the bridge. A geometry-only continuation with insufficient source evidence stays a proposal; it does not remove the two ending nodes or change connectivity. Proposals explicitly distinguish missing source support, insufficient dark evidence, ambiguity and obstruction.
-
-Accepted joins concatenate paths and remove only their consumed ending nodes. They can also close a disconnected path into a cycle. Every final path records its cleanup-stage edge/cycle IDs and accepted join IDs; every retained node maps to its cleanup-stage node. Each cleaned path occurs exactly once, including paths that could not be smoothed. Gap repair retains junctions, isolated nodes and existing isolated cycles. `edge_smoothing` and `cycle_smoothing` report actual maximum displacement, applied blend and any retention reason, indexed by the cleaned graph. The complete cleanup policy, smoothing controls and gap policy are exported with the result.
-
-Reconstructed lengths and midpoints are measured on the resulting polylines; their turning profiles are sampled without applying a second Gaussian. The original graph descriptors retain their previous meaning. The PNG renderer displays supplied geometry and does not perform reconstruction or silently fill rejected gaps. A smooth continuation remains an image-based inference rather than proof that an anatomical ridge was continuous.
-
-## Local ridge clarity
-
-`Fingerprint.clarity` measures how clearly the original capture separates local dark ridges from light valleys. It retains a source-sized map and separate contrast, separation and repetition components. It is independent of the enhanced binary image: sharpening and geometric reconstruction cannot increase their own evidence by changing the image being assessed. The current map is diagnostic; it does not filter measurements, delete features, move paths, choose joins or modify the common width unit.
-
-This is a scale-aware local separability index, not the NFIQ 2 score or a probability that a feature is anatomically correct. [NIST's local clarity method](https://doi.org/10.6028/NIST.IR.8382) motivates using oriented ridge/valley profiles and spatial class separation. Our formula, adaptive pixel scale and repetition component are distinct; no NFIQ conformance or recognition calibration is claimed.
-
-The source is examined on a regular grid with spacing `max(1, floor(P/4))`, where P is the measured bootstrap period. A centered gradient tensor over radius `ceil(P/2)` supplies the local normal without a coherence threshold. An oriented neighborhood spans `3P` across ridges and `P/2` along them, sampled at most one source pixel apart. A local illumination plane is removed before comparison. The transverse profile uses Gaussian smoothing with sigma `P/32`, truncated at three sigma. Labels describe spatial columns of that profile; pixels are not individually sorted into dark/light classes to manufacture apparent separation from noise. Class statistics use the central period, so distant clear ridges do not replace missing evidence at the location being assessed.
-
-At each measured grid location, the index is the product of three components in `[0, 1]`:
-
-- **Contrast:** the difference between the detrended light and dark class means, divided by 255. Weak source contrast remains weak even if normalization makes it visually stronger.
-- **Separation:** between-class variance divided by the total variance of the same original, detrended patch. Within-class noise and blurred transitions reduce this ratio.
-- **Repetition:** the maximum positive profile autocorrelation for lags from `0.8P` to `1.2P`, including P. A single boundary or merged plateau must not receive the same score as a repeated ridge pattern. Ridge width and valley width are not assumed equal.
-
-The resulting scores are interpolated between supported grid locations. This keeps the value between neighboring measured scores: complementary components from two weak regions cannot combine into an artificial clarity peak. Component maps are interpolated separately for inspection; their product between grid locations need not equal the interpolated score. A valid uniform region has measured clarity zero. An unavailable source footprint remains unsupported, with a separate support mask; it is not counted as a zero measurement. All displayed maps use fixed `[0, 1]` scales across images. The source raster and three component maps make the reason for a low value inspectable. Curvature and branching can reduce how well an oriented neighborhood describes the image; low clarity alone does not establish a false anatomical feature.
-
-`ClarityMap::sample` queries a source-coordinate point. `segment_mean` integrates the bilinear map along a segment, splitting at pixel boundaries and requiring its complete interpolation support. JSON `segment_clarity` arrays retain these floating-point means for observed paths, reconstructed paths and bridge proposals; `null` means unavailable support. Open paths have one entry per consecutive point pair. Cycles additionally include last-to-first, including a zero-length segment if the closing point is already repeated. Raster exports round values to 8-bit grayscale, while segment measurements retain floating-point precision.
-
-Contour overlays use the native local scores to vary visibility along a path. The fixed opacity mapping is `0.4 + 0.5 × sqrt(clarity)`, giving **40–90%** opacity independently of the map/annotation opacity setting; the source image stays at full opacity. The square root makes variation visible in low-contrast images and is identical for every capture; it changes neither stored scores nor the linear map color scale. Unsupported portions use 40% opacity and a separate color. Faint dotted originals behind the final comparison detail use 55% of the normal line opacity as a reference layer. A bright contour indicates stronger image evidence, not guaranteed feature correctness, identity confidence or a selected biometric acceptance threshold. Filtering and prioritization rules remain a separate decision.
-
-Clarity support conservatively requires the complete tensor neighborhood and the axis-aligned envelope of the rotated source patch. It does not fill missing capture pixels or extrapolate outside the frame. The estimate has an explicit budget of one billion primitive sampling operations; exceeding it returns a work-limit error instead of a truncated map. Coverage is reported beside the supported-pixel mean, which can include valid flat background and is not an overall fingerprint accuracy score.
+Acceptance samples original grayscale relative to D/L, requiring mean darkness ≥0.5, dark-length fraction ≥0.7, mean advantage over flanks ≥0.25 and no sampled light run longer than R/4. Flanks are 3R/4 away. Every crossed source interpolation cell must be observed and have palette support. Geometric plausibility alone does not authorize a join; unsupported, unobserved, ambiguous or obstructed proposals remain diagnostic alternatives.
 
 ## Feature strength, scale context and priority
 
-`Fingerprint.feature_strength` assesses every original graph node and isolated cycle. IDs are original node indices followed by cycle indices offset by the node count. Scores do not remove candidates, edit paths, change cleanup or accept joins. All original candidates remain in `feature-strength.png` and `data/features.json`, including weak, unknown and subsequently corrected candidates.
+Every original candidate is assessed independently of cleanup. The compact result and main report expose surviving, type-preserved features; the diagnostic report retains removed and uncertain candidates too.
 
-`structure-overlay.png` uses final cleaned and reconstructed paths and surviving features. It resolves original identity through both provenance transitions. Removed spurs, collapsed loop junctions and joined endings do not reappear. Changed feature types or degrees have unavailable priority because their new shape has not been assessed. New closed paths without an original isolated-cycle candidate remain unscored geometry.
+| Component | Evidence |
+| --- | --- |
+| P | Local original-image support: ridge continuity and feature-specific separation/termination. |
+| G | Local geometry, with required arms followed over up to 2R. |
+| C | Extended source-confirmed structure over up to 4R; 2R context is retained for comparison. |
+| T | Fraction of eight threshold variants preserving a corresponding candidate. |
+| N | Neighborhood factor within radius 3R, accounting for crowding and available source coverage. |
 
-Feature markers use final priority on a fixed 0–1 scale: red → orange → yellow → bright green, from weak to strong. The continuous palette increases in lightness and stays distinct from the cyan paths; markers and colorbars share the same scale across images. Their opacity is `0.4 + 0.5 × sqrt(priority)`, within 40–90%; unavailable evidence is gray at 40%. Diagnostics retain intrinsic strength Q and its separate context, local evidence, stability and neighborhood components. Path opacity continues to use regional clarity; it is not the feature score.
+Context follows sustained ridge/flank separation and continuity, including source-confirmed continuation across incidental graph nodes. Short or unsupported arms weaken a feature. Forks need separated departing arms; a strong trunk cannot replace that evidence. Ending context considers the strongest graded light cap in the allowed lookahead and weakens when forward or curved continuation is supported. Uneven contrast reduces evidence gradually; one dark corner is not a categorical rejection. Required but unobserved context stays unknown.
 
-### What makes a feature strong
-
-A strong feature is a source-confirmed structural event with meaningful continuation at the measured ridge scale. A long dark trace does not itself prove a bifurcation. A faint but consistently separated ridge can be better supported than a high-contrast blob. For a fork, every required branch and valley must be supported; a long trunk cannot compensate for a short false tail. For an ending, the source must support termination rather than an acquisition gap or compatible continuation. Missing pixels are unknown evidence, distinct from an observed absence of structure.
-
-The global mean ridge width R remains the common unit. Arc length along a ridge, transverse ridge/valley width and Euclidean neighborhood radius are distinct measurements. Extended observations use a 4R arc horizon, compared with a 2R diagnostic horizon; density uses a disk of radius 3R. Longer support saturates at the horizon rather than earning an unlimited size bonus. These are explicit engineering settings, not calibrated biometric probabilities or universal fingerprint thresholds.
-
-### Combining evidence
-
-- **C, extended context:** original-source confirmation of the required structure over the 4R context. The corresponding `support_2r` exposes how the evidence changes at 2R. Source separation and continuity matter, not merely the number of traced pixels.
-- **P, local source support:** original dark-arm continuity and feature-specific valleys, caps or interiors, with one attenuation for local reference contrast. This remains an inspectable local measurement rather than a hard ceiling on extended support.
-- **G, local geometry:** available 2R arm extent, branch separation and possible aligned continuation beyond an ending.
-- **T, extraction stability:** correspondence in eight actual threshold variants, with the original capture and R fixed. It measures sensitivity of this algorithm on this capture, not repeat-capture identity.
+Stress tests reuse the source preparation and R. They re-binarize, thin and trace eight combinations of directional margins `−0.05, 0, +0.05` and coherence thresholds around the configured value, excluding the baseline. At defaults, coherence levels are `0.18, 0.20, 0.22`. Correspondence is one-to-one and checks type, position and arm/cycle geometry, not just nearby pixels. This measures sensitivity on the same capture, not repeat-scan reliability.
 
 ```text
-L = min(P, G)
-Q = C × (0.75 + 0.25 × L) × (0.5 + 0.5 × T)
+Q = C × (0.75 + 0.25 × min(P, G)) × (0.5 + 0.5 × T)
+weighted_count = sum((1 - distance / (3R))²) over other candidates within 3R
+N = 0.5 + 0.5 × observed_fraction / (1 + weighted_count)
 priority = Q × N
 ```
 
-Extended source-confirmed structure is the prerequisite: Q cannot exceed C. Weak local evidence can reduce a supported context by at most one quarter; stability can reduce it by at most one half. Neither local contrast nor stable extraction can manufacture missing contextual structure. Unknown required P, G or C produces unknown Q and priority. The coefficients express the chosen dominance of extended evidence; they are not learned recognition probabilities. Regional clarity is not multiplied into this formula, which would count related source information again.
+Extended context is the main evidence. Local support can attenuate it by up to 25%, and stress stability by up to 50%. N stays within 0.5–1 and counts all original candidates, including later-removed artifacts. Isolation cannot create strong evidence; crowding changes priority rather than intrinsic strength Q. Pixels outside the frame or validity mask reduce `observed_fraction`.
 
-Local P/G retain the 2R arm horizon, R/2 tangent support and source sampling no farther than 0.5px apart. Required source segments check crossed interpolation cells. Each original arm exports its inspected length, darkness, dark-length fraction, reference contrast and longest light gap. Local source contrast is applied once using `c / (c + min_contrast)`. A weak local score therefore remains visible even when a wider, consistent structure supports a stronger Q.
+Missing required evidence produces unknown Q/priority, distinct from a measured zero. These scores are **engineering ranks, not calibrated recognition probabilities**. Candidate-level measurements and policy definitions live in [features.rs](../crates/core/src/biometrics/fingerprint/features.rs) and its submodules.
 
-Ending assessment uses a graded cap spanning width R and physical depth R/4 within a 1.2R forward corridor. It chooses the strongest observed window by the same contrast-to-noise separation used for ridge profiles. A dark corner or side strip contributes to the window's mean and variance instead of vetoing the entire cap. A short bright stripe has less evidence than a sustained full-depth cap. Missing required source data remains unknown. Automatic cleanup retains its strict first-confirmed light barrier and source-continuation rules.
+## Local clarity diagnostics
 
-Local termination reuses this graded source observation together with its curved-continuation evidence. Local arm measurements and reference-contrast attenuation remain separate; there is no second categorical cap test. The local geometric check searches for nearby aligned continuation over 3R, including the remainder of the same path after excluding the inspected terminal arc. It cannot infer absence of continuation outside the observed capture.
+Full extraction evaluates original-image patches oriented across ridges. It removes a local illumination trend and measures contrast, dark/light class separation and repetition near the bootstrap period. Anchor clarity is the product of these three components, then bilinearly interpolated. The component maps interpolate independently, so their dense pixelwise product is not the dense clarity map.
 
-### Extended source measurements
+Explicit support distinguishes missing evidence from zero clarity. Path-segment values integrate the map along each segment; an unsupported segment is `null`. Open paths have one value per consecutive point pair; cycles also include their closing segment. Clarity controls diagnostic line visibility only. It neither gates extraction nor enters feature Q directly; the supported-pixel mean is not an overall fingerprint accuracy score.
 
-Context probes label a center strip at ±0.2R and flanking strips at distances 0.7–0.9R on each side, using an R/2-supported local tangent. The strips are defined by geometry, not by selecting the darkest/brightest pixels. They sample the unchanged capture through its local palette, retaining unclipped normalized intensity. For each center/flank comparison, let Δ be the positive difference of mean normalized darkness, v the within-strip variance and q the normalized one-gray-level quantization variance:
+## Interpretation and next stages
 
-```text
-S = Δ² / (Δ² + v_center + v_flank + q_center + q_flank)
-q = mean(1 / (12 × local_reference_spread²))
-```
+The next stages form [regional combinations](feature-combinations.md), normalize them to [integer grid figures](grid-shapes.md), and derive [enrollment packages](grx-packages.md) for [fresh-capture signing](fingerprint-signing.md). Successful signature/Merkle verification establishes key membership and message validity, not biometric identity. The current geometric descriptor has a demonstrated cross-subject collision; see the [signing limitations](fingerprint-signing.md).
 
-A nonpositive ordered difference gives zero. The smaller of the two flank scores confirms the ridge. Consequently weak but consistent class separation can exceed noisy high-amplitude contrast; a uniform dark patch has no ordered ridge/flank evidence. C has no additional global contrast ceiling. Local P still exposes that separate contrast measurement.
-
-An arm of available length L is sampled from `min(R, L/2)` to L, avoiding the naturally merged junction core. Its support is mean separation times `1 - longest_unsupported_run / sampled_length`, times `min(L / horizon, 1)`. An unsupported run means absent ordered separation, not merely a positive score below an arbitrary confidence cutoff. Exported `supported_length_px` is the separation integral over this sampled outer interval; the excluded central interval is not claimed as inspected. The weakest required arm limits context.
-
-A fork additionally checks the geometrically closest departing pair, including every tied pair. Opposite trunk segments do not provide a substitute valley. The original interior between ridge centers is sampled beyond 0.6R from each center; both ridges must differ from that interior. Resolved interior width contributes linearly up to R/3. The pair score averages source separation along the available outer arc and accounts for its longest unsupported run. The weakest required pair limits C. Local fork P now uses the same pair selection, removing its earlier best-pair substitution defect.
-
-An ending compares each full source window against the incoming ridge using the same contrast-to-noise measurement. Its `termination` is the strongest graded cap separation. `forward_continuation` inspects nearby compatible paths within 3R and an R-wide forward corridor, verifying a source-backed ridge around each prospective continuation. A hallucinated forward graph with light source pixels does not supply that evidence. `curved_continuation` separately measures source-connected departure from the observed incoming ridge. Combined `continuation` is the maximum of those two contradictions; C is bounded by the arm evidence, cap separation and `1 - continuation`.
-
-The original-source component search remains bounded. For ranking, source connectivity and an escape's explanation by the observed ridge are graded, so a tiny transverse intensity dip is not an automatic rejection of the whole ending. A source link has margin `clamp(2 × darkness - 1, 0, 1)`; its continuous interpolation must support the connection. Each escape takes the strongest route's weakest link. This support is divided by the observed incoming ridge's mean margin and clamped to [0, 1], so a consistently faint continuation is assessed relative to its own ridge. A nonpositive or unavailable reference margin makes this comparison unknown; no denominator floor or minimum feature score is imposed.
-
-The diagnostic search starts from source-connected pixels in the actual incoming ridge core. All seeds are established before the strongest-path traversal. A single weak or exactly midpoint tip pixel therefore cannot suppress an otherwise supported continuation. Seeds must belong to the same continuously dark component within the inspected region; a light gap does not connect them. Automatic cleanup retains its original traversal.
-
-A source-certified retained backbone remains a complete explanation; the actual finite incoming trace additionally contributes its two-sided profile separation and transverse membership. Membership is full within R/2 of the trace and decreases to zero at half the accepted 1.2R width. This trace explanation does not extrapolate its endpoints. Curved continuation is the maximum of `relative connected support × (1 - explanation)` over observed escapes. Required source support remains unknown when unavailable, rather than becoming an assumed absence of continuation. Source proofs whose upper bound cannot change that maximum are skipped without changing the result or increasing the work limit.
-
-Candidate directions and forward distance weights retain the geometric rules of local G. The explanatory retained backbone excludes the same local 2R physical arc across all traversed edges, avoiding dependence on incidental graph subdivision; the observed terminal trace is assessed separately. Measured ending context requires a measured cap and both continuation components, including observed zeros. A locally observed cap can remain available when only the wider forward search is unobserved. Isolated cycles inspect their entire closed perimeter with wrapped tangents and their source interior, so changing the closed seam does not change C; extent credit still saturates at the declared horizon. Isolated points have zero resolved-structure support.
-
-Context traversal follows only existing incident edges. At a node, a candidate continuation must align within the existing 30-degree tangent allowance and retain positive two-sided source separation throughout its inspected first R. Port connectors longer than R/2 are not followed. Exactly one supported exit permits continuation; multiple exits are ambiguous, missing support stays unknown, and disconnected gaps are never traversed. Traversed edge IDs and stop reasons are exported. After a split/rejoin, a shared outgoing trunk does not count as independent continuation of both branches. The enclosure itself remains eligible for source assessment; a loop is not rejected merely because it closes.
-
-### Neighborhood priority
-
-Every other original candidate inside radius 3R contributes `(1 - distance / (3R))²` to the weighted crowding count. Candidates exactly on or beyond the radius contribute nothing; self is excluded. Original candidates remain the population even when later cleanup removes them, so confirmed artifact clusters remain visible as context. Counts are not a claim that all these candidates are anatomical features.
-
-```text
-N = 0.5 + 0.5 × observed_fraction / (1 + weighted_count)
-```
-
-`observed_fraction` is the available source-pixel-center fraction of the full 3R disk. Masked and outside-frame centers are unavailable. In a fully observed disk with no neighbors N=1; crowding or incomplete observation reduces N, with a floor of 0.5. An unobserved neighborhood cannot earn full isolation credit. This factor does not alter Q, delete candidates or establish biometric uniqueness. Genuine nearby features remain eligible; an isolated artifact with C=0 still has Q=priority=0.
-
-The native method is `scale-context-priority-v2`; the report consumer rejects incompatible contracts instead of guessing missing evidence or applying legacy scoring.
-
-The stress grid uses directional margins `-0.05, 0, +0.05` of the full local dark/light reference spread and three coherence cutoffs around the configured baseline. At the default coherence `0.2`, these are `0.18, 0.20, 0.22`. The baseline pair is excluded, giving eight cases. Original pixels, normalization, denoising, orientation response and measured scale remain fixed. Each case performs fresh binarization, thinning and graph tracing; it does not rerun cleanup or change the baseline graph.
-
-The directional margin is the smaller of the center line's darkness relative to its local midpoint and its contrast against the two flanking lines. It is averaged over the line samples and divided by two because normalized intensity encodes a full dark/light spread as two units. A margin greater than zero is exactly the baseline pair of strict directional comparisons. The complete response retains source support and full-precision coherence so threshold variants do not reuse a mask already clipped at the baseline cutoff.
-
-For other valid coherence settings `c`, the step is `max(0.02, 0.1c)`. The two neighboring values are bounded to `[0,1]`; at an endpoint, a duplicate baseline value is replaced with a second step in the available direction. The actual eight pairs are always exported. Existing valid extraction configurations remain supported.
-
-Stress correspondence is one-to-one and checks node type, incidence degree and outward arm geometry. Nodes may move by at most R; arms are compared over R with a 30-degree direction allowance and R/4 shape allowance. Isolated pixels use a stricter R/4 positional allowance. Isolated cycles additionally compare perimeter, spatial extent and centered shape with a 20% relative allowance. These are within-capture diagnostic correspondence controls, distinct from the cleanup width tolerance and any future biometric matching tolerances. A candidate cannot borrow the same variant feature already assigned to another candidate. Work limits fail explicitly instead of returning a partial stress average.
-
-## Controls and bounds
-
-`ExtractionConfig::default()` sets local standard deviation `0.035` on intensity divided by 255, tensor coherence `0.2`, a source budget of four million pixels and 4096 initial bootstrap-grid locations. The grid budget does not cap the fallback or the full measurement pass. Callers can explicitly change these controls. Invalid values fail before processing. Source periods from 4 to 128 pixels are supported; this is computational support, not an inferred sensor resolution. Resource-limit failures do not return a truncated mean.
-
-Curve sampling and smoothing are processing settings, not biometric tolerance ranges. `describe_curve` also accepts its own positive finite spacing and sigma. Sampling, Gaussian support and arithmetic have explicit work/numerical limits.
-
-## Output meaning
-
-- **Ending:** one connected path in the extracted graph. Missing signal can also create an ending.
-- **Junction:** an acyclic cluster of adjacent branch pixels, or an individual vertex where consolidation would destroy a genuine cycle. The representative position is an actual pixel; edge ports can be different pixels within that cluster. No line is invented between a port and the representative.
-- **Isolated node:** a retained single-pixel component. It is not automatically a meaningful biometric feature.
-- **Cycle:** a closed path without graph junctions. A self-edge attached to a junction is retained as an edge; node identity alone does not force its two distinct ports into a geometrically closed curve.
-- **Unknown continuation:** frame/invalid-region contact, including contact inherited through thinning. This is conservative provenance, not a confidence score. Absence of the flag does not establish a true anatomical ending.
-
-For the observed graph, lengths and midpoints are measured on unsmoothed source-coordinate paths and include rasterization error. Reconstructed contour descriptors instead measure their final geometric paths. A curve's midpoint is halfway along its length, not the center of a fitted circle. Turning is relative to the initial tangent and follows the stored traversal; rotation does not change that relative profile, but reversing a path or moving a closed seam changes its parameterization. The observed turning descriptor uses a Gaussian truncated at four sigma with renormalized open ends or periodic closed boundaries. Contour reconstruction uses the endpoint-preserving reflected extension described above.
-
-A very short or numerically unresolved curve can fail geometric description. Its path remains in the graph with an explicit per-curve error; it is not silently removed. A closed shape is not forced to have a valid circular center. No fitted-circle stability or repeat-capture tolerance is implied.
-
-The report distinguishes isolated cycles from total graph cycle rank (`edges - nodes + components + isolated cycles`). A graph with no isolated cycles can still contain loops attached to junctions. Neither count is a claim about anatomical pores or verified fingerprint patterns.
-
-## Verification and integration boundary
-
-The [SOCOFing testing guide](fingerprint-testing.md) documents the external research dataset, its usage restrictions, verified file properties, lossless input preparation and a deterministic comparison set for clarity and normalization work.
-
-Tests cover image and mask validation, blank captures, oriented stripes, local brightness changes, source-intensity integration, independence from masked pixel values, component and hole preservation, missing regions, diagonal topology, junction clusters, closed cycles, long iterative paths, geometric invariances, numerical limits and the checked-in fingerprint. Cleanup tests cover the strict diameter boundary, continuation/ending conversion, long curved branches, unknown intermediate support, ambiguous components, observed cluster routes and prevention of repeated erosion. Exhaustive small-raster cases check component, cycle and source-path conservation. Contour tests additionally cover endpoint preservation, small-loop retention, swept support, collision rejection, supported processing gaps, identical geometry with a white source gap, missing acquisition pixels, ambiguous partners and complete path provenance. The report tests cover summary reconstruction, malformed geometry, palette support, path containment, image dimensions, empty graphs, cleanup and contour origins, and PNG output. The synthetic fixture verifies execution and visualization, not real-scanner recognition performance.
-
-The compact `fingerprint::analyze` result feeds the implemented regional selection, grid quantization and candidate signing path. `fingerprint::extract` adds full report diagnostics to the same source analysis; `Fingerprint::features()` provides the equivalent compact projection. Repeated real sensor captures are still needed to evaluate reconstruction reliability and calibrate biometric tolerances; successful execution on a synthetic image or its crops does not establish that reliability.
-
-Feature-strength controls compare finite-width forks with short tails, filled valleys and reduced original contrast; visible caps with source continuations and nearby aligned paths; and supported rings with light or filled artifacts. Ending controls vary lateral cap contamination across the old dark/light threshold, introduce single-pixel transverse dips, compare a short bright stripe with a full-depth cap, and preserve contradictions from actual curved continuations. Missing capture support remains unknown, including a missing interpolation corner whose hidden intensity changes. Tests also check closed-path seam/reversal behavior, one-to-one stress correspondence, mask invariance, aggregation bounds and exact baseline response replay. These controls verify the declared diagnostic model rather than establish biometric calibration.
+Normalization/orientation follows established enhancement ideas, including [Hong, Wan and Jain](https://doi.org/10.1109/34.709565); thinning derives from [Zhang and Suen](https://doi.org/10.1145/357994.358023), with the safeguards described above. These sources do not establish the accuracy of this implementation. Evaluation requires independent repeat captures, subjects and explicit error rates; synthetic fixtures and same-image crops alone cannot provide them.
