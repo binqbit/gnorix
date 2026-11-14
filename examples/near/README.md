@@ -58,8 +58,9 @@ service or `cargo-near` installation is required for this web demo.
 
 Use `-- --port 8781` to change the web port. For an HTTPS reverse proxy, set
 `-- --public-origin https://gnorix.online`; the listener stays on loopback and
-accepts the explicitly configured Host/Origin. Public visitors share the same
-disposable demo session.
+accepts the explicitly configured Host/Origin. See [public deployment](deploy/README.md)
+for the release bundle, systemd service and nginx configuration. Public visitors
+share the same disposable demo session.
 
 Set `GNORIX_DEMO_CONTRACTS_DIR` to a directory containing both prebuilt Wasm
 contracts to skip startup compilation. Without it, the local build behavior is

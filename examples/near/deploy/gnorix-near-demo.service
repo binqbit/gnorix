@@ -1,0 +1,40 @@
+[Unit]
+Description=Gnorix NEAR transaction signing demo
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=gnorix
+Group=gnorix
+StateDirectory=gnorix-near-demo
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/gnorix-near-demo
+Environment=HOME=/var/lib/gnorix-near-demo
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+Environment=SSL_CERT_DIR=/etc/ssl/certs
+ExecStart=/opt/gnorix-near-demo/current/run --port 8780 --public-origin https://gnorix.online
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+KillMode=control-group
+MemoryHigh=1G
+MemoryMax=1200M
+TasksMax=256
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
