@@ -19,5 +19,8 @@ ed25519-dalek.workspace = true
 gnorix-example-support.workspace = true
 serde_json.workspace = true
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+near-sdk = { version = "=5.30.2", default-features = false, features = ["unit-testing"] }
+
 [lints]
 workspace = true

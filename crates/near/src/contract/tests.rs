@@ -23,12 +23,16 @@ fn runtime() -> Runtime {
 }
 
 fn package(revision: u64) -> EnrollmentPackage {
+    package_on_network(revision, "near:testnet")
+}
+
+fn package_on_network(revision: u64, network: &str) -> EnrollmentPackage {
     let mut limits = verification_limits();
     limits.candidate_attempts = NonZeroUsize::new(3).unwrap();
     let context = EnrollmentContext {
         spec: EnrollmentSpec {
             domain: Domain {
-                network: "near:testnet".into(),
+                network: network.into(),
                 verifier: "counter.testnet".into(),
             },
             subject: "alice.testnet".into(),
@@ -80,6 +84,71 @@ fn record(package: &EnrollmentPackage) -> Enrollment {
         &account("alice.testnet"),
     )
     .unwrap()
+}
+
+#[test]
+fn public_contract_methods_use_the_native_near_host() {
+    use near_sdk::{test_utils::VMContextBuilder, testing_env};
+
+    let mut context = VMContextBuilder::new();
+    context
+        .current_account_id(account("counter.testnet"))
+        .predecessor_account_id(account("mallory.testnet"))
+        .block_timestamp(1_000_000_000);
+    testing_env!(context.build());
+
+    let package = package_on_network(1, "near:test");
+    let commitment = Commitment::from_core(package.commitment()).unwrap();
+    assert!(Enrollment::register(commitment.clone(), SUITE_ID).is_err());
+
+    context.predecessor_account_id(account("alice.testnet"));
+    testing_env!(context.build());
+    let mut record = Enrollment::register(commitment, SUITE_ID).unwrap();
+    let authorization = signed(&package, 0);
+    let payload = 2_u64.to_be_bytes();
+
+    context.predecessor_account_id(account("relayer.testnet"));
+    testing_env!(context.build());
+    record
+        .verify("counter.increment", &payload, &authorization)
+        .unwrap();
+    assert_eq!(record.view().next_nonce, 0);
+    assert!(
+        record
+            .verify_and_consume("counter.increment", b"changed", &authorization)
+            .is_err()
+    );
+    assert_eq!(record.view().next_nonce, 0);
+    record
+        .verify_and_consume("counter.increment", &payload, &authorization)
+        .unwrap();
+    assert_eq!(record.view().next_nonce, 1);
+    assert!(
+        record
+            .verify("counter.increment", &payload, &authorization)
+            .is_err()
+    );
+    assert!(record.revoke().is_err());
+
+    context.predecessor_account_id(account("alice.testnet"));
+    testing_env!(context.build());
+    record.revoke().unwrap();
+    assert!(!record.view().active);
+
+    let replacement = package_on_network(2, "near:test");
+    record
+        .replace(Commitment::from_core(replacement.commitment()).unwrap())
+        .unwrap();
+    assert!(record.view().active);
+    assert_eq!(record.view().next_nonce, 0);
+    record
+        .verify("counter.increment", &payload, &signed(&replacement, 0))
+        .unwrap();
+    assert!(
+        record
+            .verify("counter.increment", &payload, &authorization)
+            .is_err()
+    );
 }
 
 #[test]

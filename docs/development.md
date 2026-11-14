@@ -87,6 +87,10 @@ cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --releas
 
 Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Cargo writes build output to the ignored root `target/` directory. The GitHub Actions workflow checks formatting, Clippy and documentation, and declares test jobs for Linux, macOS and Windows. A configured workflow does not itself establish that those hosted runs have passed.
 
+Native NEAR tests enable the SDK's official mock host through development
+dependencies, including account context and cryptographic host functions. Wasm
+contract builds use the chain host.
+
 ## Implemented responsibilities
 
 | Component | Location | Responsibility |
