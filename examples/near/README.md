@@ -33,8 +33,9 @@ binary. Use Linux or macOS with a supported NEAR sandbox binary; native Windows
 users should run this example in WSL. No Docker, Compose, Node.js, separate RPC
 service or `cargo-near` installation is required for this web demo.
 
-1. Select **Wallet 1** or **Wallet 2**. Its fingerprint, eligible feature points,
-   Merkle root, nonce and on-chain token balance appear in the page.
+1. Select **Wallet 1** or **Wallet 2**. Its fingerprint, eligible feature points
+   and on-chain token balance appear. Open **Registered Merkle root** to inspect
+   the enrollment.
 2. Enter the amount and approve signing. Each click selects a **new random
    circular capture** and adds light image artifacts. The circle covers at least
    one third of the clean enrollment's confirmed pattern pixels. Everything
