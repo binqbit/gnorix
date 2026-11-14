@@ -41,8 +41,8 @@ service or `cargo-near` installation is required for this web demo.
    outside it is blurred in the page and excluded from analysis. The backend
    extracts fresh features only from this unchanged partial sample, reconstructs
    a signing key, and checks the signature and Merkle proof through the deployed
-   wallet's read-only verifier. Matched fresh points receive four lime pointers
-   with a thin dark outline, aimed at their center. Their center color still shows priority;
+   wallet's read-only verifier. Matched fresh points receive four rounded lime arcs
+   with a thin dark outline. Their center color still shows priority;
    the markers keep a readable minimum size on small screens.
 3. Review the public key, signature and Merkle membership path, then submit to NEAR. A separate local relayer sends
    one transaction. The page shows its hash, receipt/callback result, gas and

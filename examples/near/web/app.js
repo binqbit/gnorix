@@ -241,14 +241,11 @@ function svgElement(tag, attributes) {
     return element;
 }
 
-function selectionArrows(x, y, radius) {
+function selectionArcs(x, y, radius) {
     return [0, 1, 2, 3].map((quadrant) => {
-        const angle = quadrant * Math.PI / 2;
-        const dx = Math.cos(angle);
-        const dy = Math.sin(angle);
-        const tip = radius * 0.63;
-        const halfWidth = radius * 0.23;
-        return `M ${x + dx * tip} ${y + dy * tip} L ${x + dx * radius - dy * halfWidth} ${y + dy * radius + dx * halfWidth} L ${x + dx * radius + dy * halfWidth} ${y + dy * radius - dx * halfWidth} Z`;
+        const start = (quadrant + 0.25) * Math.PI / 2;
+        const end = (quadrant + 0.75) * Math.PI / 2;
+        return `M ${x + radius * Math.cos(start)} ${y + radius * Math.sin(start)} A ${radius} ${radius} 0 0 1 ${x + radius * Math.cos(end)} ${y + radius * Math.sin(end)}`;
     }).join(" ");
 }
 
@@ -302,11 +299,14 @@ function renderFeaturePoints(wallet, capture, prepared) {
                 "data-feature-id": point.id,
             }));
             if (matches.has(point.id)) {
-                markers.push(svgElement("path", {
-                    d: selectionArrows(point.x, point.y, size.selection),
-                    class: "matched-feature-marker",
-                    "data-feature-id": point.id,
-                }));
+                const arcs = selectionArcs(point.x, point.y, size.selection);
+                for (const layer of ["contour", "marker"]) {
+                    markers.push(svgElement("path", {
+                        d: arcs,
+                        class: `matched-feature-${layer}`,
+                        "data-feature-id": point.id,
+                    }));
+                }
             }
         }
         $("matched-points").replaceChildren(...markers, ...dots);
@@ -345,7 +345,7 @@ function renderFingerprint() {
         featureLabel = analyzing ? "Analyzing capture" : "Capture retained";
         pointStatus = analyzing ? "Extracting features from the captured region…" : "Feature analysis was not completed";
     } else if (capture) {
-        pointStatus = matched ? `${matched} matched signing points · green pointers` : `${source.feature_count} fresh features · no signing match highlighted`;
+        pointStatus = matched ? `${matched} matched signing points · green arcs` : `${source.feature_count} fresh features · no signing match highlighted`;
     } else if (analyzing) {
         pointStatus = "Preparing a fresh random capture…";
     }

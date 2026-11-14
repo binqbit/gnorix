@@ -108,9 +108,11 @@ h2 { margin: 0; color: #72ff99; font-size: 16px; font-weight: 550; letter-spacin
 #fingerprint-image { opacity: .9; }
 #fingerprint.has-capture #fingerprint-image { opacity: .55; filter: url(#outside-blur); }
 #capture-image { opacity: .95; }
-.feature-point, .matched-feature-marker { vector-effect: non-scaling-stroke; pointer-events: none; }
+.feature-point, .matched-feature-contour, .matched-feature-marker { vector-effect: non-scaling-stroke; pointer-events: none; }
 .feature-point { stroke: #05220e; stroke-width: .7px; stroke-opacity: .75; }
-.matched-feature-marker { fill: #b5ff52; stroke: #101b10; stroke-width: .85px; stroke-linejoin: round; }
+.matched-feature-contour, .matched-feature-marker { fill: none; stroke-linecap: round; }
+.matched-feature-contour { stroke: #101b10; stroke-width: 3.8px; }
+.matched-feature-marker { stroke: #b5ff52; stroke-width: 2.4px; }
 .image-placeholder { position: relative; max-width: 240px; text-align: center; padding: 20px; color: var(--muted); font-size: 12px; }
 .stage-corner { position: absolute; width: 23px; height: 23px; border-color: #39ff7599; border-style: solid; pointer-events: none; filter: drop-shadow(0 0 5px #39ff75aa); }
 .top-left { top: 10px; left: 10px; border-width: 1px 0 0 1px; }
