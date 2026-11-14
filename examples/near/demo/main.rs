@@ -8,6 +8,7 @@ mod fingerprint;
 mod model;
 mod runtime;
 mod service;
+mod sessions;
 
 use anyhow::{Context, Result};
 
@@ -37,11 +38,11 @@ async fn run() -> Result<()> {
     if let Some(origin) = config.public_origin() {
         println!("Public reverse-proxy origin: {origin}");
     }
-    let app = service::App::new(config)?;
+    let app = sessions::Demo::new(config)?;
     app.start();
 
     println!("Gnorix transaction signing demo: http://127.0.0.1:{port}");
-    println!("Starting local contracts and fingerprint enrollments. The page shows progress.");
+    println!("Preparing the shared NEAR runtime. The page creates your one-hour wallet session.");
     let result = axum::serve(listener, api::router(app.clone()))
         .with_graceful_shutdown(shutdown_signal())
         .await;

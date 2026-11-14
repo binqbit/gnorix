@@ -1,9 +1,21 @@
 # Public NEAR demonstration
 
 This deployment serves `https://gnorix.online` through nginx. The Rust app and
-its private NEAR sandbox listen on loopback. Every visitor shares the same two
-test wallets, balances and active approval. Restarting the service creates a new
-chain, enrollments and balances; no mainnet or public-testnet account is used.
+its private NEAR sandbox listen on loopback. Every browser session receives its own two
+test wallets, token contract, balances, Merkle enrollments and active approval.
+All sessions use one sandbox process. Restarting the service creates a new
+chain and invalidates all sessions; no mainnet or public-testnet account is used.
+
+Sessions have an absolute one-hour lifetime; browser polling does not renew it.
+Access ends at the deadline. Asynchronous cleanup cancels analysis and releases
+enrollment/attempt data at the next worker checkpoint, then revokes enrollments
+and settles accepted transfers before deleting accounts. Unresolved accounts
+are retained if cleanup fails. The next state read starts a fresh session.
+Transaction history remains in the sandbox database until process shutdown.
+The server admits at most 16 sessions and serializes CPU-heavy fingerprint jobs;
+capacity errors do not evict another visitor. Session cookies use `HttpOnly`,
+`SameSite=Strict` and `Secure` for the configured HTTPS origin. Do not configure
+nginx to strip cookies or cache `/api/` responses.
 
 The supplied service enrolls and searches combinations of **exactly five points**,
 matching the local five-point experiment. It requires at least three anchors,
@@ -15,7 +27,7 @@ retains the example's default 3–6 point range.
 
 The page marks the prototype's security limits and provides a short **How it
 works** explanation. The service keeps public enrollment material and the
-current attempt in memory, without writing signature archives or per-attempt
+current attempt in memory per browser session, without writing signature archives or per-attempt
 metadata files. The sandbox itself retains submitted transactions in its chain
 history. Transfers attach 100 Tgas; the UI shows this limit separately from
 measured gas consumption.
@@ -115,10 +127,12 @@ for a future renewal setup.
 ## Verify and operate
 
 Check `https://gnorix.online/api/state` until `phase` is `ready` and both wallets
-are present. HTTP starts before initialization completes; status 200 or an active
-systemd unit alone does not establish readiness. Inspect state without logging
-the session token. The token protects mutations from cross-site requests; it is
-public demo state, not visitor authentication.
+are present, retaining the same cookie across readiness requests. Each cookieless
+GET creates a session. Use `HEAD /` for liveness checks that must not allocate
+wallets. HTTP starts before initialization completes; status 200 or an active
+systemd unit alone does not establish readiness. Keep the session cookie and
+returned CSRF token out of logs. They scope this public demonstration, not
+authenticated access to a real user's wallet.
 
 Check normal TLS validation, HTTP-to-HTTPS redirection, static asset hashes and
 a browser transfer in each direction. Confirm the receipt, Merkle path, nonce
@@ -132,8 +146,8 @@ sudo journalctl -u gnorix-near-demo -n 100 --no-pager
 sudo systemctl restart gnorix-near-demo
 ```
 
-A restart discards the shared demo session. Schedule updates after any active
-transfer resolves. To roll back, restore the previous `current` symlink and its
+A restart discards all demo sessions. Schedule updates after active
+transfers resolve. To roll back, restore the previous `current` symlink and its
 matching service configuration, run `systemctl daemon-reload`, then restart the
 service. Retain both when changing release arguments. For the first deployment, rollback removes only
 the Gnorix virtual-host symlink and stops its service; validate and reload nginx

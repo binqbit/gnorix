@@ -25,9 +25,10 @@ cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release
 ```
 
 Open **http://127.0.0.1:8780**. Rust starts the web server immediately and the page
-shows preparation progress. It builds both contracts, starts a private NEAR
-sandbox, deploys the token and two smart wallets, analyzes the two bundled test
-fingerprints and registers their Merkle commitments. Each wallet starts with
+shows preparation progress. It builds both contracts, starts one private NEAR
+sandbox and analyzes the two bundled test fingerprints once. Each browser session
+gets its own token, two smart wallets and freshly generated Merkle commitments.
+Each wallet starts with
 **1,000 GXT**, checked against the token contract's actual state.
 
 The machine needs Rust/rustup and a native build environment. The repository pins
@@ -70,7 +71,7 @@ Use `-- --port 8781` to change the web port. For an HTTPS reverse proxy, set
 `-- --public-origin https://gnorix.online`; the listener stays on loopback and
 accepts the explicitly configured Host/Origin. See [public deployment](deploy/README.md)
 for the release bundle, systemd service and nginx configuration. Public visitors
-share the same disposable demo session.
+receive isolated, disposable browser sessions on the same sandbox.
 
 For the local five-point experiment, run:
 
@@ -89,18 +90,47 @@ also applies to later signing attempts; changing it requires a new demo session.
 Set `GNORIX_DEMO_CONTRACTS_DIR` to a directory containing both prebuilt Wasm
 contracts to skip startup compilation. Without it, the local build behavior is
 unchanged. Ctrl+C stops the app and its managed
-sandbox. Every launch creates fresh disposable accounts, roots and balances;
+sandbox. Each session creates fresh disposable accounts, roots and balances;
 this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
 images and signing run locally. Fingerprint extraction can take tens of seconds;
 use the documented release build. The HTTP page remains responsive during it.
 
 The web service does not write a signature archive or per-attempt metadata files.
 It retains public enrollment data (Merkle hashes, context and parameters) and the
-current capture, proof and transaction result in memory. Starting a new approval
+current capture, proof and transaction result in memory, scoped to its session. Starting a new approval
 replaces the previous attempt; reconstructed signing keys are not cached. Keys
 are derived deterministically within that enrollment, while restarting creates
-a new enrollment context. Submitted transactions remain in the disposable
+new enrollment contexts. Submitted transactions remain in the disposable
 sandbox's chain history, as required for actual NEAR execution.
+
+## Browser sessions
+
+A server-generated `HttpOnly`, `SameSite=Strict` cookie selects the browser's
+session. The configured public HTTPS origin also uses `Secure`; loopback HTTP
+remains usable for local tests. Reloading or opening another tab in the same
+browser resumes that session. Another browser/profile gets its own wallets,
+contracts, token balances, enrollment roots, nonces and active attempt. The
+CSRF token is separate from the session cookie and cannot authorize a write
+in another session. Capture URLs are resolved only within the current session.
+
+Sessions expire **one hour after creation**, including sessions with an open
+page; polling does not extend the deadline. Expired sessions cannot sign,
+submit or read captures. The next state read creates a fresh session with new
+accounts and initial balances. Cleanup checks expiry every second, cancels analysis
+and drops Merkle packages and attempt data. A running blocking analysis releases
+its references at the next cancellation checkpoint. Account retirement revokes
+the enrollments and waits for accepted transfers before deletion; unresolved
+accounts remain intact if cleanup fails. An already submitted NEAR transaction
+is not rolled back by expiry. Historical
+transactions and receipt data remain in the shared sandbox database until the
+server stops; the one-hour limit applies to active session data, not chain history.
+
+There are at most **16 active sessions**, and one fingerprint analysis/enrollment
+job runs at a time across them. Other sessions remain readable while a job runs.
+When capacity is reached, a new visitor receives a temporary busy response;
+existing sessions are retained. The private sandbox process and immutable image
+analysis are shared; session-specific Merkle trees and signing keys are not.
+The browser never supplies authoritative balances or contract mappings.
 
 The fingerprint, transfer controls and execution panels reserve room through
 signing, submission and receipt updates. The transfer summary and signing public

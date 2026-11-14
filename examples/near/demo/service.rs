@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
 };
 
 use anyhow::{Context, Result, ensure};
@@ -8,21 +11,24 @@ use gnorix::near::{Action, Authorization};
 use gnorix_near_wallet::{TRANSFER_OPERATION, Transfer};
 use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
 
+mod lifecycle;
+
 use super::{
     chain::{Chain, SubmissionStatus, TRANSFER_GAS_TGAS, TransferResult},
-    config::Config,
-    fingerprint::{FingerprintTemplate, FingerprintWallet},
+    fingerprint::FingerprintWallet,
     model::{
         CaptureView, PreparedView, SignRequest, Snapshot, SubmitRequest, TOKEN_DECIMALS,
-        WalletView, format_amount, hex,
+        format_amount, hex,
     },
-    runtime,
+    sessions::Startup,
 };
 
 #[derive(Clone)]
-pub struct App {
-    pub config: Config,
+pub struct Session {
+    id: Arc<str>,
+    deadline: Arc<Mutex<Instant>>,
     cancelled: Arc<AtomicBool>,
+    startup: tokio::sync::watch::Receiver<Startup>,
     state: Arc<Mutex<Snapshot>>,
     engine: Arc<AsyncMutex<Option<Engine>>>,
     task: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -31,7 +37,7 @@ pub struct App {
 
 struct Engine {
     chain: Chain,
-    wallets: [Arc<FingerprintWallet>; 2],
+    wallets: Vec<Arc<FingerprintWallet>>,
     prepared: Option<Prepared>,
     sequence: u64,
 }
@@ -54,13 +60,19 @@ enum Command {
     Refresh,
 }
 
-impl App {
-    pub fn new(config: Config) -> Result<Self> {
+impl Session {
+    pub fn new(
+        id: String,
+        deadline: Instant,
+        startup: tokio::sync::watch::Receiver<Startup>,
+    ) -> Result<Self> {
         let mut token = [0_u8; 32];
         getrandom::fill(&mut token).context("create local session token")?;
         Ok(Self {
-            config,
+            id: id.into(),
+            deadline: Arc::new(Mutex::new(deadline)),
             cancelled: Arc::new(AtomicBool::new(false)),
+            startup,
             state: Arc::new(Mutex::new(Snapshot {
                 token: hex(&token),
                 phase: "starting",
@@ -81,6 +93,32 @@ impl App {
             task: Arc::new(Mutex::new(None)),
             preview: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn expired(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+            || Instant::now()
+                >= *self
+                    .deadline
+                    .lock()
+                    .expect("session deadline lock poisoned")
+    }
+
+    #[cfg(test)]
+    pub fn expire_for_test(&self) {
+        *self.deadline.lock().unwrap() = Instant::now();
+    }
+
+    #[cfg(test)]
+    pub fn set_capture_for_test(&self, id: &str, bytes: Vec<u8>) {
+        *self.preview.lock().unwrap() = Some(CapturePreview {
+            id: id.into(),
+            png: bytes.into(),
+        });
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -104,17 +142,6 @@ impl App {
         }));
     }
 
-    pub async fn stop(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        let task = self.task.lock().expect("demo task lock poisoned").take();
-        if let Some(task) = task {
-            task.abort();
-            let _ = task.await;
-        }
-        // Dropping the worker stops the sandbox and disposes its test accounts.
-        self.engine.lock().await.take();
-    }
-
     pub fn sign(&self, request: SignRequest) -> Result<()> {
         request.validate()?;
         let mut seed = [0_u8; 8];
@@ -131,6 +158,7 @@ impl App {
     }
 
     fn launch(&self, command: Command) -> Result<()> {
+        ensure!(!self.expired(), "demo session has expired");
         {
             let mut state = self.state.lock().expect("demo state lock poisoned");
             ensure!(!state.busy, "another operation is still running");
@@ -192,11 +220,17 @@ impl App {
     }
 
     fn progress(&self, message: &str) {
+        if self.expired() {
+            return;
+        }
         eprintln!("{message}");
         self.state.lock().expect("demo state lock poisoned").message = message.into();
     }
 
     fn fail(&self, error: anyhow::Error) {
+        if self.expired() {
+            return;
+        }
         let message = format!("{error:#}");
         eprintln!("Demo operation failed: {message}");
         let mut state = self.state.lock().expect("demo state lock poisoned");
@@ -211,68 +245,8 @@ impl App {
         state.busy = false;
     }
 
-    async fn bootstrap(&self) -> Result<()> {
-        let app = self.clone();
-        let wasm = runtime::prepare_contracts(|message| app.progress(message)).await?;
-        self.progress("Starting NEAR sandbox and deploying both wallets and the token");
-        let (chain, contexts) = Chain::bootstrap(&wasm).await?;
-        let mut wallets = Vec::with_capacity(2);
-        for (index, context) in contexts.iter().enumerate() {
-            self.progress(&format!(
-                "Extracting fingerprint features and enrolling Wallet {}",
-                index + 1
-            ));
-            let context = context.clone();
-            let points_per_combination = self.config.points_per_combination;
-            let cancelled = Arc::clone(&self.cancelled);
-            let wallet = tokio::task::spawn_blocking(move || {
-                ensure!(!cancelled.load(Ordering::Acquire), "demo is stopping");
-                let template = FingerprintTemplate::prepare(index, points_per_combination)?;
-                ensure!(!cancelled.load(Ordering::Acquire), "demo is stopping");
-                template.enroll(&format!("near:{}", context.chain_id), &context.wallet_id)
-            })
-            .await??;
-            wallets.push(Arc::new(wallet));
-        }
-        let wallets: [Arc<FingerprintWallet>; 2] = wallets
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("expected two fingerprint wallets"))?;
-        self.progress("Registering both fingerprint Merkle roots on the wallet contracts");
-        let registrations = chain
-            .register([wallets[0].commitment()?, wallets[1].commitment()?])
-            .await?;
-        let balances = chain.balances().await?;
-        let views = (0..2)
-            .map(|index| WalletView {
-                id: index,
-                name: format!("Wallet {}", index + 1),
-                account_id: contexts[index].wallet_id.clone(),
-                balance_base_units: balances[index].clone(),
-                root: hex(&registrations[index].commitment.root),
-                nonce: registrations[index].next_nonce.to_string(),
-                leaf_count: registrations[index].commitment.leaf_count,
-                fingerprint: wallets[index].view(),
-            })
-            .collect();
-        let token_id = chain.token_id().to_owned();
-        *self.engine.lock().await = Some(Engine {
-            chain,
-            wallets,
-            prepared: None,
-            sequence: 0,
-        });
-
-        let mut state = self.state.lock().expect("demo state lock poisoned");
-        state.phase = "ready";
-        state.message = "Two wallets are enrolled and funded on the local chain".into();
-        state.busy = false;
-        state.chain_id = Some(contexts[0].chain_id.clone());
-        state.token_id = Some(token_id);
-        state.wallets = views;
-        Ok(())
-    }
-
     async fn execute(&self, command: Command) -> Result<()> {
+        ensure!(!self.expired(), "demo session has expired");
         let mut guard = self.engine.lock().await;
         let engine = guard.as_mut().context("local environment is not ready")?;
         match command {
@@ -333,11 +307,18 @@ impl App {
         let transfer = engine
             .chain
             .transfer_request(request.wallet, amount, request.memo)?;
+        let remaining = self
+            .deadline
+            .lock()
+            .expect("session deadline lock poisoned")
+            .saturating_duration_since(Instant::now());
+        let validity_ms = u64::try_from(remaining.as_millis())?.min(300_000);
+        ensure!(validity_ms > 0, "demo session has expired");
         let expires_at_ms = engine
             .chain
             .block_time_ms()
             .await?
-            .checked_add(300_000)
+            .checked_add(validity_ms)
             .context("expiry overflow")?;
         let action = Action {
             operation: TRANSFER_OPERATION.into(),
@@ -375,12 +356,24 @@ impl App {
         self.progress("Analyzing only the selected partial scan and searching for its signing key");
         let app = self.clone();
         let capture_id = id.clone();
+        let resources = match self.startup.borrow().clone() {
+            Startup::Ready(resources) => resources,
+            _ => anyhow::bail!("local environment is not ready"),
+        };
+        self.progress("Waiting for the fingerprint analysis slot");
+        let permit = resources.work.clone().acquire_owned().await?;
+        ensure!(!self.expired(), "demo session has expired");
+        self.progress("Analyzing only your partial scan and searching for its signing key");
         let cancelled = Arc::clone(&self.cancelled);
         let signed = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             fingerprint.sign(
                 action,
                 &sampled,
                 |points| {
+                    if app.expired() {
+                        return;
+                    }
                     let mut state = app.state.lock().expect("demo state lock poisoned");
                     if let Some(capture) = state
                         .capture
@@ -395,6 +388,7 @@ impl App {
             )
         })
         .await??;
+        ensure!(!self.expired(), "demo session has expired");
         self.progress("Checking the signature and Merkle proof against the deployed wallet");
         ensure!(
             engine
@@ -418,6 +412,7 @@ impl App {
             attempts: signed.attempts,
             verified: true,
         };
+        ensure!(!self.expired(), "demo session has expired");
         engine.prepared = Some(Prepared {
             id,
             wallet: request.wallet,
@@ -456,6 +451,7 @@ impl App {
                 .await?,
             "authorization expired or its nonce is no longer current; sign again"
         );
+        ensure!(!self.expired(), "demo session has expired");
         let result = engine
             .chain
             .submit(prepared.wallet, &prepared.transfer, &prepared.authorization)
@@ -526,3 +522,6 @@ fn unresolved(result: &TransferResult) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod session_tests;

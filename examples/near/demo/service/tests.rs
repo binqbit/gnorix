@@ -11,12 +11,13 @@ use crate::model::TOKEN_UNIT;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "builds contracts, analyzes both bundled fingerprint images and runs a local Sandbox"]
 async fn fingerprint_approvals_execute_real_transfers_between_both_wallets() -> Result<()> {
-    let app = App::new(Config::default())?;
-    app.start();
+    let demo = crate::sessions::Demo::new(crate::config::Config::default())?;
+    demo.start();
+    let (app, _) = demo.session(None).ok().context("create test session")?;
     let outcome = timeout(Duration::from_secs(900), exercise_application(&app)).await;
     // Keep cleanup outside the scenario Result so failed assertions/timeouts
     // still stop the managed node and cancel any unfinished application task.
-    timeout(Duration::from_secs(10), app.stop())
+    timeout(Duration::from_secs(30), demo.stop())
         .await
         .context("application shutdown timed out")?;
     ensure!(
@@ -26,7 +27,7 @@ async fn fingerprint_approvals_execute_real_transfers_between_both_wallets() -> 
     outcome.context("fingerprint acceptance scenario timed out")?
 }
 
-async fn exercise_application(app: &App) -> Result<()> {
+async fn exercise_application(app: &Session) -> Result<()> {
     let ready = wait_for_phase(app, "ready").await?;
     ensure!(ready.transfer_gas_tgas == 100);
     ensure!(ready.wallets.len() == 2);
@@ -185,7 +186,7 @@ async fn exercise_application(app: &App) -> Result<()> {
     Ok(())
 }
 
-async fn failed_attempt_is_retained(app: &App) -> Result<String> {
+async fn failed_attempt_is_retained(app: &Session) -> Result<String> {
     app.launch(Command::Sign(
         SignRequest {
             wallet: 0,
@@ -253,7 +254,7 @@ async fn failed_attempt_is_retained(app: &App) -> Result<String> {
     Ok(id)
 }
 
-fn check_capture(app: &App, state: &Snapshot, wallet: usize) -> Result<()> {
+fn check_capture(app: &Session, state: &Snapshot, wallet: usize) -> Result<()> {
     let capture = state
         .capture
         .as_ref()
@@ -287,7 +288,11 @@ fn check_capture(app: &App, state: &Snapshot, wallet: usize) -> Result<()> {
     Ok(())
 }
 
-async fn verify_exact_prepared_request(app: &App, view: &PreparedView, units: u128) -> Result<()> {
+async fn verify_exact_prepared_request(
+    app: &Session,
+    view: &PreparedView,
+    units: u128,
+) -> Result<()> {
     let guard = app.engine.lock().await;
     let engine = guard.as_ref().context("missing engine")?;
     let prepared = engine
@@ -344,7 +349,7 @@ async fn verify_exact_prepared_request(app: &App, view: &PreparedView, units: u1
     Ok(())
 }
 
-async fn verify_consumed_request(app: &App, view: &PreparedView, units: u128) -> Result<()> {
+async fn verify_consumed_request(app: &Session, view: &PreparedView, units: u128) -> Result<()> {
     let guard = app.engine.lock().await;
     let engine = guard.as_ref().context("missing engine")?;
     let transfer = engine
@@ -378,7 +383,7 @@ fn check_balances_and_nonces(
     Ok(())
 }
 
-async fn wait_for_phase(app: &App, phase: &str) -> Result<Snapshot> {
+async fn wait_for_phase(app: &Session, phase: &str) -> Result<Snapshot> {
     let mut last_message = String::new();
     loop {
         let state = app.snapshot();

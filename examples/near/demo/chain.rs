@@ -3,20 +3,23 @@
 //! Account keys stay inside this module. A transfer is signed once and broadcast
 //! once; uncertainty retains its transaction hash and never triggers a resend.
 
+mod lifecycle;
 mod transaction;
 
 #[cfg(test)]
 mod tests;
 
+pub use lifecycle::Sandbox;
+use lifecycle::SessionAccounts;
 use transaction::{PendingTransfer, summarize_execution};
 pub use transaction::{SubmissionStatus, TransferResult};
 
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail, ensure};
 use gnorix::near::{Authorization, Commitment, EnrollmentView};
 use gnorix_near_wallet::Transfer;
-use near_crypto::{InMemorySigner, Signer};
+use near_crypto::Signer;
 use near_jsonrpc_client::{
     JsonRpcClient,
     errors::{JsonRpcError, JsonRpcServerError},
@@ -32,7 +35,8 @@ use near_primitives::{
 };
 use near_sdk::serde::Serialize;
 use near_workspaces::{
-    Account, Contract, Worker, network::Sandbox, result::ExecutionFinalResult, types::NearToken,
+    Account, Contract, Worker, network::Sandbox as SandboxNetwork, result::ExecutionFinalResult,
+    types::NearToken,
 };
 use serde_json::json;
 use tokio::time::{Instant, sleep, timeout};
@@ -52,7 +56,8 @@ pub struct WalletContext {
 }
 
 pub struct Chain {
-    worker: Worker<Sandbox>,
+    worker: Worker<SandboxNetwork>,
+    accounts: Arc<SessionAccounts>,
     rpc: JsonRpcClient,
     chain_id: String,
     wallets: [Contract; 2],
@@ -63,50 +68,11 @@ pub struct Chain {
 }
 
 impl Chain {
-    /// Creates a fresh, disposable chain. Both initial balances are checked via
-    /// the token's RPC views after minting and an ordinary standard transfer.
-    pub async fn bootstrap(wasm_dir: &Path) -> Result<(Self, [WalletContext; 2])> {
-        let wallet_wasm = read_wasm(wasm_dir, "gnorix_near_wallet.wasm")?;
-        let token_wasm = read_wasm(wasm_dir, "gnorix_near_token.wasm")?;
-        let worker = near_workspaces::sandbox_with_version("2.14.1").await?;
-        let wallets = [
-            worker.dev_deploy(&wallet_wasm).await?,
-            worker.dev_deploy(&wallet_wasm).await?,
-        ];
-        let token = worker.dev_deploy(&token_wasm).await?;
-        let relayer = worker.dev_create_account().await?;
-        let signer = InMemorySigner::from_secret_key(
-            relayer.id().clone(),
-            relayer
-                .secret_key()
-                .to_string()
-                .parse()
-                .context("invalid generated relayer key")?,
-        );
-        let chain_id = worker.status().await?.chain_id;
-        let rpc = JsonRpcClient::connect(worker.rpc_addr());
-        let chain = Self {
-            worker,
-            rpc,
-            chain_id,
-            wallets,
-            token,
-            relayer,
-            signer,
-            pending: None,
-        };
-
-        chain.initialize_wallets().await?;
-        chain.initialize_token().await?;
-        ensure!(
-            chain.balances().await? == [INITIAL_BALANCE.to_string(), INITIAL_BALANCE.to_string()],
-            "initial token balances do not match confirmed chain state"
-        );
-        let contexts = chain.wallets.each_ref().map(|wallet| WalletContext {
-            chain_id: chain.chain_id.clone(),
-            wallet_id: wallet.id().to_string(),
-        });
-        Ok((chain, contexts))
+    /// Revoke authorizations, settle dispatched receipts and delete this
+    /// session's accounts. Unresolved settlement leaves accounts intact.
+    /// This cannot undo transfers or erase the sandbox's block history.
+    pub async fn close(&self) -> Result<()> {
+        self.accounts.close().await
     }
 
     pub fn token_id(&self) -> &str {
@@ -139,6 +105,7 @@ impl Chain {
                 "demo wallet is already enrolled"
             );
         }
+        self.accounts.mark_enrollment_started();
         for (wallet, commitment) in self.wallets.iter().zip(&commitments) {
             successful(
                 wallet
@@ -243,6 +210,12 @@ impl Chain {
             .sign_transaction(wallet_index, transfer, authorization)
             .await?;
         let hash = transaction.get_hash();
+        self.accounts.record_submission(
+            hash,
+            wallet_index,
+            authorization.revision,
+            authorization.action.nonce,
+        )?;
         self.pending = Some(PendingTransfer {
             hash,
             result: TransferResult {
@@ -562,6 +535,14 @@ impl Chain {
     }
 }
 
+impl Drop for Chain {
+    fn drop(&mut self) {
+        // Explicit close reports errors. This also covers a cancelled session
+        // initializer or a result whose receiver disappeared before delivery.
+        self.accounts.cleanup_later();
+    }
+}
+
 enum Observation {
     Pending,
     Unknown(String),
@@ -580,7 +561,7 @@ fn successful(result: ExecutionFinalResult, operation: &str) -> Result<()> {
             .into_result()
             .err()
             .context("failure outcome without an error")?;
-        bail!("{operation}: {error}");
+        bail!("{operation}: {error:?}");
     }
     result.into_result().with_context(|| operation.to_owned())?;
     Ok(())
