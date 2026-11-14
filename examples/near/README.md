@@ -102,9 +102,11 @@ are derived deterministically within that enrollment, while restarting creates
 a new enrollment context. Submitted transactions remain in the disposable
 sandbox's chain history, as required for actual NEAR execution.
 
-The fingerprint, transfer controls and execution panels keep stable dimensions
-through signing, submission and receipt updates. Long status messages and transfer
-details scroll within their panels. The public evidence panel stays open: hashes,
+The fingerprint, transfer controls and execution panels reserve room through
+signing, submission and receipt updates. The transfer summary and signing public
+key wrap in full without internal scrollbars; extra-long content expands the
+transfer panel when needed. Long status messages scroll within their own area.
+The public evidence panel stays open: hashes,
 public key and signature use hexadecimal text, and every membership-path level
 shows its left/right inputs and parent hash, followed by the count-bound root.
 The diagram represents the selected path; sibling hashes represent the other

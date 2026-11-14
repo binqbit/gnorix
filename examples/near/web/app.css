@@ -7,7 +7,7 @@
     --accent: #39ff75;
     --green: #00ed83;
     --danger: #ffb4a4;
-    --workbench-height: clamp(600px, calc(100svh - 224px), 720px);
+    --workbench-height: clamp(640px, calc(100svh - 224px), 720px);
     --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
     font: 14px/1.5 var(--mono);
     font-synthesis: none;
@@ -148,8 +148,8 @@ h2 { margin: 0; color: #72ff99; font-size: 16px; font-weight: 550; letter-spacin
 .capture-description { min-height: 0; margin: 0 20px 12px; padding: 2px; overflow: auto; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .mono, code { font-family: var(--mono); }
 .token-badge { display: grid; place-items: center; width: 34px; height: 34px; color: var(--accent); font: 9px var(--mono); border: 1px solid #27cd61; border-radius: 50%; background: #031e0b; box-shadow: 0 0 14px #39ff7530; }
-.transfer-panel { height: var(--workbench-height); display: grid; grid-template-rows: 72px minmax(0, 1fr); }
-#transfer-form { min-height: 0; display: grid; grid-template-rows: 196px 96px 46px 32px minmax(0, 1fr); gap: 8px; padding: 0 20px 14px; }
+.transfer-panel { height: var(--workbench-height); min-height: min-content; display: grid; grid-template-rows: 72px auto; }
+#transfer-form { display: grid; grid-template-rows: minmax(200px, max-content) minmax(104px, max-content) 46px minmax(48px, max-content) minmax(112px, 1fr); gap: 8px; padding: 0 20px 14px; }
 #transfer-fields { min-height: 0; }
 .fingerprint-panel .panel-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 20px 24px; gap: 0 10px; }
 .fingerprint-panel .panel-heading > div { display: contents; }
@@ -174,7 +174,7 @@ input[readonly] { color: #8fcba2; }
 .amount-input input { border: 0; background: transparent; font-size: 28px; line-height: 1.25; font-weight: 450; letter-spacing: -.04em; padding: 8px 12px; }
 .amount-input input::placeholder { color: #659b73; }
 .amount-input span { color: var(--accent); font: 11px var(--mono); padding: 0 14px; }
-.transfer-review { min-height: 0; overflow: auto; margin: 0; padding: 11px 13px; border-left: 2px solid #20de64; background: #042010; }
+.transfer-review { margin: 0; padding: 11px 13px; border-left: 2px solid #20de64; background: #042010; }
 .transfer-review .label { color: #72d38e; font-size: 8px; }
 .transfer-review p { margin: 3px 0; font-size: 17px; color: #8cffae; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .transfer-review > span:last-child { display: block; color: #8fc99f; font: 10px/1.6 var(--mono); overflow-wrap: anywhere; }
@@ -187,7 +187,7 @@ input[readonly] { color: #8fcba2; }
 .transfer-actions { display: grid; grid-template-columns: minmax(0, 1fr) 64px; grid-template-rows: 46px; gap: 10px; align-items: center; }
 .primary-action-slot { min-width: 0; height: 46px; }
 .discard-button { grid-column: 2; margin: 0; font-size: 10px; line-height: 1.4; }
-.approval-note { min-height: 0; overflow: auto; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.approval-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 #signing-key-preview { color: #b8f7c9; }
 #signing-key-preview .label { color: #87b995; letter-spacing: .02em; }
 #signing-public-key { font: inherit; overflow-wrap: anywhere; word-break: break-all; }
@@ -209,8 +209,9 @@ input[readonly] { color: #8fcba2; }
 .execution-steps .is-failed .step-number { color: var(--danger); border-color: #b57562; }
 .action-status { min-height: 0; display: grid; grid-template-rows: 27px minmax(0, 1fr); gap: 6px; margin: 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .action-status .tag { justify-self: start; align-self: start; margin: 0; }
-.status-content { min-height: 0; overflow: auto; padding: 2px 4px 2px 2px; scrollbar-gutter: stable; }
-:where(.status-content, .transfer-review, .capture-description) { scrollbar-color: #268c4b #031008; scrollbar-width: thin; }
+/* Verbose status messages use the remaining space without expanding the panel. */
+.status-content { min-height: 0; contain: size; overflow: auto; padding: 2px 4px 2px 2px; scrollbar-gutter: stable; }
+:where(.status-content, .capture-description) { scrollbar-color: #268c4b #031008; scrollbar-width: thin; }
 .execution-message { color: #a0d4af; font-size: 11px; overflow-wrap: anywhere; }
 .execution-message[data-kind="error"] { color: var(--danger); }
 .execution-message[data-kind="success"] { color: var(--accent); }
@@ -339,7 +340,7 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     .transfer-panel { height: 660px; }
     .fingerprint-footer { padding: 12px 16px 7px; }
     .capture-description { margin-inline: 16px; }
-    #transfer-form { grid-template-rows: 220px 112px 46px 40px minmax(0, 1fr); padding: 0 16px 16px; }
+    #transfer-form { grid-template-rows: minmax(220px, max-content) minmax(112px, max-content) 46px minmax(48px, max-content) minmax(112px, 1fr); padding: 0 16px 16px; }
     .execution-panel { height: 254px; padding: 14px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: 18px 96px 50px 36px; }
     .execution-heading { flex-direction: row; align-items: center; justify-content: space-between; }
     .execution-steps { grid-column: 1; grid-row: 2; gap: 8px; margin: 0; }
