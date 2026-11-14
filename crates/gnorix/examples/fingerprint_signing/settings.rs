@@ -12,8 +12,8 @@ pub(super) struct Controls {
     pub profile_id: Hash,
 }
 
-pub(super) fn attempt_limit() -> Result<usize> {
-    number("GNORIX_SIGNING_MAX_ATTEMPTS", 1_000_000)
+pub(super) fn work_limit() -> Result<usize> {
+    number("GNORIX_SIGNING_MAX_WORK", 1_000_000_000)
 }
 
 pub(super) fn parameters(package: &EnrollmentPackage) -> Result<ProfileParameters> {
@@ -25,32 +25,20 @@ pub(super) fn parameters(package: &EnrollmentPackage) -> Result<ProfileParameter
     )
 }
 
-pub(super) fn read(package: &EnrollmentPackage) -> Result<Controls> {
+pub(super) fn read(package: &EnrollmentPackage, work: usize) -> Result<Controls> {
     let retained = parameters(package)?;
-    let work = number("GNORIX_SIGNING_MAX_WORK", 1_000_000_000)?;
     let combination = retained.controls(work)?;
     require_override("GNORIX_COMBINATION_MIN_POINTS", combination.min_points)?;
+    require_override("GNORIX_COMBINATION_MAX_POINTS", combination.max_points)?;
     require_override("GNORIX_COMBINATION_MIN_PRIORITY", combination.min_priority)?;
-    require_override(
-        "GNORIX_COMBINATION_POOL_MULTIPLIER",
-        combination.pool_multiplier,
-    )?;
     require_override("GNORIX_COMBINATION_RADIUS_UNITS", combination.radius_units)?;
-    require_override(
-        "GNORIX_COMBINATION_PER_REGION",
-        combination.combinations_per_region,
-    )?;
-    require_override(
-        "GNORIX_COMBINATION_MIN_DIAMETER_FRACTION",
-        combination.spatial.min_diameter_fraction,
-    )?;
     require_override(
         "GNORIX_COMBINATION_MIN_ANCHOR_POINTS",
         combination.spatial.min_anchor_points,
     )?;
     require_override(
-        "GNORIX_COMBINATION_MIN_ANCHOR_SEPARATION_FRACTION",
-        combination.spatial.min_anchor_separation_fraction,
+        "GNORIX_COMBINATION_MIN_ANCHOR_DISTANCE_UNITS",
+        combination.spatial.min_anchor_distance_units,
     )?;
     require_override(
         "GNORIX_GRID_UNCERTAINTY_STEPS",
@@ -58,6 +46,7 @@ pub(super) fn read(package: &EnrollmentPackage) -> Result<Controls> {
     )?;
     let search = SigningSearchConfig {
         min_points: combination.min_points,
+        max_points: combination.max_points,
         min_priority: combination.min_priority,
         radius_units: combination.radius_units,
         spatial: retained.spatial(),
@@ -80,9 +69,10 @@ fn require_override<T: FromStr + PartialEq + Copy>(name: &str, retained: T) -> R
     Ok(())
 }
 
-pub(super) fn limits(attempts: usize) -> Result<Limits> {
+pub(super) fn limits(work: usize) -> Result<Limits> {
     Ok(Limits {
-        candidate_attempts: nonzero(attempts)?,
+        // Each fingerprint candidate spends positive work before key derivation.
+        candidate_attempts: nonzero(work)?,
         candidate_bytes: nonzero(32)?,
         public_key_bytes: nonzero(32)?,
         signature_bytes: nonzero(64)?,

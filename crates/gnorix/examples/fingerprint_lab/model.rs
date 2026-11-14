@@ -1,11 +1,10 @@
-use gnorix::biometrics::fingerprint::{CombinationConfig, SpatialPolicy, SpatialRequirements};
+use gnorix::biometrics::fingerprint::{CombinationConfig, SpatialPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::Result;
 
 pub const MAX_WORK: usize = 1_000_000_000;
-pub const MAX_ATTEMPTS: usize = 1_000_000_000;
 pub const ARTIFACT_GENERATOR: &str = "gnorix.test-artifacts.v3";
 
 pub fn default_work_limit() -> usize {
@@ -24,13 +23,11 @@ pub struct Circle {
 #[serde(deny_unknown_fields)]
 pub struct LabConfig {
     pub min_points: usize,
+    pub max_points: usize,
     pub min_priority: f64,
-    pub min_diameter_fraction: f64,
     pub min_anchor_points: usize,
-    pub min_anchor_separation_fraction: f64,
-    pub pool_multiplier: usize,
+    pub min_anchor_distance_units: f64,
     pub radius_units: f64,
-    pub combinations_per_region: usize,
     pub uncertainty_steps: u32,
 }
 
@@ -38,13 +35,11 @@ impl Default for LabConfig {
     fn default() -> Self {
         Self {
             min_points: 3,
+            max_points: 6,
             min_priority: 0.5,
-            min_diameter_fraction: 1.0 / 3.0,
             min_anchor_points: 3,
-            min_anchor_separation_fraction: 1.0 / 6.0,
-            pool_multiplier: 2,
+            min_anchor_distance_units: 6.0,
             radius_units: 30.0,
-            combinations_per_region: 12,
             uncertainty_steps: 1,
         }
     }
@@ -52,13 +47,15 @@ impl Default for LabConfig {
 
 impl LabConfig {
     pub fn validate(&self) -> Result<()> {
-        if !(1..=8).contains(&self.min_points)
+        if !(1..=16).contains(&self.min_points)
             || !self.min_priority.is_finite()
             || !(0.0..=1.0).contains(&self.min_priority)
             || !(1..=16).contains(&self.min_anchor_points)
-            || self.min_anchor_points > 2 * self.min_points
-            || !(1..=4).contains(&self.pool_multiplier)
-            || !(1..=256).contains(&self.combinations_per_region)
+            || !(1..=16).contains(&self.max_points)
+            || self.min_points > self.max_points
+            || self.min_anchor_points > self.max_points
+            || !self.min_anchor_distance_units.is_finite()
+            || !(0.0..=200.0).contains(&self.min_anchor_distance_units)
             || !self.radius_units.is_finite()
             || !(1.0..=200.0).contains(&self.radius_units)
             || self.uncertainty_steps > 3
@@ -72,15 +69,13 @@ impl LabConfig {
     pub fn combinations(&self) -> Result<CombinationConfig> {
         Ok(CombinationConfig {
             min_points: self.min_points,
+            max_points: self.max_points,
             min_priority: self.min_priority,
             spatial: SpatialPolicy {
-                min_diameter_fraction: self.min_diameter_fraction,
                 min_anchor_points: self.min_anchor_points,
-                min_anchor_separation_fraction: self.min_anchor_separation_fraction,
+                min_anchor_distance_units: self.min_anchor_distance_units,
             },
-            pool_multiplier: self.pool_multiplier,
             radius_units: self.radius_units,
-            combinations_per_region: self.combinations_per_region,
             max_work: MAX_WORK,
         })
     }
@@ -133,7 +128,6 @@ pub struct TestRequest {
     pub selection: Circle,
     pub artifact_revision: u64,
     pub payload: String,
-    pub attempt_limit: usize,
     pub work_limit: usize,
 }
 
@@ -148,7 +142,6 @@ pub struct PreparedId {
 pub struct SignRequest {
     pub prepared_id: u64,
     pub payload: String,
-    pub attempt_limit: usize,
     pub work_limit: usize,
 }
 
@@ -201,8 +194,7 @@ pub struct RegionView {
     pub y: f64,
     pub initial_radius: f64,
     pub radius: f64,
-    pub pool: Vec<usize>,
-    pub available_points: usize,
+    pub feature_ids: Vec<usize>,
 }
 
 #[derive(Clone, Serialize)]
@@ -215,17 +207,15 @@ pub struct EnrollmentView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct SpatialView {
-    pub min_diameter_units: f64,
     pub min_anchor_points: usize,
-    pub min_anchor_separation_units: f64,
+    pub min_anchor_distance_units: f64,
 }
 
-impl From<SpatialRequirements> for SpatialView {
-    fn from(requirements: SpatialRequirements) -> Self {
+impl From<SpatialPolicy> for SpatialView {
+    fn from(requirements: SpatialPolicy) -> Self {
         Self {
-            min_diameter_units: requirements.min_diameter_units,
             min_anchor_points: requirements.min_anchor_points,
-            min_anchor_separation_units: requirements.min_anchor_separation_units,
+            min_anchor_distance_units: requirements.min_anchor_distance_units,
         }
     }
 }
@@ -245,11 +235,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_unbounded_invalid_and_insufficient_pool_configs() {
+    fn rejects_invalid_ranges_and_spatial_controls() {
         assert!(LabConfig::default().validate().is_ok());
         for invalid in [
             LabConfig {
                 min_points: 0,
+                ..LabConfig::default()
+            },
+            LabConfig {
+                min_points: 7,
+                max_points: 6,
+                ..LabConfig::default()
+            },
+            LabConfig {
+                max_points: 0,
+                ..LabConfig::default()
+            },
+            LabConfig {
+                max_points: 17,
                 ..LabConfig::default()
             },
             LabConfig {
@@ -265,18 +268,6 @@ mod tests {
                 ..LabConfig::default()
             },
             LabConfig {
-                min_diameter_fraction: f64::NAN,
-                ..LabConfig::default()
-            },
-            LabConfig {
-                min_diameter_fraction: -0.01,
-                ..LabConfig::default()
-            },
-            LabConfig {
-                min_diameter_fraction: 1.01,
-                ..LabConfig::default()
-            },
-            LabConfig {
                 min_anchor_points: 0,
                 ..LabConfig::default()
             },
@@ -285,20 +276,15 @@ mod tests {
                 ..LabConfig::default()
             },
             LabConfig {
-                pool_multiplier: 4,
-                min_anchor_points: 7,
+                min_anchor_distance_units: f64::INFINITY,
                 ..LabConfig::default()
             },
             LabConfig {
-                min_anchor_separation_fraction: f64::INFINITY,
+                min_anchor_distance_units: -0.01,
                 ..LabConfig::default()
             },
             LabConfig {
-                min_anchor_separation_fraction: -0.01,
-                ..LabConfig::default()
-            },
-            LabConfig {
-                min_anchor_separation_fraction: 1.01,
+                min_anchor_distance_units: 201.0,
                 ..LabConfig::default()
             },
             LabConfig {
@@ -306,74 +292,95 @@ mod tests {
                 ..LabConfig::default()
             },
             LabConfig {
-                combinations_per_region: 1,
-                ..LabConfig::default()
-            },
-            LabConfig {
                 uncertainty_steps: 4,
                 ..LabConfig::default()
             },
         ] {
-            assert!(invalid.validate().is_err());
+            assert!(invalid.validate().is_err(), "accepted {invalid:?}");
         }
+    }
+
+    #[test]
+    fn preparation_defaults_preserve_exact_biometric_controls() {
+        let config = LabConfig::default();
+        assert_eq!((config.min_points, config.max_points), (3, 6));
+        assert_eq!(config.min_priority, 0.5);
+        assert_eq!(config.min_anchor_points, 3);
+        assert_eq!(config.min_anchor_distance_units, 6.0);
+        for min_priority in [0.0, 0.43137304374477875, 1.0] {
+            let config = LabConfig {
+                min_priority,
+                ..config
+            };
+            config.validate().unwrap();
+            let value =
+                serde_json::json!({ "kind": "enrollment", "config": config, "selection": null });
+            let request: PrepareRequest = serde_json::from_value(value).unwrap();
+            assert_eq!(request.memory_budget_gib, 2);
+            assert_eq!(request.work_limit, MAX_WORK);
+            assert_eq!(request.config, config);
+        }
+    }
+
+    #[test]
+    fn explicit_range_and_ridge_distance_reach_the_core_without_conversion() {
+        let config = LabConfig {
+            min_points: 2,
+            max_points: 5,
+            min_anchor_points: 4,
+            min_anchor_distance_units: 7.25,
+            ..LabConfig::default()
+        };
+        config.validate().unwrap();
+        let controls = config.combinations().unwrap();
+        assert_eq!((controls.min_points, controls.max_points), (2, 5));
+        assert_eq!(controls.spatial.min_anchor_points, 4);
+        assert_eq!(controls.spatial.min_anchor_distance_units, 7.25);
+        let encoded = serde_json::to_vec(&config).unwrap();
+        let decoded: LabConfig = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, config);
+        for value in [0.0, 200.0] {
+            LabConfig {
+                min_anchor_distance_units: value,
+                ..config
+            }
+            .validate()
+            .unwrap();
+        }
+        LabConfig {
+            min_points: 16,
+            max_points: 16,
+            ..config
+        }
+        .validate()
+        .unwrap();
+        let mut malformed = serde_json::to_value(config).unwrap();
+        malformed["min_anchor_points"] = serde_json::json!(3.5);
+        assert!(serde_json::from_value::<LabConfig>(malformed).is_err());
+    }
+
+    #[test]
+    fn obsolete_controls_are_rejected_instead_of_silently_ignored() {
+        for name in [
+            "pool_multiplier",
+            "combinations_per_region",
+            "min_diameter_fraction",
+            "min_anchor_separation_fraction",
+        ] {
+            let mut value = serde_json::to_value(LabConfig::default()).unwrap();
+            value[name] = serde_json::json!(1);
+            assert!(serde_json::from_value::<LabConfig>(value).is_err());
+        }
+        let request = serde_json::json!({"prepared_id": 1, "payload": "test", "work_limit": 1000});
+        assert!(serde_json::from_value::<SignRequest>(request.clone()).is_ok());
+        let mut obsolete = request;
+        obsolete["attempt_limit"] = serde_json::json!(100);
+        assert!(serde_json::from_value::<SignRequest>(obsolete).is_err());
         assert!(
             serde_json::from_value::<PreparedId>(serde_json::json!({
                 "prepared_id": 1, "path": "/unexpected"
             }))
             .is_err()
         );
-    }
-
-    #[test]
-    fn preparation_defaults_to_two_gib_without_changing_biometric_config() {
-        let config = LabConfig::default();
-        assert_eq!(config.min_priority, 0.5);
-        assert_eq!(config.min_diameter_fraction, 1.0 / 3.0);
-        assert_eq!(config.min_anchor_points, 3);
-        assert_eq!(config.min_anchor_separation_fraction, 1.0 / 6.0);
-        for min_priority in [0.0, 1.0] {
-            LabConfig {
-                min_priority,
-                ..config
-            }
-            .validate()
-            .unwrap();
-        }
-        let value =
-            serde_json::json!({ "kind": "enrollment", "config": config, "selection": null });
-        let request: PrepareRequest = serde_json::from_value(value).unwrap();
-        assert_eq!(request.memory_budget_gib, 2);
-        assert_eq!(request.config, config);
-    }
-
-    #[test]
-    fn spatial_controls_round_trip_and_reach_the_core_policy() {
-        let config = LabConfig {
-            min_diameter_fraction: 0.4,
-            min_anchor_points: 4,
-            min_anchor_separation_fraction: 0.2,
-            ..LabConfig::default()
-        };
-        config.validate().unwrap();
-        let policy = config.combinations().unwrap().spatial;
-        assert_eq!(policy.min_diameter_fraction, 0.4);
-        assert_eq!(policy.min_anchor_points, 4);
-        assert_eq!(policy.min_anchor_separation_fraction, 0.2);
-        let encoded = serde_json::to_vec(&config).unwrap();
-        let decoded: LabConfig = serde_json::from_slice(&encoded).unwrap();
-        assert_eq!(decoded, config);
-
-        let mut malformed = serde_json::to_value(config).unwrap();
-        malformed["min_anchor_points"] = serde_json::json!(3.5);
-        assert!(serde_json::from_value::<LabConfig>(malformed).is_err());
-        for value in [0.0, 1.0] {
-            LabConfig {
-                min_diameter_fraction: value,
-                min_anchor_separation_fraction: value,
-                ..config
-            }
-            .validate()
-            .unwrap();
-        }
     }
 }

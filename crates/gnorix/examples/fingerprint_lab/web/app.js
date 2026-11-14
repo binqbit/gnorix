@@ -2,20 +2,17 @@ const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const configFields = {
     min_points: "min-points",
+    max_points: "max-points",
     min_priority: "min-priority",
-    min_diameter_fraction: "min-diameter-fraction",
     min_anchor_points: "min-anchor-points",
-    min_anchor_separation_fraction: "min-anchor-separation-fraction",
-    pool_multiplier: "pool-multiplier",
+    min_anchor_distance_units: "min-anchor-distance-units",
     radius_units: "radius-units",
-    combinations_per_region: "per-region",
     uncertainty_steps: "uncertainty",
 };
 const integerFields = new Set([
     "min_points",
+    "max_points",
     "min_anchor_points",
-    "pool_multiplier",
-    "combinations_per_region",
     "uncertainty_steps",
 ]);
 const state = {
@@ -91,18 +88,17 @@ function validConfig() {
     }
     const config = readConfig();
     return (
-        config.min_anchor_points <= config.min_points * config.pool_multiplier &&
-        config.min_anchor_points <= 2 * config.min_points &&
-        config.combinations_per_region >=
-        config.min_points * (config.pool_multiplier - 1) + 1
+        config.min_points <= config.max_points &&
+        config.min_anchor_points <= config.max_points
     );
 }
 
 function validSearchControls() {
-    return ["work-limit", "attempt-limit"].every((id) => {
-        const input = $(id);
-        return input.checkValidity() && Number.isInteger(Number(input.value));
-    });
+    const input = $("work-limit");
+    return (
+        input.checkValidity() &&
+        Number.isInteger(Number(input.value))
+    );
 }
 
 function validMemoryBudget() {
@@ -468,9 +464,9 @@ function drawEvidence(prepared) {
     )
         state.region = null;
     const selected = regions.find((region) => region.id === state.region);
-    const pool = new Set(
+    const regionalFeatures = new Set(
         (selected ? [selected] : regions).flatMap(
-            (region) => region.pool ?? [],
+            (region) => region.feature_ids ?? [],
         ),
     );
     const result = state.server.result;
@@ -520,7 +516,7 @@ function drawEvidence(prepared) {
     const points = prepared.points ?? [];
     const unit = markerUnit();
     for (const point of points) {
-        const included = pool.has(point.id);
+        const included = regionalFeatures.has(point.id);
         const isMatched = matched.has(point.id);
         const color = priorityColor(point.priority);
         pointsLayer.append(
@@ -538,9 +534,9 @@ function drawEvidence(prepared) {
                     "data-kind": point.kind,
                     "data-priority": point.priority,
                     "data-matched": isMatched,
-                    "data-selected-pool": included,
+                    "data-regional-feature": included,
                 },
-                `#${point.id} · ${point.kind} · priority ${format.format(point.priority * 100)}%${isMatched ? " · matched" : included ? " · selected pool" : ""}`,
+                `#${point.id} · ${point.kind} · priority ${format.format(point.priority * 100)}%${isMatched ? " · matched" : included ? " · regional feature" : ""}`,
             ),
         );
         if (included) {
@@ -552,7 +548,7 @@ function drawEvidence(prepared) {
                     "stroke-width": 0.8,
                     "vector-effect": "non-scaling-stroke",
                     "pointer-events": "none",
-                    "data-indicator": "selected-pool",
+                    "data-indicator": "regional-feature",
                     "data-for-feature-id": point.id,
                 }),
             );
@@ -578,7 +574,7 @@ function drawEvidence(prepared) {
         { id: null, label: `All regions · ${regions.length}` },
         ...regions.map((region) => ({
             id: region.id,
-            label: `#${region.id + 1} · ${region.pool?.length ?? 0}/${region.available_points} points`,
+            label: `#${region.id + 1} · ${countLabel(region.feature_ids?.length ?? 0, "eligible point")}`,
         })),
     ];
     for (const option of options) {
@@ -849,7 +845,6 @@ function render() {
         "circle-radius",
         ...Object.values(configFields),
         "work-limit",
-        "attempt-limit",
     ])
         $(id).disabled = state.busy;
     $("payload").disabled = state.busy;
@@ -863,16 +858,16 @@ function render() {
         Boolean(enrollment && !registered),
     );
     $("config-help").textContent = !valid
-        ? "Anchors must fit the pool and the 2n signing limit. Combinations / region ≥ n × (multiplier − 1) + 1; check value limits too."
+        ? "Minimum points and anchor count must not exceed maximum points. Check the allowed value ranges."
         : enrollment && !registered
           ? "These settings differ from the enrolled set. Prepare and create a new set, or restore the previous settings."
-          : "Only features at or above the minimum priority enter key combinations. R is the mean dark-ridge width. Changing these settings requires a new Merkle set.";
+          : "All features at or above the minimum priority enter regional selection. Sparse regions expand automatically. R is the mean dark-ridge width. Changing these settings requires a new Merkle set.";
     const spatial =
         prepared?.spatial ?? (registered ? enrollment?.spatial : null);
     $("minimum-span").textContent =
         spatial == null
-            ? "D and d are fractions of the enrolled pattern's shorter side. Additional points must lie inside or on the anchors' convex hull. Distances are measured during enrollment preparation."
-            : `D ≥ ${format.format(spatial.min_diameter_units)}R · at least ${countLabel(spatial.min_anchor_points, "anchor")} with every pair separated by d ≥ ${format.format(spatial.min_anchor_separation_units)}R. Additional points stay inside or on their convex hull. These distances in R are retained for signing fragments.`;
+            ? "Anchor distance is measured directly in mean dark-ridge widths R. Every anchor pair must meet it; additional points stay inside or on the anchors' convex hull."
+            : `At least ${countLabel(spatial.min_anchor_points, "anchor")} with every pair separated by ≥ ${format.format(spatial.min_anchor_distance_units)}R. Additional points stay inside or on their convex hull. The same distance in R applies to signing fragments.`;
     $("merkle-root").textContent = enrollment?.root ?? "No set created yet";
     $("leaf-count").textContent = enrollment
         ? countLabel(enrollment.leaf_count, "key")
@@ -1074,7 +1069,6 @@ $("execute").addEventListener("click", () => {
         submit("/api/sign", {
             prepared_id: prepared.id,
             payload: $("payload").value,
-            attempt_limit: Number($("attempt-limit").value),
             work_limit: Number($("work-limit").value),
         });
 });
@@ -1090,14 +1084,12 @@ $("test-altered-scan").addEventListener("click", () => {
         selection: state.circle,
         artifact_revision: state.server.artifact.revision,
         payload: $("payload").value,
-        attempt_limit: Number($("attempt-limit").value),
         work_limit: Number($("work-limit").value),
     });
 });
 for (const id of [
     ...Object.values(configFields),
     "work-limit",
-    "attempt-limit",
     "memory-budget",
 ])
     $(id).addEventListener("input", () => {

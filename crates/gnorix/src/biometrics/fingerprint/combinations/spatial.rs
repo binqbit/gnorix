@@ -1,58 +1,28 @@
-//! Source-space diameter and separated-anchor envelope requirements.
+//! Separated-anchor envelopes measured in ridge widths.
 
-use super::{CombinationError, FingerprintError, Point, RegionBounds, WorkBudget};
+use super::{CombinationError, FingerprintError, Point, WorkBudget};
 use crate::biometrics::geometry::hull::{self, HullError};
 
 #[cfg(test)]
 mod tests;
 
-/// Source-figure policy resolved once from the enrolled bounds' shorter side.
+/// Spatial envelope measured directly in mean dark-ridge widths R.
 /// At least `min_anchor_points` anchors must be pairwise separated; every other
 /// feature must lie inside or on their convex hull. More anchors are allowed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpatialPolicy {
-    /// Minimum figure diameter as a fraction of the enrolled shorter side.
-    pub min_diameter_fraction: f64,
     /// Minimum anchor count, not an exact hull-vertex count.
     pub min_anchor_points: usize,
-    /// Minimum distance between every anchor pair, as an enrolled-side fraction.
-    pub min_anchor_separation_fraction: f64,
+    /// Minimum distance between every anchor pair, in measured ridge widths R.
+    pub min_anchor_distance_units: f64,
 }
 
 impl SpatialPolicy {
     pub fn validate(&self) -> Result<(), CombinationError> {
-        for fraction in [
-            self.min_diameter_fraction,
-            self.min_anchor_separation_fraction,
-        ] {
-            if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
-                return Err(CombinationError::InvalidConfig(
-                    "spatial fractions must be finite and in [0, 1]",
-                ));
-            }
-        }
-        anchor_count(self.min_anchor_points)
-    }
-}
-
-/// Fixed enrolled requirements in mean dark-ridge widths R.
-/// Fresh captures apply their own measured R to these retained distances; they
-/// do not derive smaller requirements from a crop's bounds.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SpatialRequirements {
-    pub min_diameter_units: f64,
-    pub min_anchor_points: usize,
-    pub min_anchor_separation_units: f64,
-}
-
-impl SpatialRequirements {
-    pub fn validate(&self) -> Result<(), CombinationError> {
-        for units in [self.min_diameter_units, self.min_anchor_separation_units] {
-            if !units.is_finite() || units < 0.0 {
-                return Err(CombinationError::InvalidConfig(
-                    "spatial distances must be finite and nonnegative",
-                ));
-            }
+        if !self.min_anchor_distance_units.is_finite() || self.min_anchor_distance_units < 0.0 {
+            return Err(CombinationError::InvalidConfig(
+                "anchor distance must be finite and nonnegative in ridge units",
+            ));
         }
         anchor_count(self.min_anchor_points)
     }
@@ -60,58 +30,22 @@ impl SpatialRequirements {
     pub(super) fn pixels(&self, unit: f64) -> Result<SpatialPixels, CombinationError> {
         self.validate()?;
         validate_unit(unit)?;
-        let diameter = self.min_diameter_units * unit;
-        let separation = self.min_anchor_separation_units * unit;
-        if !diameter.is_finite() || !separation.is_finite() {
+        let separation = self.min_anchor_distance_units * unit;
+        if !separation.is_finite() {
             return Err(CombinationError::InvalidConfig(
-                "spatial distances in source pixels overflow",
+                "anchor distance in source pixels overflows",
             ));
         }
-        if (self.min_diameter_units > 0.0 && diameter == 0.0)
-            || (self.min_anchor_separation_units > 0.0 && separation == 0.0)
-        {
+        if self.min_anchor_distance_units > 0.0 && separation == 0.0 {
             return Err(CombinationError::InvalidConfig(
-                "positive spatial distances underflow in source pixels",
+                "positive anchor distance underflows in source pixels",
             ));
         }
         Ok(SpatialPixels {
-            diameter,
             anchors: self.min_anchor_points,
             separation,
         })
     }
-}
-
-/// Resolve both fractions from the same enrolled pattern/eligible-point bounds.
-pub fn derive_spatial_requirements(
-    bounds: RegionBounds,
-    unit: f64,
-    policy: &SpatialPolicy,
-) -> Result<SpatialRequirements, CombinationError> {
-    policy.validate()?;
-    validate_unit(unit)?;
-    if bounds.max.x() < bounds.min.x() || bounds.max.y() < bounds.min.y() {
-        return Err(CombinationError::InvalidConfig(
-            "spatial bounds must not be inverted",
-        ));
-    }
-    let shorter = (bounds.max.x() - bounds.min.x()).min(bounds.max.y() - bounds.min.y());
-    let requirements = SpatialRequirements {
-        min_diameter_units: policy.min_diameter_fraction * shorter / unit,
-        min_anchor_points: policy.min_anchor_points,
-        min_anchor_separation_units: policy.min_anchor_separation_fraction * shorter / unit,
-    };
-    requirements.validate()?;
-    if shorter > 0.0
-        && ((policy.min_diameter_fraction > 0.0 && requirements.min_diameter_units == 0.0)
-            || (policy.min_anchor_separation_fraction > 0.0
-                && requirements.min_anchor_separation_units == 0.0))
-    {
-        return Err(CombinationError::InvalidConfig(
-            "positive spatial fractions underflow in enrolled ridge units",
-        ));
-    }
-    Ok(requirements)
 }
 
 /// Check source positions before snapping. Returns admission and consumed work.
@@ -120,7 +54,7 @@ pub fn derive_spatial_requirements(
 pub fn satisfies_spatial_requirements(
     positions: &[Point],
     unit: f64,
-    requirements: &SpatialRequirements,
+    requirements: &SpatialPolicy,
     max_work: usize,
 ) -> Result<(bool, usize), CombinationError> {
     if max_work == 0 {
@@ -136,14 +70,13 @@ pub fn satisfies_spatial_requirements(
 
 #[derive(Clone, Copy)]
 pub(super) struct SpatialPixels {
-    pub diameter: f64,
     pub anchors: usize,
     pub separation: f64,
 }
 
 impl SpatialPixels {
     pub(super) fn unconstrained(self) -> bool {
-        self.diameter == 0.0 && self.anchors == 1 && self.separation == 0.0
+        self.anchors == 1 && self.separation == 0.0
     }
 }
 
@@ -157,20 +90,6 @@ pub(super) fn check(
     }
     if positions.len() < policy.anchors {
         return Ok(false);
-    }
-    if policy.diameter > 0.0 {
-        let mut wide = false;
-        'pairs: for first in 0..positions.len() {
-            for second in first + 1..positions.len() {
-                if distance(positions[first], positions[second], work)? >= policy.diameter {
-                    wide = true;
-                    break 'pairs;
-                }
-            }
-        }
-        if !wide {
-            return Ok(false);
-        }
     }
     let (boundary, used) =
         hull::convex_hull(positions, work.remaining).map_err(|error| match error {

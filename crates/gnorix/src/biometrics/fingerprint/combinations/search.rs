@@ -8,7 +8,7 @@ use std::{
 
 use super::{
     CombinationError, CombinationPoint, Point, RegionBounds, WorkBudget, collect_points,
-    enumeration::RankedSubsets, regions, spatial, validate_min_priority,
+    enumeration::RankedSubsets, regions, spatial, validate_min_priority, validate_point_range,
 };
 use crate::{
     biometrics::{
@@ -23,10 +23,11 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningSearchConfig {
     pub min_points: usize,
+    pub max_points: usize,
     /// Inclusive minimum final feature priority, between zero and one.
     pub min_priority: f64,
     /// Fixed enrolled source geometry, expressed in this capture's ridge units R.
-    pub spatial: super::SpatialRequirements,
+    pub spatial: super::SpatialPolicy,
     /// Initial circle radius measured in the fresh capture's mean ridge width R.
     pub radius_units: f64,
     /// Hex-neighbor steps per point; also the fixed padding used at enrollment.
@@ -41,16 +42,11 @@ impl SigningSearchConfig {
     pub fn validate(&self) -> Result<(), CombinationError> {
         validate_min_priority(self.min_priority)?;
         self.spatial.validate()?;
-        if self.min_points == 0 || self.min_points.checked_mul(2).is_none() {
-            return Err(CombinationError::InvalidConfig(
-                "signing subset size must be nonzero and its double must fit usize",
-            ));
-        }
-        if self.spatial.min_anchor_points > 2 * self.min_points {
-            return Err(CombinationError::InvalidConfig(
-                "minimum anchor count exceeds signing subset maximum; increase min_points",
-            ));
-        }
+        validate_point_range(
+            self.min_points,
+            self.max_points,
+            self.spatial.min_anchor_points,
+        )?;
         if !self.radius_units.is_finite() || self.radius_units <= 0.0 {
             return Err(CombinationError::InvalidConfig(
                 "circle radius must be finite and positive in ridge units",
@@ -71,16 +67,15 @@ impl SigningSearchConfig {
 }
 
 /// Searches positional uncertainty for distinct regional point subsets of size
-/// `min_points..=min(2 * min_points, points_in_region)`.
+/// `min_points..=min(max_points, points_in_region)`.
 ///
-/// Adaptive circles cover the confirmed pattern and grow to include twice the
-/// minimum, or all eligible points when fewer exist. Every point meeting the
+/// Adaptive circles cover the confirmed pattern and grow to include the maximum, or all eligible points when fewer exist. Every point meeting the
 /// priority minimum inside a circle remains eligible. Overlapping circles never
 /// repeat the same subset.
 /// Subsets are merged by mean `0.1 + 0.9 * priority²`, then global point rank;
 /// equal point priorities use ascending source IDs. Only known priorities at or
 /// above the configured minimum are eligible. There is no global-search fallback.
-/// Only source figures satisfying the retained diameter and separated-anchor
+/// Only source figures satisfying the retained separated-anchor
 /// envelope requirements are admitted. No regional subset feasibility analysis
 /// runs in advance. Each valid ranked subset yields its rounded baseline first, then
 /// its complete Cartesian neighborhood before the next valid subset is requested.
@@ -133,7 +128,7 @@ pub struct SigningRegion {
     pub initial_radius: f64,
     pub radius: f64,
     /// Every eligible source ID inside this circle, in descending priority order.
-    /// Equal priorities use ascending source IDs. This is not a truncated pool.
+    /// Equal priorities use ascending source IDs; every eligible point is retained.
     pub feature_ids: Vec<usize>,
 }
 
@@ -191,7 +186,7 @@ impl SigningSearch {
             bounds,
             spacing,
             config.radius_units,
-            2 * config.min_points,
+            config.max_points,
             &mut work,
         )?;
         let regions = describe_regions(&points, &circles, &mut work)?;
@@ -199,7 +194,7 @@ impl SigningSearch {
             &points,
             circles,
             config.min_points.max(config.spatial.min_anchor_points),
-            2 * config.min_points,
+            config.max_points,
             &mut work,
         )?;
         Ok(Self {
@@ -449,11 +444,11 @@ mod tests {
     fn config(min_points: usize, uncertainty_steps: u32) -> SigningSearchConfig {
         SigningSearchConfig {
             min_points,
+            max_points: 2 * min_points,
             min_priority: 0.0,
-            spatial: super::super::SpatialRequirements {
-                min_diameter_units: 0.0,
+            spatial: super::super::SpatialPolicy {
                 min_anchor_points: 1,
-                min_anchor_separation_units: 0.0,
+                min_anchor_distance_units: 0.0,
             },
             radius_units: 100_000.0,
             uncertainty_steps,
@@ -911,6 +906,38 @@ mod tests {
     }
 
     #[test]
+    fn explicit_maximum_controls_signing_independently_of_the_minimum() {
+        let mut candidates = search(
+            points(5),
+            SigningSearchConfig {
+                max_points: 3,
+                ..config(2, 0)
+            },
+        );
+        let mut subsets = BTreeSet::new();
+        while let Some(candidate) = candidates.next() {
+            candidate.unwrap();
+            assert!((2..=3).contains(&candidates.last_feature_ids().len()));
+            subsets.insert(candidates.last_feature_ids().to_vec());
+        }
+        assert_eq!(subsets.len(), 20); // C(5,2) + C(5,3)
+        let mut exact = search(
+            points(5),
+            SigningSearchConfig {
+                max_points: 2,
+                ..config(2, 0)
+            },
+        );
+        let mut count = 0;
+        while let Some(candidate) = exact.next() {
+            candidate.unwrap();
+            assert_eq!(exact.last_feature_ids().len(), 2);
+            count += 1;
+        }
+        assert_eq!(count, 10);
+    }
+
+    #[test]
     fn source_geometry_is_checked_lazily_before_unchanged_variant_groups() {
         let source: Vec<_> = [(0., 0.), (-1., 1.), (10., 0.), (0., 10.)]
             .into_iter()
@@ -923,10 +950,9 @@ mod tests {
             })
             .collect();
         let controls = SigningSearchConfig {
-            spatial: super::super::SpatialRequirements {
-                min_diameter_units: 10. / 2.3,
+            spatial: super::super::SpatialPolicy {
                 min_anchor_points: 3,
-                min_anchor_separation_units: 5. / 2.3,
+                min_anchor_distance_units: 5. / 2.3,
             },
             ..config(2, 1)
         };
@@ -977,10 +1003,9 @@ mod tests {
         let mut actual = search(
             source,
             SigningSearchConfig {
-                spatial: super::super::SpatialRequirements {
-                    min_diameter_units: 10.,
+                spatial: super::super::SpatialPolicy {
                     min_anchor_points: 3,
-                    min_anchor_separation_units: 5.,
+                    min_anchor_distance_units: 5.,
                 },
                 ..config(2, 1)
             },
@@ -989,10 +1014,9 @@ mod tests {
         assert!(actual.next().is_none());
         assert!(actual.last_feature_ids().is_empty());
         let invalid = SigningSearchConfig {
-            spatial: super::super::SpatialRequirements {
-                min_diameter_units: 0.,
+            spatial: super::super::SpatialPolicy {
                 min_anchor_points: 5,
-                min_anchor_separation_units: 0.,
+                min_anchor_distance_units: 0.,
             },
             ..config(2, 0)
         };

@@ -212,15 +212,13 @@ fn extracts_the_checked_in_image_in_source_coordinates() {
 fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     let config = fingerprint::CombinationConfig {
         min_points: 3,
+        max_points: 6,
         min_priority: 0.0,
         spatial: fingerprint::SpatialPolicy {
-            min_diameter_fraction: 0.0,
             min_anchor_points: 1,
-            min_anchor_separation_fraction: 0.0,
+            min_anchor_distance_units: 0.0,
         },
-        pool_multiplier: 2,
         radius_units: 30.0,
-        combinations_per_region: 12,
         max_work: 10_000_000,
     };
     let selected =
@@ -231,7 +229,7 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
     );
     assert!(selected.work_used > 0 && selected.work_used <= config.max_work);
     assert_eq!(selected.regions.len(), 4);
-    assert!(selected.points.len() >= config.min_points * config.pool_multiplier);
+    assert!(selected.points.len() >= config.max_points);
     assert!(
         selected
             .points
@@ -281,11 +279,11 @@ fn assert_single_region_selection(
     )
     .unwrap();
     assert_eq!(selected.regions.len(), 1);
-    assert_eq!(selected.combinations.len(), config.combinations_per_region);
+    assert!(selected.combinations.len() >= selected.points.len() - config.max_points);
     for region in &selected.regions {
-        assert_eq!(region.available_points, selected.points.len());
-        assert_eq!(region.pool, selected.regions[0].pool);
-        assert_eq!(region.combination_count, config.combinations_per_region);
+        assert_eq!(region.feature_ids.len(), selected.points.len());
+        assert_eq!(region.feature_ids, selected.regions[0].feature_ids);
+        assert_eq!(region.combination_count, selected.combinations.len());
     }
     for combination in &selected.combinations {
         assert_eq!(combination.regions, [0]);
@@ -306,18 +304,18 @@ fn assert_combination_subsets(
                 .windows(2)
                 .all(|pair| pair[0] < pair[1])
         );
-        assert!(combination.feature_ids.len() >= config.min_points);
+        assert!((config.min_points..=config.max_points).contains(&combination.feature_ids.len()));
         assert!(combination.score.is_finite() && (0.1..=1.0).contains(&combination.score));
         assert!(!combination.regions.is_empty());
         assert!(combination.regions.windows(2).all(|pair| pair[0] < pair[1]));
         for &id in &combination.regions {
             let region = &selected.regions[id];
-            assert!(combination.feature_ids.len() <= region.pool.len());
+            assert!(combination.feature_ids.len() <= region.feature_ids.len());
             assert!(
                 combination
                     .feature_ids
                     .iter()
-                    .all(|id| region.pool.contains(id))
+                    .all(|id| region.feature_ids.contains(id))
             );
         }
     }
@@ -337,17 +335,13 @@ fn assert_combination_region(
         .iter()
         .map(|point| (point.id, point))
         .collect();
-    assert_eq!(
-        region.pool.len(),
-        config.min_points * config.pool_multiplier
-    );
-    assert!(region.available_points >= region.pool.len());
+    assert!(region.feature_ids.len() >= config.max_points);
     assert!(region.radius.is_finite() && region.radius >= region.initial_radius);
-    assert!(region.pool.windows(2).all(|pair| {
+    assert!(region.feature_ids.windows(2).all(|pair| {
         let (a, b) = (points[&pair[0]], points[&pair[1]]);
         a.priority > b.priority || (a.priority == b.priority && a.id < b.id)
     }));
-    for id in &region.pool {
+    for id in &region.feature_ids {
         let position = points[id].position;
         let distance = (position.x() - region.center.x()).hypot(position.y() - region.center.y());
         assert!(distance <= region.radius);
@@ -359,9 +353,8 @@ fn assert_combination_region(
         .filter(|combination| combination.regions.contains(&region.id))
         .collect();
     assert_eq!(subsets.len(), region.combination_count);
-    assert_eq!(region.combination_count, config.combinations_per_region);
     let incidence: Vec<_> = region
-        .pool
+        .feature_ids
         .iter()
         .map(|id| {
             subsets
@@ -371,7 +364,6 @@ fn assert_combination_region(
         })
         .collect();
     assert!(incidence.iter().all(|&count| count > 0));
-    assert!(incidence.windows(2).all(|pair| pair[0] >= pair[1]));
 }
 
 fn assert_combination_failures(
@@ -406,8 +398,7 @@ fn assert_combination_failures(
             &result.features().unwrap(),
             &CombinationConfig {
                 min_points: required,
-                pool_multiplier: 1,
-                combinations_per_region: 1,
+                max_points: required,
                 ..config
             }
         ),

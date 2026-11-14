@@ -1,14 +1,8 @@
-//! Imported enrollment policy, spatial admission and advertised pool coverage.
+//! Imported enrollment policy, spatial admission and regional point coverage.
 
 use std::collections::BTreeMap;
 
-use gnorix::biometrics::{
-    fingerprint::{
-        self, CombinationConfig, GridBaselineConfig, RegionBounds, SpatialPolicy,
-        SpatialRequirements,
-    },
-    geometry::Point,
-};
+use gnorix::biometrics::fingerprint::{self, CombinationConfig, GridBaselineConfig, SpatialPolicy};
 use serde_json::{Map, Value};
 
 use super::{Result, enrollment_profile::ProfileParameters, input::CombinationInput};
@@ -19,36 +13,8 @@ pub(super) fn parameters(
     grid: &GridBaselineConfig,
 ) -> Result<ProfileParameters> {
     let controls = combination_controls(&input.metadata)?;
-    let bounds = input
-        .metadata
-        .get("bounds")
-        .and_then(Value::as_object)
-        .ok_or("combination report requires bounds")?;
-    let bounds = RegionBounds {
-        min: point(bounds.get("min"))?,
-        max: point(bounds.get("max"))?,
-    };
-    let derived =
-        fingerprint::derive_spatial_requirements(bounds, input.unit_px, &controls.spatial)?;
-    let declared = spatial_requirements(input.metadata.get("spatial"))?;
-    if declared != derived {
-        return Err(
-            "declared spatial requirements differ from enrolled bounds and ridge unit".into(),
-        );
-    }
-    validate_selected_features(input, &controls, &declared)?;
-    ProfileParameters::new(&controls, grid.padding_steps, declared)
-}
-
-fn point(value: Option<&Value>) -> Result<Point> {
-    let coordinates = value
-        .and_then(Value::as_array)
-        .filter(|items| items.len() == 2)
-        .ok_or("bounds must contain two numeric coordinates")?;
-    Ok(Point::new(
-        coordinates[0].as_f64().ok_or("bound must be numeric")?,
-        coordinates[1].as_f64().ok_or("bound must be numeric")?,
-    )?)
+    validate_selected_features(input, &controls)?;
+    ProfileParameters::new(&controls, grid.padding_steps)
 }
 
 fn combination_controls(metadata: &Map<String, Value>) -> Result<CombinationConfig> {
@@ -58,10 +24,9 @@ fn combination_controls(metadata: &Map<String, Value>) -> Result<CombinationConf
         .ok_or("combination report requires config")?;
     let expected = [
         "min_points",
+        "max_points",
         "min_priority",
-        "pool_multiplier",
         "radius_units",
-        "combinations_per_region",
         "spatial",
         "max_work",
     ];
@@ -72,22 +37,13 @@ fn combination_controls(metadata: &Map<String, Value>) -> Result<CombinationConf
     }
     let controls = CombinationConfig {
         min_points: integer(config, "min_points")?,
+        max_points: integer(config, "max_points")?,
         min_priority: numeric(config, "min_priority")?,
-        pool_multiplier: integer(config, "pool_multiplier")?,
         radius_units: numeric(config, "radius_units")?,
-        combinations_per_region: integer(config, "combinations_per_region")?,
         spatial: spatial_policy(config.get("spatial"))?,
         max_work: integer(config, "max_work")?,
     };
     controls.validate()?;
-    if controls.spatial.min_anchor_points
-        > controls
-            .min_points
-            .checked_mul(2)
-            .ok_or("signing subset capacity overflow")?
-    {
-        return Err("anchor count exceeds the signing subset capacity".into());
-    }
     Ok(controls)
 }
 
@@ -99,39 +55,13 @@ fn numeric(fields: &Map<String, Value>, name: &str) -> Result<f64> {
 }
 
 fn spatial_policy(value: Option<&Value>) -> Result<SpatialPolicy> {
-    let fields = spatial_fields(
-        value,
-        &[
-            "min_diameter_fraction",
-            "min_anchor_points",
-            "min_anchor_separation_fraction",
-        ],
-    )?;
+    let fields = spatial_fields(value, &["min_anchor_points", "min_anchor_distance_units"])?;
     let policy = SpatialPolicy {
-        min_diameter_fraction: numeric(fields, "min_diameter_fraction")?,
         min_anchor_points: integer(fields, "min_anchor_points")?,
-        min_anchor_separation_fraction: numeric(fields, "min_anchor_separation_fraction")?,
+        min_anchor_distance_units: numeric(fields, "min_anchor_distance_units")?,
     };
     policy.validate()?;
     Ok(policy)
-}
-
-fn spatial_requirements(value: Option<&Value>) -> Result<SpatialRequirements> {
-    let fields = spatial_fields(
-        value,
-        &[
-            "min_diameter_units",
-            "min_anchor_points",
-            "min_anchor_separation_units",
-        ],
-    )?;
-    let requirements = SpatialRequirements {
-        min_diameter_units: numeric(fields, "min_diameter_units")?,
-        min_anchor_points: integer(fields, "min_anchor_points")?,
-        min_anchor_separation_units: numeric(fields, "min_anchor_separation_units")?,
-    };
-    requirements.validate()?;
-    Ok(requirements)
 }
 
 fn spatial_fields<'a>(
@@ -152,7 +82,6 @@ fn spatial_fields<'a>(
 fn validate_selected_features(
     input: &CombinationInput,
     controls: &CombinationConfig,
-    spatial: &SpatialRequirements,
 ) -> Result<()> {
     let mut remaining_work = controls.max_work;
     reserve_validation_work(&mut remaining_work, input.points.len())?;
@@ -162,20 +91,10 @@ fn validate_selected_features(
             return Err(format!("duplicate feature ID {}", point.id).into());
         }
     }
-    let maximum_points = controls
-        .min_points
-        .checked_mul(controls.pool_multiplier)
-        .ok_or(fingerprint::CombinationError::WorkLimit)?;
-    let mut coverage = declared_pools(
-        input,
-        &points,
-        controls,
-        maximum_points,
-        &mut remaining_work,
-    )?;
+    let mut coverage = declared_regions(input, &points, controls, &mut remaining_work)?;
     for (index, combination) in input.combinations.iter().enumerate() {
         let count = combination.feature_ids.len();
-        if count < controls.min_points || count > maximum_points {
+        if count < controls.min_points || count > controls.max_points {
             return Err(format!(
                 "combination {index} has a point count outside the declared policy"
             )
@@ -201,7 +120,7 @@ fn validate_selected_features(
         let (satisfies, used) = fingerprint::satisfies_spatial_requirements(
             &positions,
             input.unit_px,
-            spatial,
+            &controls.spatial,
             remaining_work,
         )?;
         reserve_validation_work(&mut remaining_work, used)?;
@@ -220,27 +139,26 @@ fn validate_selected_features(
             .ok_or(fingerprint::CombinationError::WorkLimit)?;
         reserve_validation_work(&mut remaining_work, membership_work)?;
         for region in &combination.regions {
-            let pool = coverage
+            let members = coverage
                 .get_mut(region)
                 .ok_or_else(|| format!("combination {index} refers to unknown region {region}"))?;
             for id in &combination.feature_ids {
-                let covered = pool.get_mut(id).ok_or_else(|| {
-                    format!(
-                        "combination {index} selects feature {id} outside region {region}'s pool"
-                    )
+                let covered = members.get_mut(id).ok_or_else(|| {
+                    format!("combination {index} selects feature {id} outside region {region}")
                 })?;
                 *covered = true;
             }
         }
     }
-    for (region, pool) in coverage {
+    for (region, members) in coverage {
         reserve_validation_work(
             &mut remaining_work,
-            pool.len()
+            members
+                .len()
                 .checked_add(1)
                 .ok_or(fingerprint::CombinationError::WorkLimit)?,
         )?;
-        for (feature_id, covered) in pool {
+        for (feature_id, covered) in members {
             if !covered {
                 return Err(
                     fingerprint::CombinationError::UncoverablePoint { region, feature_id }.into(),
@@ -253,11 +171,10 @@ fn validate_selected_features(
 
 type RegionCoverage = BTreeMap<usize, BTreeMap<usize, bool>>;
 
-fn declared_pools(
+fn declared_regions(
     input: &CombinationInput,
     points: &BTreeMap<usize, &fingerprint::CombinationPoint>,
     controls: &CombinationConfig,
-    maximum_points: usize,
     remaining_work: &mut usize,
 ) -> Result<RegionCoverage> {
     let regions = input
@@ -274,19 +191,19 @@ fn declared_pools(
             .ok_or("selected region must be an object")?;
         let id = integer(fields, "id")?;
         let ids = fields
-            .get("pool")
+            .get("feature_ids")
             .and_then(Value::as_array)
-            .ok_or("selected region requires a point pool")?;
-        if ids.len() < controls.min_points || ids.len() > maximum_points {
-            return Err(format!("region {id} pool size differs from the declared policy").into());
+            .ok_or("selected region requires feature IDs")?;
+        if ids.len() < controls.min_points.max(controls.spatial.min_anchor_points) {
+            return Err(format!("region {id} has too few points for the declared policy").into());
         }
         reserve_validation_work(remaining_work, ids.len())?;
-        let mut pool = BTreeMap::new();
+        let mut members = BTreeMap::new();
         for item in ids {
             let feature_id = item
                 .as_u64()
                 .and_then(|value| usize::try_from(value).ok())
-                .ok_or("pool feature ID must be an unsigned integer")?;
+                .ok_or("regional feature ID must be an unsigned integer")?;
             let point = points
                 .get(&feature_id)
                 .ok_or_else(|| format!("region {id} selects unknown feature {feature_id}"))?;
@@ -296,11 +213,11 @@ fn declared_pools(
                 )
                 .into());
             }
-            if pool.insert(feature_id, false).is_some() {
+            if members.insert(feature_id, false).is_some() {
                 return Err(format!("region {id} repeats feature {feature_id}").into());
             }
         }
-        if coverage.insert(id, pool).is_some() {
+        if coverage.insert(id, members).is_some() {
             return Err(format!("duplicate selected region ID {id}").into());
         }
     }
@@ -327,25 +244,26 @@ fn integer(fields: &Map<String, Value>, name: &str) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gnorix::biometrics::geometry::Point;
     use serde_json::json;
 
     fn imported() -> CombinationInput {
         crate::input::parse(json!({
-            "schema":"gnorix.feature-combinations.v5", "unit_px":4.0,
+            "schema":"gnorix.feature-combinations.v6", "unit_px":4.0,
             "bounds":{"min":[0,0],"max":[12,12]},
-            "spatial":{"min_diameter_units":1.0,"min_anchor_points":3,"min_anchor_separation_units":0.5},
-            "config":{"min_points":3,"min_priority":0.5,"pool_multiplier":2,
-                "radius_units":30.0,"combinations_per_region":12,
-                "spatial":{"min_diameter_fraction":1.0/3.0,"min_anchor_points":3,
-                    "min_anchor_separation_fraction":1.0/6.0},"max_work":10000},
+            "config":{"min_points":3,"max_points":6,"min_priority":0.5,
+                "radius_units":30.0,
+                "spatial":{"min_anchor_points":3,
+                    "min_anchor_distance_units":0.5},"max_work":10000},
             "points":[
                 {"id":0,"kind":"ending","position":[0,0],"priority":0.5},
                 {"id":1,"kind":"ending","position":[10,0],"priority":0.9},
                 {"id":2,"kind":"ending","position":[0,10],"priority":0.8},
                 {"id":3,"kind":"ending","position":[2,2],"priority":0.49}],
-            "regions":[{"id":0,"pool":[0,1,2]}],
+            "regions":[{"id":0,"feature_ids":[0,1,2]}],
             "combinations":[{"feature_ids":[0,1,2],"score":0.5,"regions":[0]}]
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     fn grid() -> GridBaselineConfig {
@@ -363,10 +281,9 @@ mod tests {
         let loaded = ProfileParameters::decode(first.encoded(), first.profile_id()).unwrap();
         assert_eq!(
             loaded.spatial(),
-            SpatialRequirements {
-                min_diameter_units: 1.0,
+            SpatialPolicy {
                 min_anchor_points: 3,
-                min_anchor_separation_units: 0.5,
+                min_anchor_distance_units: 0.5,
             }
         );
         assert_eq!(loaded.uncertainty_steps(), 1);
@@ -376,18 +293,12 @@ mod tests {
             first.profile_id(),
             parameters(&input, &grid()).unwrap().profile_id()
         );
-        let fresh_crop = fingerprint::derive_spatial_requirements(
-            RegionBounds {
-                min: Point::new(0.0, 0.0).unwrap(),
-                max: Point::new(6.0, 6.0).unwrap(),
-            },
-            4.0,
-            &loaded.controls(1000).unwrap().spatial,
-        )
-        .unwrap();
-        assert_ne!(loaded.spatial(), fresh_crop);
-        assert_eq!(loaded.spatial().min_diameter_units, 1.0);
-        assert_eq!(loaded.spatial().min_anchor_separation_units, 0.5);
+        input.metadata["bounds"] = json!({"min":[0,0],"max":[6,6]});
+        assert_eq!(
+            first.profile_id(),
+            parameters(&input, &grid()).unwrap().profile_id()
+        );
+        assert_eq!(loaded.spatial().min_anchor_distance_units, 0.5);
         input.metadata["config"]["min_priority"] = json!(0.0);
         let zero = parameters(&input, &grid()).unwrap();
         assert_ne!(first.profile_id(), zero.profile_id());
@@ -396,8 +307,7 @@ mod tests {
             zero.profile_id(),
             parameters(&input, &grid()).unwrap().profile_id()
         );
-        input.metadata["config"]["spatial"]["min_diameter_fraction"] = json!(0.5);
-        input.metadata["spatial"]["min_diameter_units"] = json!(1.5);
+        input.metadata["config"]["spatial"]["min_anchor_distance_units"] = json!(1.5);
         assert_ne!(
             zero.profile_id(),
             parameters(&input, &grid()).unwrap().profile_id()
@@ -416,7 +326,7 @@ mod tests {
                 .contains("priority")
         );
         input.points[3].priority = 0.8;
-        input.metadata["regions"][0]["pool"] = json!([0, 1, 2, 3]);
+        input.metadata["regions"][0]["feature_ids"] = json!([0, 1, 2, 3]);
         assert!(parameters(&input, &grid()).is_ok()); // Interior fourth point is covered.
         input.points[3].position = Point::new(10.0, 1.0).unwrap();
         // The outside point is too close to point1 to make both anchors;
@@ -439,12 +349,10 @@ mod tests {
     }
 
     #[test]
-    fn imports_verify_both_derived_distances_and_reject_old_or_unknown_fields() {
-        for field in ["min_diameter_units", "min_anchor_separation_units"] {
-            let mut input = imported();
-            input.metadata["spatial"][field] = json!(1.1);
-            assert!(parameters(&input, &grid()).is_err());
-        }
+    fn imports_verify_direct_distance_and_reject_old_or_unknown_fields() {
+        let mut input = imported();
+        input.metadata["config"]["spatial"]["min_anchor_distance_units"] = json!(-1.0);
+        assert!(parameters(&input, &grid()).is_err());
         let mut input = imported();
         input.metadata["config"]["spatial"]["min_anchor_points"] = json!(0);
         assert!(parameters(&input, &grid()).is_err());
@@ -460,14 +368,34 @@ mod tests {
     }
 
     #[test]
+    fn region_can_exceed_subset_maximum_but_each_combination_must_fit() {
+        let mut input = imported();
+        input.metadata["config"]["max_points"] = json!(3);
+        input.points[3].priority = 0.8;
+        input.points[3].position = Point::new(10.0, 10.0).unwrap();
+        input.metadata["regions"][0]["feature_ids"] = json!([0, 1, 2, 3]);
+        input.combinations.push(input.combinations[0].clone());
+        input.combinations[1].feature_ids = vec![1, 2, 3];
+        assert!(parameters(&input, &grid()).is_ok());
+
+        input.combinations[1].feature_ids = vec![0, 1, 2, 3];
+        assert!(
+            parameters(&input, &grid())
+                .unwrap_err()
+                .to_string()
+                .contains("point count")
+        );
+    }
+
+    #[test]
     fn imported_geometry_validation_has_one_actual_aggregate_work_budget() {
         let mut input = imported();
         input.points[3].priority = 0.8;
         input.points[3].position = Point::new(10.0, 10.0).unwrap();
-        input.metadata["regions"][0]["pool"] = json!([0, 1, 2, 3]);
+        input.metadata["regions"][0]["feature_ids"] = json!([0, 1, 2, 3]);
         input.combinations.push(input.combinations[0].clone());
         input.combinations[1].feature_ids = vec![1, 2, 3];
-        let spatial = spatial_requirements(input.metadata.get("spatial")).unwrap();
+        let spatial = combination_controls(&input.metadata).unwrap().spatial;
         let mut required = input.points.len() + 2 * (1 + 4);
         for subset in &input.combinations {
             let positions: Vec<_> = subset
@@ -496,10 +424,10 @@ mod tests {
     }
 
     #[test]
-    fn imports_cannot_remove_pool_coverage_or_region_membership() {
+    fn imports_cannot_remove_feature_coverage_or_region_membership() {
         let mut input = imported();
         input.points[3].priority = 0.8;
-        input.metadata["regions"][0]["pool"] = json!([0, 1, 2, 3]);
+        input.metadata["regions"][0]["feature_ids"] = json!([0, 1, 2, 3]);
         let error = parameters(&input, &grid()).unwrap_err();
         assert_eq!(
             error.downcast_ref::<fingerprint::CombinationError>(),
@@ -517,7 +445,7 @@ mod tests {
         input.metadata.remove("regions");
         assert!(parameters(&input, &grid()).is_err());
         let mut input = imported();
-        input.metadata["regions"][0]["pool"] = json!([0, 1, 3]);
+        input.metadata["regions"][0]["feature_ids"] = json!([0, 1, 3]);
         input.points[3].priority = 0.8;
         assert!(
             parameters(&input, &grid())

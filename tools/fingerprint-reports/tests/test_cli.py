@@ -195,6 +195,7 @@ class CommandTests(unittest.TestCase):
             (False, True, False, "gnorix.feature-combinations.v5"),
             (False, True, True, "gnorix.feature-combinations.v5"),
             (True, True, True, "gnorix.feature-combinations.v5"),
+            (True, True, True, "gnorix.feature-combinations.v6"),
             (False, True, False, "gnorix.feature-combinations.v4"),
             (False, True, True, "gnorix.feature-combinations.v4"),
             (True, True, True, "gnorix.feature-combinations.v4"),

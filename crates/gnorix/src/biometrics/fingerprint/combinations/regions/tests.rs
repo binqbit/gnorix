@@ -17,159 +17,79 @@ fn bounds(width: f64, height: f64) -> RegionBounds {
     }
 }
 
-fn anchor_config() -> CombinationConfig {
+fn config() -> CombinationConfig {
     CombinationConfig {
-        min_points: 2,
-        min_priority: 0.0,
+        min_points: 3,
+        max_points: 4,
+        min_priority: 0.,
         spatial: super::super::SpatialPolicy {
-            min_diameter_fraction: 1. / 3.,
             min_anchor_points: 3,
-            min_anchor_separation_fraction: 1. / 6.,
+            min_anchor_distance_units: 5.,
         },
-        pool_multiplier: 2,
         radius_units: 100.,
-        combinations_per_region: 12,
-        max_work: 1_000_000,
-    }
-}
-
-fn circle(size: usize) -> RegionCandidates {
-    RegionCandidates {
-        id: 7,
-        center: Point::new(0., 0.).unwrap(),
-        initial_radius: 100.,
-        radius: 100.,
-        indices: (0..size).collect(),
+        max_work: 100_000,
     }
 }
 
 #[test]
-fn an_invalid_full_pool_is_kept_when_valid_subsets_cover_every_point() {
+fn all_eligible_points_participate_even_when_the_complete_set_is_invalid() {
     let points: Vec<_> = [(0., 0.), (10., 0.), (0., 10.), (-1., 1.)]
         .into_iter()
         .enumerate()
         .map(|(id, (x, y))| point(id, x, y, 1. - id as f64 * 0.1))
         .collect();
-    let policy = spatial::SpatialPixels {
-        diameter: 10.,
-        anchors: 3,
-        separation: 5.,
-    };
-    let positions: Vec<_> = points.iter().map(|point| point.position).collect();
+    let controls = config();
+    let policy = controls.spatial.pixels(1.).unwrap();
+    let positions: Vec<_> = points.iter().map(|p| p.position).collect();
     assert!(!spatial::check(&positions, policy, &mut WorkBudget::new(1000)).unwrap());
-    let config = anchor_config();
-    let pool = select_pool(
+    let selection = select(
         &points,
-        &circle(4),
-        &config,
-        4,
+        bounds(10., 10.),
+        1.,
+        &controls,
         policy,
         &mut WorkBudget::new(100_000),
     )
     .unwrap();
-    assert_eq!(pool.indices, [0, 1, 2, 3]);
-    assert_eq!(pool.subsets.len(), 2);
-    let scores: Vec<_> = points.iter().map(|point| point.priority).collect();
-    let selected = enumeration::enumerate_spatial(
-        &scores,
-        &positions,
-        2,
-        12,
-        policy,
-        &mut WorkBudget::new(100_000),
-    )
-    .unwrap();
-    assert!(selected.uncovered.is_empty());
-    assert_eq!(selected.subsets.len(), 2);
+    assert_eq!(selection.len(), 1);
+    assert_eq!(selection[0].region.feature_ids, [0, 1, 2, 3]);
+    assert_eq!(selection[0].subsets.len(), 2);
 }
 
 #[test]
-fn an_uncovered_selected_point_stops_generation_instead_of_being_replaced() {
-    let points: Vec<_> = [(0., 0.), (10., 0.), (0., 10.), (-1., 1.), (-10., 10.)]
+fn an_uncoverable_regional_point_stops_generation() {
+    let points: Vec<_> = [(0., 0.), (10., 0.), (0., 10.), (-1., 1.), (-2., 2.)]
         .into_iter()
         .enumerate()
         .map(|(id, (x, y))| point(id, x, y, 1. - id as f64 * 0.1))
         .collect();
-    let policy = spatial::SpatialPixels {
-        diameter: 10.,
-        anchors: 3,
-        separation: 10.,
-    };
+    let mut controls = config();
+    controls.spatial.min_anchor_distance_units = 10.;
+    let policy = controls.spatial.pixels(1.).unwrap();
     assert!(matches!(
-        select_pool(
+        select(
             &points,
-            &circle(5),
-            &anchor_config(),
-            4,
+            bounds(10., 10.),
+            1.,
+            &controls,
             policy,
             &mut WorkBudget::new(100_000)
         ),
         Err(CombinationError::UncoverablePoint {
-            region: 7,
+            region: 0,
             feature_id: 3
         })
     ));
     assert!(matches!(
-        select_pool(
+        select(
             &points,
-            &circle(5),
-            &anchor_config(),
-            4,
+            bounds(10., 10.),
+            1.,
+            &controls,
             policy,
             &mut WorkBudget::new(3)
         ),
         Err(CombinationError::WorkLimit)
-    ));
-}
-
-#[test]
-fn pool_rescue_requires_no_valid_original_subset_and_retains_strong_fillers() {
-    let points: Vec<_> = [(0., 0.), (1., 0.), (2., 0.), (3., 0.), (10., 0.), (0., 10.)]
-        .into_iter()
-        .enumerate()
-        .map(|(id, (x, y))| point(id, x, y, 1. - id as f64 * 0.1))
-        .collect();
-    let policy = spatial::SpatialPixels {
-        diameter: 8.,
-        anchors: 3,
-        separation: 5.,
-    };
-    assert_eq!(
-        select_pool(
-            &points,
-            &circle(6),
-            &anchor_config(),
-            4,
-            policy,
-            &mut WorkBudget::new(100_000)
-        )
-        .unwrap()
-        .indices,
-        [0, 1, 4, 5]
-    );
-    let mut with_uncoverable = points;
-    with_uncoverable[0].position = Point::new(-1., 1.).unwrap();
-    with_uncoverable[1].position = Point::new(0., 0.).unwrap();
-    with_uncoverable[2].position = Point::new(-2., 2.).unwrap();
-    with_uncoverable[3].position = Point::new(-3., 3.).unwrap();
-    let strict = spatial::SpatialPixels {
-        diameter: 10.,
-        anchors: 3,
-        separation: 10.,
-    };
-    assert!(matches!(
-        select_pool(
-            &with_uncoverable,
-            &circle(6),
-            &anchor_config(),
-            4,
-            strict,
-            &mut WorkBudget::new(100_000)
-        ),
-        Err(CombinationError::UncoverablePoint {
-            region: 7,
-            feature_id: 0
-        })
     ));
 }
 
@@ -194,53 +114,33 @@ fn grows_sparse_circle_and_retains_all_inclusive_boundary_points() {
 }
 
 #[test]
-fn enrollment_caps_pools_while_shared_circles_retain_every_point() {
+fn enrollment_retains_every_regional_point_in_priority_order() {
     let points = vec![
-        point(8, 1.0, 1.0, 0.2),
-        point(2, 2.0, 1.0, 0.2),
-        point(3, 4.0, 1.0, 1.0),
+        point(8, 1., 1., 0.2),
+        point(2, 2., 1., 0.2),
+        point(3, 4., 1., 1.),
     ];
-    let config = CombinationConfig {
+    let controls = CombinationConfig {
         min_points: 1,
-        min_priority: 0.0,
+        max_points: 2,
         spatial: super::super::SpatialPolicy {
-            min_diameter_fraction: 0.0,
             min_anchor_points: 1,
-            min_anchor_separation_fraction: 0.0,
+            min_anchor_distance_units: 0.,
         },
-        pool_multiplier: 2,
-        radius_units: 5.0,
-        combinations_per_region: 2,
-        max_work: 1000,
+        ..config()
     };
-    let regions = select(
+    let result = select(
         &points,
-        bounds(6.0, 2.0),
-        1.0,
-        &config,
-        super::super::SpatialRequirements {
-            min_diameter_units: 0.0,
-            min_anchor_points: 1,
-            min_anchor_separation_units: 0.0,
-        }
-        .pixels(1.0)
-        .unwrap(),
+        bounds(6., 2.),
+        1.,
+        &controls,
+        controls.spatial.pixels(1.).unwrap(),
         &mut WorkBudget::new(1000),
     )
     .unwrap();
-    assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].region.pool, [3, 2]);
-    assert_eq!(regions[0].region.available_points, 3);
-    let all = circular_regions(
-        &points,
-        bounds(6.0, 2.0),
-        1.0,
-        5.0,
-        2,
-        &mut WorkBudget::new(1000),
-    )
-    .unwrap();
-    assert_eq!(all[0].indices, [2, 1, 0]);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].region.feature_ids, [3, 2, 8]);
+    assert!(result[0].subsets.iter().all(|s| s.ranks.len() <= 2));
 }
 
 #[test]

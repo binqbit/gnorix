@@ -1,4 +1,4 @@
-//! Inspect bounded regional feature combinations from one opaque PNG capture.
+//! Inspect ranked regional feature combinations from one opaque PNG capture.
 
 #[path = "support/combination_config.rs"]
 mod combination_config;
@@ -85,7 +85,7 @@ fn snapshot(
         .map(|region| {
             let counts = region_counts.get(&region.id);
             let occurrences: Vec<_> = region
-                .pool
+                .feature_ids
                 .iter()
                 .map(|id| {
                     json!({
@@ -99,8 +99,7 @@ fn snapshot(
                 "center": [region.center.x(), region.center.y()],
                 "initial_radius_px": region.initial_radius,
                 "radius_px": region.radius,
-                "available_points": region.available_points,
-                "pool": region.pool,
+                "feature_ids": region.feature_ids,
                 "combination_count": region.combination_count,
                 "point_occurrences": occurrences,
             })
@@ -119,37 +118,31 @@ fn snapshot(
         .collect();
 
     json!({
-        "schema": "gnorix.feature-combinations.v5",
+        "schema": "gnorix.feature-combinations.v6",
         "source": {"image": input.to_string_lossy(), "width": width, "height": height},
         "unit_px": unit_px,
-        "spatial": {
-            "min_diameter_units": result.spatial.min_diameter_units,
-            "min_anchor_points": result.spatial.min_anchor_points,
-            "min_anchor_separation_units": result.spatial.min_anchor_separation_units,
-        },
         "config": {
             "min_points": config.min_points,
+            "max_points": config.max_points,
             "min_priority": config.min_priority,
             "spatial": {
-                "min_diameter_fraction": config.spatial.min_diameter_fraction,
                 "min_anchor_points": config.spatial.min_anchor_points,
-                "min_anchor_separation_fraction": config.spatial.min_anchor_separation_fraction,
+                "min_anchor_distance_units": config.spatial.min_anchor_distance_units,
             },
-            "pool_multiplier": config.pool_multiplier,
             "radius_units": config.radius_units,
-            "combinations_per_region": config.combinations_per_region,
             "max_work": config.max_work,
         },
         "policy": {
             "point_eligibility": "known final priority >= min_priority",
-            "subset_geometry": "minimum source-point diameter; at least min_anchor_points pairwise-separated anchors; all other points inside their convex hull (inclusive), before grid alignment",
+            "subset_geometry": "at least min_anchor_points pairwise-separated anchors; all other points inside their convex hull (inclusive), before grid alignment",
             "region_layout": "adaptive row-major cell centers covering confirmed-pattern and eligible-point bounds",
             "region_coverage": "minimum cell count whose half-diagonals fit the initial radius; closest-to-square cells break ties",
             "initial_radius": "radius_units * measured mean ridge width R",
             "point_weight": "0.1 + 0.9 * priority^2",
             "combination_score": "mean point weight",
-            "subset_sizes": "min_points through regional pool size",
-            "coverage": "each selected pool point occurs at least once per region",
+            "selection": "rank bands by strongest included point; quotas N, ceil(N/2), ... with a floor of one, plus coverage witnesses",
+            "subset_sizes": "min_points through max_points, bounded by regional availability",
+            "coverage": "each eligible regional point occurs at least once per region",
             "identity": "original feature IDs within this capture",
         },
         "bounds": {
@@ -215,41 +208,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_settings_are_explicit_and_can_be_overridden_without_global_environment() {
+    fn settings_use_explicit_point_range_and_ridge_unit_distance() {
         let defaults = parse_configuration(|_| None).unwrap();
-        assert_eq!(defaults.min_points, 3);
+        assert_eq!((defaults.min_points, defaults.max_points), (3, 6));
         assert_eq!(defaults.min_priority, 0.5);
-        assert_eq!(defaults.spatial.min_diameter_fraction, 1.0 / 3.0);
         assert_eq!(defaults.spatial.min_anchor_points, 3);
-        assert_eq!(defaults.spatial.min_anchor_separation_fraction, 1.0 / 6.0);
-        assert_eq!(defaults.pool_multiplier, 2);
+        assert_eq!(defaults.spatial.min_anchor_distance_units, 6.0);
         assert_eq!(defaults.radius_units, 30.0);
-        assert_eq!(defaults.combinations_per_region, 12);
         assert_eq!(defaults.max_work, 10_000_000);
 
         let settings = BTreeMap::from([
             (ENVIRONMENT[0], "2"),
-            (ENVIRONMENT[1], "3"),
+            (ENVIRONMENT[1], "7"),
             (ENVIRONMENT[2], "24.5"),
-            (ENVIRONMENT[3], "20"),
-            (ENVIRONMENT[4], "1000"),
-            (ENVIRONMENT[5], "0.35"),
-            (ENVIRONMENT[6], "0.4"),
-            (ENVIRONMENT[7], "4"),
-            (ENVIRONMENT[8], "0.2"),
+            (ENVIRONMENT[3], "1000"),
+            (ENVIRONMENT[4], "0.35"),
+            (ENVIRONMENT[5], "4"),
+            (ENVIRONMENT[6], "8.5"),
         ]);
         let config = parse_configuration(|name| settings.get(name).copied()).unwrap();
-        assert_eq!(config.min_points, 2);
+        assert_eq!((config.min_points, config.max_points), (2, 7));
         assert_eq!(config.min_priority, 0.35);
-        assert_eq!(config.spatial.min_diameter_fraction, 0.4);
         assert_eq!(config.spatial.min_anchor_points, 4);
-        assert_eq!(config.spatial.min_anchor_separation_fraction, 0.2);
-        assert_eq!(config.pool_multiplier, 3);
+        assert_eq!(config.spatial.min_anchor_distance_units, 8.5);
         assert_eq!(config.radius_units, 24.5);
-        assert_eq!(config.combinations_per_region, 20);
         assert_eq!(config.max_work, 1000);
         for value in ["0", "-0", "1"] {
-            assert!(parse_configuration(|name| (name == ENVIRONMENT[5]).then_some(value)).is_ok());
+            assert!(parse_configuration(|name| (name == ENVIRONMENT[4]).then_some(value)).is_ok());
         }
     }
 
@@ -263,21 +248,21 @@ mod tests {
                 max: origin,
             },
             points: Vec::new(),
-            spatial: fingerprint::SpatialRequirements {
-                min_diameter_units: 1.0,
-                min_anchor_points: 3,
-                min_anchor_separation_units: 0.5,
-            },
             unscored_features: 0,
             regions: Vec::new(),
             combinations: Vec::new(),
             work_used: 0,
         };
         let document = snapshot(Path::new("capture.png"), 1, 1, 4.0, &config, &result);
-        assert_eq!(document["schema"], "gnorix.feature-combinations.v5");
+        assert_eq!(document["schema"], "gnorix.feature-combinations.v6");
         assert_eq!(document["config"]["min_priority"], 0.5);
+        assert_eq!(document["config"]["max_points"], 6);
         assert_eq!(document["config"]["spatial"]["min_anchor_points"], 3);
-        assert_eq!(document["spatial"]["min_anchor_separation_units"], 0.5);
+        assert_eq!(
+            document["config"]["spatial"]["min_anchor_distance_units"],
+            6.0
+        );
+        assert!(document.get("spatial").is_none());
         assert_eq!(
             document["policy"]["point_eligibility"],
             "known final priority >= min_priority"
@@ -291,34 +276,27 @@ mod tests {
             (ENVIRONMENT[0], "-1"),
             (ENVIRONMENT[0], "1.5"),
             (ENVIRONMENT[0], "0"),
-            (ENVIRONMENT[1], "0"),
+            (ENVIRONMENT[0], "7"),
+            (ENVIRONMENT[1], "2"),
             (ENVIRONMENT[2], "NaN"),
             (ENVIRONMENT[2], "inf"),
             (ENVIRONMENT[2], "-0.5"),
             (ENVIRONMENT[2], "0"),
             (ENVIRONMENT[3], "0"),
-            (ENVIRONMENT[4], "0"),
-            (ENVIRONMENT[5], "NaN"),
-            (ENVIRONMENT[5], "inf"),
-            (ENVIRONMENT[5], "-0.01"),
-            (ENVIRONMENT[5], "1.01"),
-            (ENVIRONMENT[6], "NaN"),
+            (ENVIRONMENT[4], "NaN"),
+            (ENVIRONMENT[4], "inf"),
+            (ENVIRONMENT[4], "-0.01"),
+            (ENVIRONMENT[4], "1.01"),
+            (ENVIRONMENT[5], "0"),
+            (ENVIRONMENT[5], "2.5"),
+            (ENVIRONMENT[5], "7"),
+            (ENVIRONMENT[6], "inf"),
             (ENVIRONMENT[6], "-0.1"),
-            (ENVIRONMENT[6], "1.1"),
-            (ENVIRONMENT[7], "0"),
-            (ENVIRONMENT[7], "2.5"),
-            (ENVIRONMENT[8], "inf"),
-            (ENVIRONMENT[8], "-0.1"),
-            (ENVIRONMENT[8], "1.1"),
         ] {
             assert!(
                 parse_configuration(|key| (key == name).then_some(invalid)).is_err(),
                 "{name} accepted {invalid}"
             );
         }
-        let huge = usize::MAX.to_string();
-        assert!(
-            parse_configuration(|name| (name == ENVIRONMENT[0]).then_some(huge.as_str())).is_err()
-        );
     }
 }

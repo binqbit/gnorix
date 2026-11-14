@@ -12,7 +12,7 @@ use gnorix::{
     biometrics::fingerprint::{
         self, CombinationError, CombinationPoint, ExtractionConfig, FeatureKind,
         FingerprintFeatures, GridBaselineConfig, GridBaselines, GridShapeError, SigningSearch,
-        SigningSearchConfig, SpatialRequirements,
+        SigningSearchConfig, SpatialPolicy,
     },
     crypto::SignatureVerifier,
     enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
@@ -65,7 +65,7 @@ struct Enrolled {
     config: LabConfig,
     authorization: Option<Authorization>,
     unit_px: f64,
-    spatial: SpatialRequirements,
+    spatial: SpatialPolicy,
 }
 
 struct ArtifactFrame {
@@ -238,7 +238,6 @@ impl Engine {
 
     pub fn test(&mut self, request: TestRequest, phase: impl Fn(&str)) -> Result<()> {
         validate_payload(&request.payload)?;
-        validate_attempts(request.attempt_limit)?;
         self.prepare(
             PrepareRequest {
                 kind: "signing".into(),
@@ -260,7 +259,6 @@ impl Engine {
             SignRequest {
                 prepared_id,
                 payload: request.payload,
-                attempt_limit: request.attempt_limit,
                 work_limit: request.work_limit,
             },
             phase,
@@ -351,10 +349,9 @@ impl Engine {
                 .enrolled
                 .as_ref()
                 .map_or(
-                    SpatialRequirements {
-                        min_diameter_units: 0.0,
+                    SpatialPolicy {
                         min_anchor_points: request.config.min_anchor_points,
-                        min_anchor_separation_units: 0.0,
+                        min_anchor_distance_units: request.config.min_anchor_distance_units,
                     },
                     |enrolled| enrolled.spatial,
                 )
@@ -381,17 +378,13 @@ impl Engine {
                     y: region.center.y() + analyzed.offset[1],
                     initial_radius: region.initial_radius,
                     radius: region.radius,
-                    pool: region.pool.clone(),
-                    available_points: region.available_points,
+                    feature_ids: region.feature_ids.clone(),
                 })
                 .collect();
             view.combination_count = combinations.combinations.len();
-            view.spatial = combinations.spatial.into();
-            let parameters = ProfileParameters::new(
-                &combination_config,
-                request.config.uncertainty_steps,
-                combinations.spatial,
-            )?;
+            view.spatial = combination_config.spatial.into();
+            let parameters =
+                ProfileParameters::new(&combination_config, request.config.uncertainty_steps)?;
             let budget = enrollment_budget.ok_or("enrollment memory budget missing")?;
             let grid = prepare_enrollment_grid(
                 &combinations.points,
@@ -415,6 +408,7 @@ impl Engine {
                 extracted,
                 &SigningSearchConfig {
                     min_points: request.config.min_points,
+                    max_points: request.config.max_points,
                     min_priority: request.config.min_priority,
                     spatial: self
                         .enrolled
@@ -437,8 +431,7 @@ impl Engine {
                     y: region.center.y() + analyzed.offset[1],
                     initial_radius: region.initial_radius,
                     radius: region.radius,
-                    pool: region.feature_ids.clone(),
-                    available_points: region.feature_ids.len(),
+                    feature_ids: region.feature_ids.clone(),
                 })
                 .collect();
             PreparedWork::Signing(Box::new(search))
@@ -532,7 +525,6 @@ impl Engine {
     pub fn sign(&mut self, request: SignRequest, phase: impl Fn(&str)) -> Result<()> {
         validate_payload(&request.payload)?;
         validate_work(request.work_limit)?;
-        validate_attempts(request.attempt_limit)?;
         let artifact_revision = self
             .prepared
             .as_ref()
@@ -558,7 +550,9 @@ impl Engine {
             return Err("this signing search was already consumed; prepare again".into());
         }
         phase("Searching enrollment for a matching key");
-        let limits = limits(request.attempt_limit)?;
+        // Each fingerprint candidate already consumes work; this derived generic
+        // authorization cap cannot independently shorten the fingerprint search.
+        let limits = limits(request.work_limit)?;
         let action = action(request.payload)?;
         prepared.consumed = true;
         let generated = Cell::new(0usize);
@@ -576,7 +570,7 @@ impl Engine {
             None,
             &limits,
         );
-        let attempted = generated.get().min(request.attempt_limit);
+        let attempted = generated.get().min(request.work_limit);
         let result = match outcome {
             Ok(signed) => {
                 phase("Verifying signature and Merkle proof");
@@ -797,13 +791,6 @@ fn require_config(enrolled: LabConfig, current: LabConfig) -> Result<()> {
 fn validate_work(work: usize) -> Result<()> {
     if !(1..=MAX_WORK).contains(&work) {
         return Err("work limit must be between 1 and 1000000000".into());
-    }
-    Ok(())
-}
-
-fn validate_attempts(attempts: usize) -> Result<()> {
-    if !(1..=MAX_ATTEMPTS).contains(&attempts) {
-        return Err(format!("attempt limit must be between 1 and {MAX_ATTEMPTS}").into());
     }
     Ok(())
 }
@@ -1176,8 +1163,7 @@ mod tests {
         assert_eq!(first.points.len(), 4);
         let changed = LabConfig {
             min_priority: 0.35,
-            min_diameter_fraction: 0.25,
-            min_anchor_separation_fraction: 0.125,
+            min_anchor_distance_units: 4.0,
             ..LabConfig::default()
         };
         engine
@@ -1243,11 +1229,10 @@ mod tests {
         assert_eq!(first.as_bytes(), repeated.as_bytes());
     }
 
-    fn test_spatial_requirements(config: LabConfig) -> SpatialRequirements {
-        SpatialRequirements {
-            min_diameter_units: config.min_diameter_fraction * 3.0,
+    fn test_spatial_requirements(config: LabConfig) -> SpatialPolicy {
+        SpatialPolicy {
             min_anchor_points: config.min_anchor_points,
-            min_anchor_separation_units: config.min_anchor_separation_fraction * 3.0,
+            min_anchor_distance_units: config.min_anchor_distance_units,
         }
     }
 
@@ -1297,12 +1282,9 @@ mod tests {
             candidate_limit: Some(budget.candidate_limit()),
             estimated_peak_bytes: Some(budget.estimated_peak_bytes(1).unwrap()),
         };
-        let parameters = ProfileParameters::new(
-            &config.combinations().unwrap(),
-            config.uncertainty_steps,
-            test_spatial_requirements(config),
-        )
-        .unwrap();
+        let parameters =
+            ProfileParameters::new(&config.combinations().unwrap(), config.uncertainty_steps)
+                .unwrap();
         engine.prepared = Some(Prepared {
             view: view.clone(),
             work: PreparedWork::Enrollment {
@@ -1352,12 +1334,9 @@ mod tests {
         let limits = limits(1).unwrap();
         let candidate = gnorix::biometrics::Candidate::new(vec![7; 32]).unwrap();
         let candidates = Box::new(std::iter::once(Ok(candidate)));
-        let parameters = ProfileParameters::new(
-            &config.combinations().unwrap(),
-            config.uncertainty_steps,
-            test_spatial_requirements(config),
-        )
-        .unwrap();
+        let parameters =
+            ProfileParameters::new(&config.combinations().unwrap(), config.uncertainty_steps)
+                .unwrap();
         let enrollment = enrollment::enroll_candidates(
             &ExampleCrypto,
             candidates,
@@ -1656,7 +1635,7 @@ mod tests {
         assert!(require_config(enrolled, enrolled).is_ok());
         for changed in [
             LabConfig {
-                min_diameter_fraction: 0.4,
+                max_points: 7,
                 ..enrolled
             },
             LabConfig {
@@ -1664,7 +1643,7 @@ mod tests {
                 ..enrolled
             },
             LabConfig {
-                min_anchor_separation_fraction: 0.2,
+                min_anchor_distance_units: 7.0,
                 ..enrolled
             },
         ] {
@@ -1674,17 +1653,17 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_billion_attempts_without_allocating_or_running_the_search() {
-        assert_eq!(MAX_ATTEMPTS, 1_000_000_000);
-        for count in [1, 1_000_001, MAX_ATTEMPTS] {
-            validate_attempts(count).unwrap();
+    fn one_work_budget_also_bounds_crypto_attempts_without_running_the_search() {
+        assert_eq!(MAX_WORK, 1_000_000_000);
+        for count in [1, 1_000_001, MAX_WORK] {
+            validate_work(count).unwrap();
             assert_eq!(limits(count).unwrap().candidate_attempts.get(), count);
         }
-        for count in [0, MAX_ATTEMPTS + 1, usize::MAX] {
-            let error = validate_attempts(count).unwrap_err().to_string();
+        for count in [0, MAX_WORK + 1, usize::MAX] {
+            let error = validate_work(count).unwrap_err().to_string();
             assert_eq!(
                 error,
-                format!("attempt limit must be between 1 and {MAX_ATTEMPTS}")
+                format!("work limit must be between 1 and {MAX_WORK}")
             );
         }
         assert_eq!(MAX_WORK, 1_000_000_000);

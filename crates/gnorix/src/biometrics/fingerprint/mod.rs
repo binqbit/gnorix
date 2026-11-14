@@ -38,8 +38,8 @@ pub use cleanup::{
 pub use combinations::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FeatureCombination,
     FeatureCombinations, RegionBounds, SigningRegion, SigningSearch, SigningSearchConfig,
-    SpatialPolicy, SpatialRequirements, derive_spatial_requirements, generate_combinations,
-    prepare_signing_search, satisfies_spatial_requirements, signing_candidates,
+    SpatialPolicy, generate_combinations, prepare_signing_search, satisfies_spatial_requirements,
+    signing_candidates,
 };
 pub use enhancement::LocalPalette;
 pub use features::{

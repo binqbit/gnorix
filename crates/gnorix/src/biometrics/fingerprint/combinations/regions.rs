@@ -1,4 +1,4 @@
-//! Shared adaptive circles, followed by bounded enrollment pool selection.
+//! Shared adaptive circles and automatic regional combination selection.
 
 mod layout;
 
@@ -55,11 +55,6 @@ pub(super) struct RegionSelection {
     pub subsets: Vec<enumeration::RankedSubset>,
 }
 
-struct PoolSelection {
-    indices: Vec<usize>,
-    subsets: Vec<enumeration::RankedSubset>,
-}
-
 pub(super) fn select(
     points: &[CombinationPoint],
     bounds: RegionBounds,
@@ -68,36 +63,53 @@ pub(super) fn select(
     spatial: spatial::SpatialPixels,
     work: &mut WorkBudget,
 ) -> Result<Vec<RegionSelection>, CombinationError> {
-    let target = config
-        .min_points
-        .checked_mul(config.pool_multiplier)
-        .ok_or(CombinationError::InvalidConfig("point pool size overflows"))?
-        .min(points.len());
+    let target = config.max_points.min(points.len());
     circular_regions(points, bounds, unit_px, config.radius_units, target, work)?
         .into_iter()
-        .map(|region| {
-            let pool = select_pool(points, &region, config, target, spatial, work)?;
-            Ok(RegionSelection {
-                region: CombinationRegion {
-                    id: region.id,
-                    center: region.center,
-                    initial_radius: region.initial_radius,
-                    radius: region.radius,
-                    available_points: region.indices.len(),
-                    pool: pool
-                        .indices
-                        .into_iter()
-                        .map(|index| points[index].id)
-                        .collect(),
-                    combination_count: pool.subsets.len(),
-                },
-                subsets: pool.subsets,
-            })
-        })
+        .map(|region| select_region(points, region, config, spatial, work))
         .collect()
 }
 
-fn pool_data(
+fn select_region(
+    points: &[CombinationPoint],
+    region: RegionCandidates,
+    config: &CombinationConfig,
+    spatial: spatial::SpatialPixels,
+    work: &mut WorkBudget,
+) -> Result<RegionSelection, CombinationError> {
+    let (priorities, positions) = regional_data(points, &region.indices, work)?;
+    let coverage = enumeration::enumerate_spatial(
+        &priorities,
+        &positions,
+        config.min_points,
+        config.max_points.min(region.indices.len()),
+        spatial,
+        work,
+    )?;
+    if let Some(&rank) = coverage.uncovered.first() {
+        return Err(CombinationError::UncoverablePoint {
+            region: region.id,
+            feature_id: points[region.indices[rank]].id,
+        });
+    }
+    Ok(RegionSelection {
+        region: CombinationRegion {
+            id: region.id,
+            center: region.center,
+            initial_radius: region.initial_radius,
+            radius: region.radius,
+            feature_ids: region
+                .indices
+                .into_iter()
+                .map(|index| points[index].id)
+                .collect(),
+            combination_count: coverage.subsets.len(),
+        },
+        subsets: coverage.subsets,
+    })
+}
+
+fn regional_data(
     points: &[CombinationPoint],
     indices: &[usize],
     work: &mut WorkBudget,
@@ -116,91 +128,8 @@ fn pool_data(
     ))
 }
 
-/// Never discard an uncovered selected point. Rescue is allowed only when the
-/// original top-priority pool has no valid subset at all.
-fn select_pool(
-    points: &[CombinationPoint],
-    region: &RegionCandidates,
-    config: &CombinationConfig,
-    target: usize,
-    spatial: spatial::SpatialPixels,
-    work: &mut WorkBudget,
-) -> Result<PoolSelection, CombinationError> {
-    let top = &region.indices[..target];
-    let failure = |index: usize| CombinationError::UncoverablePoint {
-        region: region.id,
-        feature_id: points[index].id,
-    };
-    if spatial.anchors > target {
-        return Err(failure(top[0]));
-    }
-    let coverage = select_subsets(points, top, config, spatial, work)?;
-    if coverage.uncovered.is_empty() {
-        work.spend(target)?;
-        return Ok(PoolSelection {
-            indices: top.to_vec(),
-            subsets: coverage.subsets,
-        });
-    }
-    if !coverage.subsets.is_empty() {
-        return Err(failure(top[coverage.uncovered[0]]));
-    }
-    let (priorities, positions) = pool_data(points, &region.indices, work)?;
-    let mut ranked = enumeration::RankedSubsets::new(
-        &priorities,
-        config.min_points.max(spatial.anchors),
-        target,
-        work,
-    )?;
-    while let Some(seed) = ranked.next(&priorities, work)? {
-        if !spatial::subset(&positions, &seed.ranks, spatial, work)? {
-            continue;
-        }
-        work.spend(region.indices.len())?;
-        let mut ranks = seed.ranks;
-        for rank in 0..region.indices.len() {
-            if ranks.len() == target {
-                break;
-            }
-            work.spend(ranks.len() + 1)?;
-            if !ranks.contains(&rank) {
-                ranks.push(rank);
-            }
-        }
-        ranks.sort_unstable();
-        let pool: Vec<_> = ranks.into_iter().map(|rank| region.indices[rank]).collect();
-        let coverage = select_subsets(points, &pool, config, spatial, work)?;
-        if let Some(&uncovered) = coverage.uncovered.first() {
-            return Err(failure(pool[uncovered]));
-        }
-        return Ok(PoolSelection {
-            indices: pool,
-            subsets: coverage.subsets,
-        });
-    }
-    Err(failure(top[0]))
-}
-
-fn select_subsets(
-    points: &[CombinationPoint],
-    indices: &[usize],
-    config: &CombinationConfig,
-    spatial: spatial::SpatialPixels,
-    work: &mut WorkBudget,
-) -> Result<enumeration::SpatialCoverage, CombinationError> {
-    let (priorities, positions) = pool_data(points, indices, work)?;
-    enumeration::enumerate_spatial(
-        &priorities,
-        &positions,
-        config.min_points,
-        config.combinations_per_region,
-        spatial,
-        work,
-    )
-}
-
-/// Keep every in-circle point for signing. Enrollment alone truncates this list
-/// to its target pool. Sparse circles grow just enough to reach the shared target.
+/// Retain every eligible in-circle point. Sparse circles grow just enough to
+/// reach the explicit maximum, or all available points when fewer exist.
 pub(super) fn circular_regions(
     points: &[CombinationPoint],
     bounds: RegionBounds,

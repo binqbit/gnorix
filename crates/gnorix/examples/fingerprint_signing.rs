@@ -58,9 +58,10 @@ fn main() -> Result<()> {
 
 fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Path) -> Result<()> {
     require_new_output(output_path)?;
-    let limits = settings::limits(settings::attempt_limit()?)?;
+    let work = settings::work_limit()?;
+    let limits = settings::limits(work)?;
     let package = read_package(package_path, &limits)?;
-    let controls = settings::read(&package)?;
+    let controls = settings::read(&package, work)?;
     let action = read_action(action_path, &limits)?;
     validate_profile(&package, controls.profile_id)?;
     let secret = secret_input::read_secret(package.commitment().context.spec.secret_policy)?;
@@ -70,9 +71,8 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
     let point_count = candidates.points().len();
     let region_count = candidates.regions().len();
     let spatial = controls.search.spatial;
-    let min_diameter_units = spatial.min_diameter_units;
     let min_anchor_points = spatial.min_anchor_points;
-    let min_anchor_separation_units = spatial.min_anchor_separation_units;
+    let min_anchor_distance_units = spatial.min_anchor_distance_units;
     let attempted = Cell::new(0_usize);
     let counted = Box::new(candidates.inspect(|result| {
         if result.is_ok() {
@@ -92,7 +92,7 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
         Ok(signed) => signed,
         Err(error) => {
             eprintln!(
-                "search failed after generating {} candidates; {point_count} eligible features; {region_count} regions; minimum diameter {min_diameter_units:.6}R; at least {min_anchor_points} anchors separated by at least {min_anchor_separation_units:.6}R: {error}",
+                "search failed after generating {} candidates; {point_count} eligible features; {region_count} regions; at least {min_anchor_points} anchors separated by at least {min_anchor_distance_units:.6}R: {error}",
                 attempted.get(),
             );
             return Err(error.into());
@@ -100,7 +100,7 @@ fn sign(image: &Path, package_path: &Path, action_path: &Path, output_path: &Pat
     };
     publish_verified(&package, &action, &signed, output_path, &limits)?;
     println!(
-        "first matching key after {} candidates; {point_count} eligible features; {region_count} regions; minimum diameter {min_diameter_units:.6}R; at least {min_anchor_points} anchors separated by at least {min_anchor_separation_units:.6}R; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
+        "first matching key after {} candidates; {point_count} eligible features; {region_count} regions; at least {min_anchor_points} anchors separated by at least {min_anchor_distance_units:.6}R; R={unit_px:.6}px; signature and Merkle proof verified\n{}",
         attempted.get(),
         output_path.display(),
     );

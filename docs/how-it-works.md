@@ -18,7 +18,7 @@ If alignment or coverage is inadequate, the process requests another capture or 
 
 ## 3. Define the accepted variation
 
-Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. Each point must meet the same inclusive minimum final priority in both stages. Each combination also needs a sufficiently separated source-point pair: the fingerprint examples use one third of the enrolled pattern bounds' shorter side, retain that distance in ridge-width units and reuse it on partial captures. Insufficient eligible points or span require another capture or a new enrollment policy, not weaker points or a smaller crop-derived threshold.
+Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. Each point must meet the same inclusive minimum final priority in both stages. Each combination must fit the explicit minimum/maximum point count and contain enough pairwise-separated anchors, with the remaining points inside their convex hull. The fingerprint examples start with 3–6 points and at least three anchors separated by 6R, where R is the measured mean dark-ridge width. Partial captures reuse the same distance in R. Insufficient eligible points or geometric support require another capture or a new enrollment policy; the threshold does not shrink with the crop.
 
 The goal is not to flatten all measurements into a trivial common value. It is to preserve useful distinctions while accounting for expected variability. Greater tolerance can improve acceptance of genuine recaptures but can also expand the space accepted by the enrollment. The policy must balance these effects.
 
@@ -40,7 +40,7 @@ The root identifies the accepted set; the candidate public key remains the key u
 
 ## 6. Retain membership material
 
-The person needs a way to obtain the correct path for a reconstructed key. Retained tree, index or proof material supports this lookup. The fingerprint package also carries canonical public reconstruction settings, including the fixed span, authenticated by the context's profile ID. These retained materials are separate from the trusted public commitment and from the fresh biometric reading.
+The person needs a way to obtain the correct path for a reconstructed key. Retained tree, index or proof material supports this lookup. The fingerprint package also carries canonical public reconstruction settings, including the point-count range and anchor policy in R, authenticated by the context's profile ID. These retained materials are separate from the trusted public commitment and from the fresh biometric reading.
 
 This material is not automatically harmless because it omits raw images or private keys. Its handling, backup and recovery matter. Losing it can prevent an otherwise valid reconstructed key from being used with the existing enrollment.
 
