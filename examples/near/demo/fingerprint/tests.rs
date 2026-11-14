@@ -70,8 +70,44 @@ fn reported_five_point_capture_signs_with_local_coverage() {
             &AtomicBool::new(false),
         )
         .unwrap();
-    // The shared 5R policy changes the first eligible signing group.
-    assert_eq!(signed.matched_feature_ids, [21, 24, 29, 31, 36]);
+    // These five observed points correspond to a compact enrolled group.
+    // Midpoint coverage makes this group available earlier in the search.
+    assert_eq!(signed.matched_feature_ids, [29, 36, 43, 47, 50]);
+    assert_signed_action(&wallet, action, signed);
+}
+
+#[test]
+#[ignore = "extracts the exact hosted partial scan and searches real signing keys"]
+fn reported_eight_feature_capture_reconstructs_a_five_point_key() {
+    let wallet = FingerprintTemplate::prepare(0, Some(5))
+        .unwrap()
+        .enroll("near:regression", "wallet.fixture")
+        .unwrap();
+    // Reproduce the reported center, independently of the signing outcome.
+    let sampled = wallet.sample(67_294).unwrap();
+    assert_eq!(sampled.metadata.circle.x, 103.0);
+    assert_eq!(sampled.metadata.circle.y, 153.0);
+    assert_eq!(sampled.metadata.circle.radius, 82.3286098510111);
+    let action = Action {
+        operation: "wallet.ft_transfer.v1".into(),
+        payload: b"reported-eight-feature-capture".to_vec(),
+        nonce: 0,
+        expires_at_ms: 2_000_000_000_000,
+    };
+    let signed = wallet
+        .sign(
+            action.clone(),
+            &sampled,
+            |points| {
+                assert_eq!(
+                    points.iter().map(|point| point.id).collect::<Vec<_>>(),
+                    [6, 11, 13, 14, 32, 38, 43, 45]
+                );
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    assert_eq!(signed.matched_feature_ids, [11, 13, 38, 43, 45]);
     assert_signed_action(&wallet, action, signed);
 }
 

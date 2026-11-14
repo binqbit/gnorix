@@ -185,7 +185,7 @@ The [lifecycle integration tests](../crates/core/tests/lifecycle/main.rs) demons
 For an existing fingerprint `.grx` package, validate its retained public policy,
 then call `fingerprint::analyze` → `fingerprint::signing_candidates` →
 `authorization::sign_candidates`, followed by trusted verification. Example
-profile **v9** binds the point-count range, shared priority cutoff, anchor count
+profile **v10** binds the point-count range, shared priority cutoff, anchor count
 and distance in R, baseline enrollment, grid padding and subset-selection policy.
 Enrollment combines weighted selection with point-coverage witnesses and compact
 local subsets. Signing searches regional subsets lazily and stops at the first

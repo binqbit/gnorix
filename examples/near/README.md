@@ -138,8 +138,10 @@ distances are not required. Enrollment stores rounded baselines only. Signing
 checks each ranked subset's positional variants lazily, stopping at the first
 member. Work includes geometry and descriptor processing, not just key attempts.
 
-Example profile **v9** binds these settings and the bounded, priority-weighted
-subset selection with local coverage groups. See [feature combinations](../../docs/feature-combinations.md)
+Example profile **v10** binds these settings and the bounded, priority-weighted
+subset selection with local coverage groups around features and between pairs of
+features. The 5R anchor distance leaves more room for extraction variation than
+the previous 6R demo setting; the comparison itself remains strict. See [feature combinations](../../docs/feature-combinations.md)
 and [fresh-image signing](../../docs/fingerprint-signing.md) for the shared
 algorithms. Earlier profiles need new enrollment. The Lab has different defaults
 and optional image artifacts; its settings do not control this NEAR service.

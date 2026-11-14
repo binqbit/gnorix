@@ -11,7 +11,9 @@ use crate::model::TOKEN_UNIT;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "builds contracts, analyzes both bundled fingerprint images and runs a local Sandbox"]
 async fn fingerprint_approvals_execute_real_transfers_between_both_wallets() -> Result<()> {
-    let demo = crate::sessions::Demo::new(crate::config::Config::default())?;
+    let config =
+        crate::config::Config::parse(["--points-per-combination", "5"].map(str::to_owned))?;
+    let demo = crate::sessions::Demo::new(config)?;
     demo.start();
     let (app, _) = demo.session(None).ok().context("create test session")?;
     let outcome = timeout(Duration::from_secs(900), exercise_application(&app)).await;
@@ -51,8 +53,8 @@ async fn exercise_application(app: &Session) -> Result<()> {
         );
     }
 
-    // These seeds were checked independently under the production policy. Each
-    // appears once; a failed crop is asserted as failure, never retried silently.
+    // These reported captures were reproduced independently under the five-point
+    // public profile. Each appears once, with no outcome-based retry.
     let failed_capture = failed_attempt_is_retained(app).await?;
 
     let forward = TOKEN_UNIT * 125 / 100;
@@ -60,7 +62,7 @@ async fn exercise_application(app: &Session) -> Result<()> {
     let steps = [
         (
             0,
-            4_u64,
+            67_294_u64,
             "1.25",
             forward,
             [1000 * TOKEN_UNIT - forward, 1000 * TOKEN_UNIT + forward],
@@ -68,7 +70,7 @@ async fn exercise_application(app: &Session) -> Result<()> {
         ),
         (
             1,
-            1_u64,
+            118_278_u64,
             "2.5",
             reverse,
             [
@@ -114,7 +116,7 @@ async fn exercise_application(app: &Session) -> Result<()> {
             "new action reused a capture identifier"
         );
         ensure!(capture.matched_feature_ids == prepared.matched_feature_ids);
-        ensure!((3..=6).contains(&prepared.matched_feature_ids.len()));
+        ensure!(prepared.matched_feature_ids.len() == 5);
         ensure!(
             prepared
                 .matched_feature_ids
@@ -200,12 +202,15 @@ async fn failed_attempt_is_retained(app: &Session) -> Result<String> {
     ensure!(failed.prepared.is_none() && failed.transaction.is_none());
     ensure!(
         failed.error.as_deref()
-            == Some("This capture did not reconstruct an enrolled key. Try a new random capture."),
-        "expected the known crop's unsuccessful reconstruction"
+            == Some(
+                "This capture has too few usable features for signing. Try a new random capture."
+            ),
+        "four usable points must not satisfy the five-point profile"
     );
     check_capture(app, &failed, 0)?;
     check_balances_and_nonces(&failed, [1000 * TOKEN_UNIT; 2], [0, 0])?;
     let capture = failed.capture.as_ref().context("failed scan disappeared")?;
+    ensure!(capture.feature_count == Some(4));
     ensure!(capture.id == "1" && capture.matched_feature_ids.is_empty());
     {
         let guard = app.engine.lock().await;

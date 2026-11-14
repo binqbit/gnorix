@@ -200,7 +200,7 @@ The current coordinate descriptor has a recorded cross-subject match: a
 historical profile-v7 Lab test enrolled SOCOFing **270 / right index** and signed
 with **226 / right middle**, finding a member after **414 candidate checks**.
 Both the signature and Merkle proof verified. This is one observed negative
-control, not a measured false-acceptance rate. Current profile v9 changes subset
+control, not a measured false-acceptance rate. Current profile v10 changes subset
 selection, not the coordinate encoding, so the observation cannot be dismissed
 as fixed by the new schedule. Earlier counts are not current-profile benchmarks.
 

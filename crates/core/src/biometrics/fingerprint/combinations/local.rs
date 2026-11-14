@@ -11,10 +11,11 @@ use super::{
     spatial,
 };
 
-/// Keep the regional allocation intact and add at most one nearest valid group
-/// containing each source feature. Every group still satisfies the original
-/// spatial policy. A small neighborhood lacking valid anchors is expanded by
-/// the lazy frontier rather than treated as an uncovered regional feature.
+/// Keep the regional allocation intact and add one nearest valid group around
+/// each source feature and pair midpoint. Feature-centered witnesses contain
+/// their source feature; midpoint witnesses cover compact groups between them.
+/// Every group still satisfies the original spatial policy. A neighborhood
+/// lacking valid anchors expands through the lazy frontier.
 pub(super) fn supplement(
     priorities: &[f64],
     positions: &[Point],
@@ -25,14 +26,33 @@ pub(super) fn supplement(
     work: &mut WorkBudget,
 ) -> Result<(), CombinationError> {
     let minimum = minimum.max(policy.anchors);
+    check_center_budget(positions.len(), work)?;
     let mut seen = BTreeSet::new();
     for subset in selected.iter() {
         work.spend(subset.ranks.len())?;
         seen.insert(subset.ranks.clone());
     }
-    for center in 0..positions.len() {
-        let neighbors = neighbors(center, priorities, positions, work)?;
-        if let Some(ranks) = nearest_valid(&neighbors, minimum, maximum, positions, policy, work)? {
+    let feature_centers = positions
+        .iter()
+        .enumerate()
+        .map(|(rank, &position)| (position, Some(rank)));
+    let midpoints = positions.iter().enumerate().flat_map(|(first, &a)| {
+        positions[first + 1..]
+            .iter()
+            .map(move |&b| (midpoint(a, b), None))
+    });
+    for (center, required_rank) in feature_centers.chain(midpoints) {
+        work.spend(1)?;
+        let neighbors = neighbors(center, required_rank, priorities, positions, work)?;
+        if let Some(ranks) = nearest_valid(
+            &neighbors,
+            required_rank.is_some(),
+            minimum,
+            maximum,
+            positions,
+            policy,
+            work,
+        )? {
             work.spend(ranks.len())?;
             if seen.insert(ranks.clone()) {
                 selected.push(enumeration::ranked_subset(priorities, ranks));
@@ -43,13 +63,35 @@ pub(super) fn supplement(
     Ok(())
 }
 
+fn check_center_budget(count: usize, work: &WorkBudget) -> Result<(), CombinationError> {
+    let pairs = count
+        .checked_mul(count.saturating_sub(1))
+        .map(|pairs| pairs / 2)
+        .ok_or(CombinationError::WorkLimit)?;
+    let minimum_work = pairs
+        .checked_add(count)
+        .and_then(|centers| count.checked_add(1)?.checked_mul(centers))
+        .ok_or(CombinationError::WorkLimit)?;
+    // Each lazy center visits every position, before sorting or searching.
+    if minimum_work > work.remaining {
+        return Err(CombinationError::WorkLimit);
+    }
+    Ok(())
+}
+
+fn midpoint(a: Point, b: Point) -> Point {
+    Point::new(a.x() / 2.0 + b.x() / 2.0, a.y() / 2.0 + b.y() / 2.0)
+        .expect("halved finite coordinates have a finite midpoint")
+}
+
 struct Neighbor {
     rank: usize,
     distance: f64,
 }
 
 fn neighbors(
-    center: usize,
+    center: Point,
+    required_rank: Option<usize>,
     priorities: &[f64],
     positions: &[Point],
     work: &mut WorkBudget,
@@ -60,7 +102,7 @@ fn neighbors(
         .enumerate()
         .map(|(rank, point)| Neighbor {
             rank,
-            distance: (point.x() - positions[center].x()).hypot(point.y() - positions[center].y()),
+            distance: (point.x() - center.x()).hypot(point.y() - center.y()),
         })
         .collect::<Vec<_>>();
     if neighbors
@@ -74,8 +116,8 @@ fn neighbors(
     let mut comparisons = 0_usize;
     neighbors.sort_unstable_by(|first, second| {
         comparisons = comparisons.saturating_add(1);
-        (first.rank != center)
-            .cmp(&(second.rank != center))
+        (Some(first.rank) != required_rank)
+            .cmp(&(Some(second.rank) != required_rank))
             .then_with(|| first.distance.total_cmp(&second.distance))
             .then_with(|| priorities[second.rank].total_cmp(&priorities[first.rank]))
             // Regional ranks already use priority and ascending source IDs.
@@ -87,6 +129,7 @@ fn neighbors(
 
 fn nearest_valid(
     neighbors: &[Neighbor],
+    fixed_first: bool,
     minimum: usize,
     maximum: usize,
     positions: &[Point],
@@ -112,10 +155,11 @@ fn nearest_valid(
 
         // As with the ranked regional frontier, decrementing the first
         // nonminimal mutable index identifies each tuple's unique parent.
-        // Index zero is fixed: every witness must contain its own center.
+        // Feature witnesses fix index zero. Midpoint witnesses have no required
+        // member, so the same frontier also advances their first index.
         let last = current.first_nonminimal.min(current.indices.len() - 1);
         work.spend(last + 1)?;
-        for position in 1..=last {
+        for position in usize::from(fixed_first)..=last {
             let limit = current
                 .indices
                 .get(position + 1)

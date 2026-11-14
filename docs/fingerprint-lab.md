@@ -106,7 +106,7 @@ Changing enrollment parameters, including minimum feature priority, requires a n
 - **Incomplete:** the work budget stopped signing. This is not a completed no-match result. Enrollment baseline counts that exceed the memory-derived limits are rejected during preparation, before a package is created.
 - **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
 
-The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The selection and anchor policy uses profile v9 and is retained inside container-v2 `.grx` packages; signing reads the saved policy. Recreate earlier test enrollments rather than mixing the interpretations.
+The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The selection and anchor policy uses profile v10 and is retained inside container-v2 `.grx` packages; signing reads the saved policy. Recreate earlier test enrollments rather than mixing the interpretations.
 
 ## Local data
 
@@ -120,7 +120,7 @@ Use the full source as a control, then test smaller circles and altered scans.
 Inspect eligible features, regions, attempted keys and the final status. A crop
 may omit every enrolled subset despite showing many features. Test positive and
 negative controls under the actual retained profile; historical v7/v8 leaf
-counts and first-match positions do not describe current profile v9.
+counts and first-match positions do not describe current profile v10.
 
 A successful signature proves that a generated key belongs to the retained set.
 It does not establish biometric identity. The [canonical security-boundary

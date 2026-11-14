@@ -62,15 +62,82 @@ fn compact_frontier_matches_an_independent_exhaustive_distance_oracle() {
                                 .then(first.1.total_cmp(&second.1))
                         });
                     let mut work = WorkBudget::new(100_000);
-                    let nearby = neighbors(center, &priorities, &points, &mut work).unwrap();
+                    let nearby = neighbors(
+                        points[center],
+                        Some(center),
+                        &priorities,
+                        &points,
+                        &mut work,
+                    )
+                    .unwrap();
                     let actual =
-                        nearest_valid(&nearby, minimum, maximum, &points, policy, &mut work)
+                        nearest_valid(&nearby, true, minimum, maximum, &points, policy, &mut work)
                             .unwrap();
                     assert_eq!(actual.is_some(), expected.is_some());
                     if let Some(ranks) = actual {
                         assert!(ranks.contains(&center));
                         let selected = ranks.iter().map(|&rank| points[rank]).collect::<Vec<_>>();
                         let actual = cost(points[center], &selected);
+                        let expected = expected.unwrap();
+                        assert_eq!(actual.0, expected.0);
+                        assert!((actual.1 - expected.1).abs() < 1e-12);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn midpoint_frontier_matches_an_independent_exhaustive_distance_oracle() {
+    let points = positions(&[
+        (0., 0.),
+        (1., 0.),
+        (-1., 2.),
+        (4., 0.),
+        (0., 5.),
+        (-4., -3.),
+        (3., 4.),
+    ]);
+    let priorities = [1., 0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
+    let centers = positions(&[(0.5, 0.), (1.5, 2.), (-0.5, 1.), (2., 2.5)]);
+    for minimum in 3..=5 {
+        for maximum in minimum..=5 {
+            for separation in [0., 2., 5.] {
+                let policy = spatial::SpatialPixels {
+                    anchors: 3,
+                    separation,
+                };
+                for &center in &centers {
+                    let expected = (1_usize..1 << points.len())
+                        .filter(|mask| (minimum..=maximum).contains(&(mask.count_ones() as usize)))
+                        .filter_map(|mask| {
+                            let selected = points
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(rank, &point)| {
+                                    (mask & (1 << rank) != 0).then_some(point)
+                                })
+                                .collect::<Vec<_>>();
+                            spatial::check(&selected, policy, &mut WorkBudget::new(10_000))
+                                .unwrap()
+                                .then(|| cost(center, &selected))
+                        })
+                        .min_by(|first, second| {
+                            first
+                                .0
+                                .total_cmp(&second.0)
+                                .then(first.1.total_cmp(&second.1))
+                        });
+                    let mut work = WorkBudget::new(100_000);
+                    let nearby = neighbors(center, None, &priorities, &points, &mut work).unwrap();
+                    let actual =
+                        nearest_valid(&nearby, false, minimum, maximum, &points, policy, &mut work)
+                            .unwrap();
+                    assert_eq!(actual.is_some(), expected.is_some());
+                    if let Some(ranks) = actual {
+                        let selected = ranks.iter().map(|&rank| points[rank]).collect::<Vec<_>>();
+                        let actual = cost(center, &selected);
                         let expected = expected.unwrap();
                         assert_eq!(actual.0, expected.0);
                         assert!((actual.1 - expected.1).abs() < 1e-12);
@@ -157,9 +224,9 @@ fn compact_search_expands_past_close_points_until_the_required_anchors_exist() {
         separation: 5.,
     };
     let mut work = WorkBudget::new(100_000);
-    let nearby = neighbors(0, &priorities, &points, &mut work).unwrap();
+    let nearby = neighbors(points[0], Some(0), &priorities, &points, &mut work).unwrap();
     assert!(nearby[..5].iter().all(|neighbor| neighbor.distance <= 1.));
-    let selected = nearest_valid(&nearby, 5, 5, &points, policy, &mut work)
+    let selected = nearest_valid(&nearby, true, 5, 5, &points, policy, &mut work)
         .unwrap()
         .unwrap();
     assert!(selected.contains(&0));
@@ -185,4 +252,66 @@ fn local_selection_reports_resource_exhaustion() {
         ),
         Err(CombinationError::WorkLimit)
     ));
+    assert!(matches!(
+        check_center_budget(usize::MAX, &WorkBudget::new(usize::MAX)),
+        Err(CombinationError::WorkLimit)
+    ));
+    assert!(matches!(
+        check_center_budget(100, &WorkBudget::new(10_000)),
+        Err(CombinationError::WorkLimit)
+    ));
+}
+
+#[test]
+fn local_witnesses_cover_a_partial_scan_centered_between_source_features() {
+    let points = positions(&[
+        (0., 0.),
+        (10., 0.),
+        (20., 0.),
+        (0., 10.),
+        (20., 10.),
+        (0., 20.),
+        (10., 20.),
+        (20., 20.),
+    ]);
+    let priorities = [0.8; 8];
+    let policy = spatial::SpatialPixels {
+        anchors: 3,
+        separation: 3.,
+    };
+    let mut selected = Vec::new();
+    supplement(
+        &priorities,
+        &points,
+        5,
+        5,
+        policy,
+        &mut selected,
+        &mut WorkBudget::new(100_000),
+    )
+    .unwrap();
+
+    // The center (10, 10) is between observed features. Its compact valid
+    // group is missed when witnesses can only be centered on a feature.
+    assert!(selected.iter().any(|group| group.ranks == [0, 1, 3, 4, 6]));
+
+    let transformed = points
+        .iter()
+        .map(|point| Point::new(2.0 * point.x() + 100., 2.0 * point.y() - 80.).unwrap())
+        .collect::<Vec<_>>();
+    let mut repeated = Vec::new();
+    supplement(
+        &priorities,
+        &transformed,
+        5,
+        5,
+        spatial::SpatialPixels {
+            anchors: 3,
+            separation: 6.,
+        },
+        &mut repeated,
+        &mut WorkBudget::new(100_000),
+    )
+    .unwrap();
+    assert_eq!(selected, repeated);
 }

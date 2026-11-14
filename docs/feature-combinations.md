@@ -35,7 +35,10 @@ Select distinct valid subsets in the cycle **H, M, H, L**. Empty or exhausted ba
 For N regional points, enrollment targets **3N subsets**, or all admissible subsets if fewer exist. It then adds:
 
 - Coverage witnesses for any regional point not represented yet. If a point cannot belong to any valid subset in the configured size range, the entire operation fails with its region and source ID.
-- At most one compact valid group around each regional point. The group includes that point and prefers the smallest farthest-neighbor distance, then the smallest total distance. Its nearest-neighbor search expands until the same spatial constraints can be met.
+- At most one compact valid group around each regional point, including that point.
+- At most one compact valid group around the midpoint of each regional point pair, without requiring either endpoint. These centers cover partial scans whose useful group lies between features.
+
+Both local searches prefer the smallest farthest-neighbor distance, then the smallest total distance, and expand until the same spatial constraints can be met. Duplicate groups merge. Pair centers add at most N(N−1)/2 witnesses per region, and their search shares the work budget; no unrestricted subset enumeration is performed.
 
 These additions improve point coverage and partial-capture coverage; they can exceed 3N and change the overall band proportions. They do not guarantee a match for every crop. Selection and feasibility checks share the work budget; exhaustion is an incomplete computation, not proof that a point is geometrically unusable.
 
