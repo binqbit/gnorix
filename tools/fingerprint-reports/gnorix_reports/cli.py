@@ -141,7 +141,7 @@ def _extract(root: Path, image: Path, destination: Path) -> None:
             "cargo",
             "run",
             "-p",
-            "gnorix",
+            "gnorix-core",
             "--release",
             "--example",
             "fingerprint",

@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use gnorix::{
+use gnorix_core::{
     biometrics::fingerprint::GridBaselineConfig,
     enrollment::{Domain, EnrollmentSpec},
     merkle::Hash,

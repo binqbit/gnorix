@@ -293,6 +293,13 @@ dependencies = [
 name = "gnorix"
 version = "0.1.0-dev.1"
 dependencies = [
+ "gnorix-core",
+]
+
+[[package]]
+name = "gnorix-core"
+version = "0.1.0-dev.1"
+dependencies = [
  "gnorix-example-support",
  "image",
  "serde",
@@ -306,7 +313,7 @@ name = "gnorix-example-support"
 version = "0.1.0-dev.1"
 dependencies = [
  "ed25519-dalek",
- "gnorix",
+ "gnorix-core",
  "hkdf",
  "hmac",
  "serde",

@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, env, str::FromStr};
 
-use gnorix::biometrics::fingerprint::GridShapeConfig;
+use gnorix_core::biometrics::fingerprint::GridShapeConfig;
 
 use super::Result;
 

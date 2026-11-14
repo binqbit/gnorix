@@ -2,7 +2,7 @@
 
 use std::num::NonZeroU64;
 
-use gnorix::{
+use gnorix_core::{
     Error,
     authorization::{self, Action, EnrollmentStatus},
     crypto::SignatureVerifier,

@@ -1,6 +1,6 @@
 //! Canonical, retained fingerprint reconstruction parameters shared by the examples.
 
-use gnorix::{
+use gnorix_core::{
     biometrics::fingerprint::{CombinationConfig, SpatialPolicy},
     merkle::Hash,
 };

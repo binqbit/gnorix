@@ -4,7 +4,7 @@
 //! biometric entropy. Applications choose their own complete provider policy.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use gnorix::{
+use gnorix_core::{
     biometrics::Candidate,
     crypto::{CryptoProvider, SecretInput, SignatureVerifier},
     error::AlgorithmError,

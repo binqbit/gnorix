@@ -16,7 +16,7 @@ use std::{
 use combination_config::read as configuration;
 #[cfg(test)]
 use combination_config::{ENVIRONMENT, parse_configuration};
-use gnorix::biometrics::{
+use gnorix_core::biometrics::{
     Capture,
     fingerprint::{self, CombinationConfig, ExtractionConfig, FeatureCombinations, FeatureKind},
 };
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn export_records_the_required_eligibility_policy() {
         let config = parse_configuration(|_| None).unwrap();
-        let origin = gnorix::biometrics::geometry::Point::new(0.0, 0.0).unwrap();
+        let origin = gnorix_core::biometrics::geometry::Point::new(0.0, 0.0).unwrap();
         let result = FeatureCombinations {
             bounds: fingerprint::RegionBounds {
                 min: origin,

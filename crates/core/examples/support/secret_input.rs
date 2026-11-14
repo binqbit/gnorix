@@ -2,7 +2,7 @@
 
 use std::env;
 
-use gnorix::{crypto::SecretInput, policy::SecretPolicy};
+use gnorix_core::{crypto::SecretInput, policy::SecretPolicy};
 
 use super::Result;
 
@@ -24,7 +24,7 @@ pub(super) fn read_secret(policy: SecretPolicy) -> Result<Option<SecretInput>> {
         (policy, &secret),
         (SecretPolicy::Absent, None) | (SecretPolicy::Required, Some(_))
     ) {
-        return Err(gnorix::Error::SecretPolicyMismatch.into());
+        return Err(gnorix_core::Error::SecretPolicyMismatch.into());
     }
     Ok(secret)
 }

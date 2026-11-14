@@ -1,6 +1,6 @@
 //! Explicit regional enrollment controls shared by the local examples.
 
-use gnorix::biometrics::fingerprint::{CombinationConfig, SpatialPolicy};
+use gnorix_core::biometrics::fingerprint::{CombinationConfig, SpatialPolicy};
 use std::{collections::BTreeMap, env, error::Error, str::FromStr};
 
 pub(super) const ENVIRONMENT: [&str; 7] = [

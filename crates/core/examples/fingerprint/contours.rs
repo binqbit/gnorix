@@ -1,6 +1,6 @@
 //! Serialization of reconstructed geometry and its observed-source provenance.
 
-use gnorix::biometrics::fingerprint::{
+use gnorix_core::biometrics::fingerprint::{
     ClarityMap, ContourReconstruction, GapStatus, NodeKind, SmoothingAdjustment, SmoothingRejection,
 };
 use serde_json::{Value, json};

@@ -43,7 +43,7 @@ Merge identical point sets from overlapping regions, retaining all contributing 
 ## Run the small example
 
 ```sh
-cargo run -p gnorix --example feature_combinations --release --locked -- \
+cargo run -p gnorix-core --example feature_combinations --release --locked -- \
   crates/core/tests/assets/test-fingerprint.png \
   reports/fingerprint/feature-combinations.json
 ```

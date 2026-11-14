@@ -2,7 +2,7 @@
 
 use std::num::NonZeroUsize;
 
-use gnorix::{
+use gnorix_core::{
     Error,
     authorization::{self, EnrollmentStatus},
     crypto::SecretInput,

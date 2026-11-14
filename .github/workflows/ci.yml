@@ -38,6 +38,10 @@ jobs:
       - run: cargo test --workspace --all-targets --locked
       - run: cargo test --workspace --doc --locked
       - run: cargo test --workspace --release --locked
+      - name: Check the public library feature configurations
+        run: |
+          cargo check -p gnorix --no-default-features --locked
+          cargo check -p gnorix --no-default-features --features core --locked
 
   fingerprint-reports:
     runs-on: ubuntu-latest

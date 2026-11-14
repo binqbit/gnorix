@@ -36,7 +36,7 @@ For an explicit diagnostic export, `fingerprint::prepare_grid_shapes(...)` and `
 ## Run on the existing combinations
 
 ```sh
-cargo run -p gnorix --example feature_grid --release --locked -- \
+cargo run -p gnorix-core --example feature_grid --release --locked -- \
   reports/fingerprint/feature-combinations.json \
   reports/fingerprint/feature-grid.json
 ```

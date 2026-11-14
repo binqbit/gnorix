@@ -16,7 +16,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use gnorix::{
+use gnorix_core::{
     authorization::{self, Action, Authorization, EnrollmentStatus},
     biometrics::{
         Capture,
@@ -126,12 +126,15 @@ fn analyze(path: &Path) -> Result<FingerprintFeatures> {
     Ok(fingerprint::analyze(&capture, &controls)?)
 }
 
-fn validate_profile(package: &EnrollmentPackage, expected: gnorix::merkle::Hash) -> Result<()> {
+fn validate_profile(
+    package: &EnrollmentPackage,
+    expected: gnorix_core::merkle::Hash,
+) -> Result<()> {
     if package.commitment().context.profile_id != expected {
-        return Err(gnorix::Error::ProfileMismatch.into());
+        return Err(gnorix_core::Error::ProfileMismatch.into());
     }
     if package.commitment().context.suite_id != ExampleCrypto.suite_id() {
-        return Err(gnorix::Error::SuiteMismatch.into());
+        return Err(gnorix_core::Error::SuiteMismatch.into());
     }
     Ok(())
 }

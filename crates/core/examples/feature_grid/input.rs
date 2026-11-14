@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-use gnorix::biometrics::{
+use gnorix_core::biometrics::{
     fingerprint::{CombinationPoint, FeatureCombination, FeatureKind},
     geometry::Point,
 };

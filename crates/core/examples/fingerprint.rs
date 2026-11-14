@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gnorix::biometrics::{
+use gnorix_core::biometrics::{
     Capture,
     fingerprint::{self, ExtractionConfig, Fingerprint},
 };

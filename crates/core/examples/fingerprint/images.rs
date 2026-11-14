@@ -2,7 +2,7 @@
 
 use std::{error::Error, path::Path};
 
-use gnorix::biometrics::fingerprint::{Fingerprint, RidgeMap};
+use gnorix_core::biometrics::fingerprint::{Fingerprint, RidgeMap};
 use image::GrayImage;
 
 pub(super) fn save(

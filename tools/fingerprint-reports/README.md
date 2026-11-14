@@ -11,7 +11,7 @@ The command runs the Rust extractor, validates its measurements and geometry, an
 
 ## Requirements
 
-Use the Gnorix checkout with its pinned Rust toolchain and `uv`. The Python tool requires Python 3.11 or later; `uv.lock` pins its matplotlib, NumPy and Pillow environment. It invokes Cargo from the checkout root, so discovery of `reports/fingerprint/` does not depend on the launch directory. An explicitly supplied relative image path resolves from the caller's working directory.
+Use the Gnorix checkout with its pinned Rust toolchain and `uv`. The Python tool requires Python 3.11 or later; `uv.lock` pins its matplotlib, NumPy and Pillow environment. It invokes the `fingerprint` example from the `gnorix-core` package through Cargo at the checkout root, so discovery of `reports/fingerprint/` does not depend on the launch directory. An explicitly supplied relative image path resolves from the caller's working directory.
 
 The input must be an opaque PNG. The Rust adapter converts it to grayscale and rejects transparency, excessive dimensions and unsupported inputs. Source dimensions, grayscale conversion and algorithm bounds are described in the [fingerprint guide](../../docs/fingerprint.md). The checked-in fingerprint is a synthetic fixture.
 

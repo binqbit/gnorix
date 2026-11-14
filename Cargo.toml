@@ -1,3 +1,21 @@
+[package]
+name = "gnorix"
+description = "Biometric signing library with optional integrations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = ["core"]
+core = ["dep:gnorix-core"]
+
+[dependencies]
+gnorix-core = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
 [workspace]
 members = ["crates/core", "examples/fingerprint-lab", "examples/support"]
 resolver = "3"
@@ -9,7 +27,8 @@ rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
-gnorix = { path = "crates/core" }
+gnorix = { path = "." }
+gnorix-core = { path = "crates/core" }
 gnorix-example-support = { path = "examples/support" }
 ed25519-dalek = "3.0.0"
 hkdf = "0.13.0"

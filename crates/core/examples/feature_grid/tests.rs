@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use gnorix::biometrics::fingerprint::{self, GridShapeConfig, GridShapes};
+use gnorix_core::biometrics::fingerprint::{self, GridShapeConfig, GridShapes};
 use serde_json::{Value, json};
 
 use super::{

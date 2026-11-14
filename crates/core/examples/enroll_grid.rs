@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gnorix::{
+use gnorix_core::{
     biometrics::fingerprint::{self, GridBaselines},
     crypto::{CryptoProvider, SecretInput, SignatureVerifier},
     enrollment::{self, EnrollmentContext},

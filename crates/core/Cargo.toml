@@ -1,5 +1,5 @@
 [package]
-name = "gnorix"
+name = "gnorix-core"
 description = "Biometric signing foundations and enrollment commitments"
 version.workspace = true
 edition.workspace = true

@@ -1,7 +1,7 @@
 //! Search-only budgets, separated from the enrolled coordinate interpretation.
 
 use super::{Result, enrollment_profile::ProfileParameters};
-use gnorix::{
+use gnorix_core::{
     biometrics::fingerprint::SigningSearchConfig, merkle::Hash, package::EnrollmentPackage,
     package::PackageLimits, policy::Limits,
 };

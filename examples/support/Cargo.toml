@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-gnorix.workspace = true
+gnorix-core.workspace = true
 ed25519-dalek.workspace = true
 hkdf.workspace = true
 hmac.workspace = true

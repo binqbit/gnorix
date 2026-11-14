@@ -6,7 +6,7 @@
 
 use std::{io::Read, num::NonZeroU64};
 
-use gnorix::{
+use gnorix_core::{
     authorization::{Action, Authorization},
     merkle::{Hash, MerkleProof},
     policy::Limits,

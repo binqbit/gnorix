@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 
-use gnorix::{
+use gnorix_core::{
     authorization::{self, Action, Authorization, EnrollmentStatus, VerifiedAuthorization},
     biometrics::{Candidate, Candidates, Capture, MeasurementEngine},
     crypto::{CryptoProvider, SecretInput, SignatureVerifier},
@@ -364,7 +364,7 @@ impl Fixture {
         }
     }
 
-    pub fn sign(&self, symbols: &[u8]) -> gnorix::Result<Authorization> {
+    pub fn sign(&self, symbols: &[u8]) -> gnorix_core::Result<Authorization> {
         authorization::sign(
             &self.measurement,
             &self.crypto,
@@ -379,7 +379,7 @@ impl Fixture {
     pub fn verify<'a>(
         &'a self,
         authorization: &'a Authorization,
-    ) -> gnorix::Result<VerifiedAuthorization<'a>> {
+    ) -> gnorix_core::Result<VerifiedAuthorization<'a>> {
         authorization::verify(
             &self.crypto,
             self.enrollment.commitment(),
@@ -392,7 +392,7 @@ impl Fixture {
     }
 }
 
-pub fn failure<T>(result: gnorix::Result<T>) -> gnorix::Error {
+pub fn failure<T>(result: gnorix_core::Result<T>) -> gnorix_core::Error {
     match result {
         Err(error) => error,
         Ok(_) => panic!("expected operation to fail"),

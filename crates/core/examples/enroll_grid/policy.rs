@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use gnorix::biometrics::fingerprint::{self, CombinationConfig, GridBaselineConfig, SpatialPolicy};
+use gnorix_core::biometrics::fingerprint::{
+    self, CombinationConfig, GridBaselineConfig, SpatialPolicy,
+};
 use serde_json::{Map, Value};
 
 use super::{Result, enrollment_profile::ProfileParameters, input::CombinationInput};
@@ -244,7 +246,7 @@ fn integer(fields: &Map<String, Value>, name: &str) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gnorix::biometrics::geometry::Point;
+    use gnorix_core::biometrics::geometry::Point;
     use serde_json::json;
 
     fn imported() -> CombinationInput {

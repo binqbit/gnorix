@@ -2,7 +2,7 @@
 
 use std::{cell::Cell, error::Error as _, num::NonZeroUsize};
 
-use gnorix::{
+use gnorix_core::{
     Error,
     biometrics::{Candidate, Candidates, MeasurementEngine},
     crypto::{CryptoProvider, SecretInput, SignatureVerifier},

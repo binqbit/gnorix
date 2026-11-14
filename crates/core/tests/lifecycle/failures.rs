@@ -2,7 +2,7 @@
 
 use std::{error::Error as _, num::NonZeroUsize};
 
-use gnorix::{
+use gnorix_core::{
     Error,
     biometrics::Candidate,
     crypto::SecretInput,
@@ -17,7 +17,7 @@ use crate::support::{
 };
 
 fn assert_algorithm_error<T>(
-    result: gnorix::Result<T>,
+    result: gnorix_core::Result<T>,
     expected_stage: Stage,
     expected_source: &str,
 ) {

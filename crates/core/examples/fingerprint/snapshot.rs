@@ -1,6 +1,6 @@
 //! JSON measurements and source-coordinate geometry for the report consumer.
 
-use gnorix::biometrics::fingerprint::{
+use gnorix_core::biometrics::fingerprint::{
     self, CurveGeometry, ExtractionConfig, Fingerprint, NodeKind, WidthConsistency,
 };
 use serde_json::{Value, json};

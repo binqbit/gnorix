@@ -22,7 +22,7 @@ The application retains control over enrollment ownership, permitted actions, re
 
 ## Development
 
-The Rust workspace contains the independent `gnorix` library in `crates/core`. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice.
+The repository-root `gnorix` package is the public library entry point. Its default `core` feature exposes the implementation in `crates/core` (`gnorix-core`) through both `gnorix::core::*` and the direct `gnorix::*` API. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice. See [Development](docs/development.md#using-the-library) for dependency and feature selection.
 
 The [Fingerprint Lab application](examples/fingerprint-lab/README.md) is a separate workspace package with its own manifest and web dependencies. Run it with `cargo run -p gnorix-lab --release --locked`.
 
@@ -30,7 +30,7 @@ Use the pinned Rust 1.99.1 toolchain, then run:
 
 ```sh
 cargo test --workspace --all-targets --locked
-cargo run -p gnorix --example merkle --locked
+cargo run -p gnorix-core --example merkle --locked
 ```
 
 The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection, protected persistence and the NEAR execution adapter remain development work. See [Development](docs/development.md) for the complete workflow and test scope.

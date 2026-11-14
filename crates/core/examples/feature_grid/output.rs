@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use gnorix::biometrics::{
+use gnorix_core::biometrics::{
     fingerprint::{FeatureKind, GridShape, GridShapeConfig, GridShapes, GridVariant},
     geometry::Point,
 };

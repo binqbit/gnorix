@@ -1,6 +1,6 @@
 //! Lossless native feature-evidence export; no scoring in the report adapter.
 
-use gnorix::biometrics::fingerprint::{
+use gnorix_core::biometrics::fingerprint::{
     ContextStop, FeatureAssessment, FeatureContext, FeatureKind, FeaturePolicy, FeatureReason,
     FeatureStrength,
 };

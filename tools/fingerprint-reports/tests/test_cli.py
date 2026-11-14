@@ -133,7 +133,7 @@ class CommandTests(unittest.TestCase):
                 "cargo",
                 "run",
                 "-p",
-                "gnorix",
+                "gnorix-core",
                 "--release",
                 "--example",
                 "fingerprint",

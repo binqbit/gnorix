@@ -1,6 +1,6 @@
 //! Export native local clarity without changing source geometry or measurements.
 
-use gnorix::biometrics::{fingerprint::ClarityMap, geometry::Point};
+use gnorix_core::biometrics::{fingerprint::ClarityMap, geometry::Point};
 use serde_json::{Value, json};
 
 pub(super) fn snapshot(map: &ClarityMap) -> Value {

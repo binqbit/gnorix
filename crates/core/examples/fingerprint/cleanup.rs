@@ -1,6 +1,6 @@
 //! Source evidence and raster provenance for intermediate ridge cleanup.
 
-use gnorix::biometrics::fingerprint::{
+use gnorix_core::biometrics::fingerprint::{
     ClarityMap, LoopEvidence, NodeKind, RidgeCleanup, SourceDecision, SpurEvidence,
 };
 use serde_json::{Value, json};

@@ -12,7 +12,7 @@ mod tests;
 
 use std::{env, error::Error, fs::File, path::PathBuf};
 
-use gnorix::biometrics::fingerprint;
+use gnorix_core::biometrics::fingerprint;
 use grid_config::read as configuration;
 #[cfg(test)]
 use grid_config::{ENVIRONMENT, parse as parse_configuration};

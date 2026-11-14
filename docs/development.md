@@ -2,7 +2,7 @@
 
 ## Workspace and setup
 
-The repository uses a Rust 2024 Cargo workspace. `crates/core` is the reusable library; `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the existing shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
+The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
 Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
 
@@ -13,7 +13,34 @@ cargo fetch --locked
 
 On a system-managed toolchain, including NixOS, provide the same tools through the system's package configuration and check `rustc --version` and `cargo --version`. The library needs no scanner, blockchain node, credentials or database to build and test. Keep `Cargo.lock` in version control for reproducible repository checks. Package publication is disabled during this foundation stage.
 
-The library dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
+The core implementation dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
+
+## Using the library
+
+Consumers depend on the repository-root `gnorix` package. For a local checkout, use a path relative to the consuming application's `Cargo.toml`:
+
+```toml
+[dependencies]
+gnorix = { path = "../gnorix" }
+```
+
+The `core` feature is enabled by default. Select the component explicitly when desired:
+
+```toml
+[dependencies]
+gnorix = { path = "../gnorix", default-features = false, features = ["core"] }
+```
+
+Both imports expose the same implementation and types:
+
+```rust
+use gnorix::core::biometrics::fingerprint;
+// The direct API is also available: use gnorix::biometrics::fingerprint;
+```
+
+Without default features, `gnorix` does not include the core implementation; enabling `core` restores it. `core` is currently the only public feature. NEAR and other integrations will receive their own implementations and feature wiring when added; they are not selectable yet.
+
+The CLI examples belong to the implementation package at `crates/core/examples/`, so their commands use `-p gnorix-core`. Application consumers continue to use `gnorix`.
 
 ## Routine checks
 
@@ -26,7 +53,9 @@ cargo test --workspace --all-targets --locked
 cargo test --workspace --doc --locked
 cargo test --workspace --release --locked
 cargo doc --workspace --no-deps --locked
-cargo run -p gnorix --example merkle --locked
+cargo check -p gnorix --no-default-features --locked
+cargo check -p gnorix --no-default-features --features core --locked
+cargo run -p gnorix-core --example merkle --locked
 ```
 
 Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Cargo writes build output to the ignored root `target/` directory. The GitHub Actions workflow checks formatting, Clippy and documentation, and declares test jobs for Linux, macOS and Windows. A configured workflow does not itself establish that those hosted runs have passed.

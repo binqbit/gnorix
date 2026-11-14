@@ -1,7 +1,7 @@
 //! Exercise only the commitment/proof API with illustrative public-key bytes.
 //! This example does not capture a fingerprint or derive signing keys.
 
-use gnorix::merkle::{MerkleTree, leaf_hash, verify};
+use gnorix_core::merkle::{MerkleTree, leaf_hash, verify};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = b"example enrollment context";

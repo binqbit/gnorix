@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use gnorix::biometrics::{
+use gnorix_core::biometrics::{
     Capture,
     fingerprint::{self, ExtractionConfig, FingerprintError, NodeKind, RidgeMap, SourceDecision},
 };
