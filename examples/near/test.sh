@@ -2,7 +2,7 @@
 # Build and exercise the complete example in a local NEAR sandbox.
 set -eu
 
-example_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+example_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$example_dir/../.."
 
 for manifest in \

@@ -239,6 +239,13 @@ false-acceptance rates.
 For the standalone wallet and NEP-141 token contract regression suites, install
 `cargo-near` and build all three test contracts:
 
+On Ubuntu, install the native dependency used by `cargo-near` first:
+
+```sh
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y libudev-dev pkg-config
+```
+
 ```sh
 rustup target add --toolchain 1.99.1 wasm32-unknown-unknown
 cargo install cargo-near --version 0.23.0 --locked
