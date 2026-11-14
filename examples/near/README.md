@@ -70,6 +70,14 @@ this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
 images and signing run locally. Fingerprint extraction can take tens of seconds;
 use the documented release build. The HTTP page remains responsive during it.
 
+The web service does not write a signature archive or per-attempt metadata files.
+It retains public enrollment data (Merkle hashes, context and parameters) and the
+current capture, proof and transaction result in memory. Starting a new approval
+replaces the previous attempt; reconstructed signing keys are not cached. Keys
+are derived deterministically within that enrollment, while restarting creates
+a new enrollment context. Submitted transactions remain in the disposable
+sandbox's chain history, as required for actual NEAR execution.
+
 The fingerprint, transfer controls and execution panels keep stable dimensions
 through signing, submission and receipt updates. Long status messages and transfer
 details scroll within their panels. The public evidence panel stays open: hashes,

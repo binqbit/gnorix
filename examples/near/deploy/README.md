@@ -5,6 +5,10 @@ its private NEAR sandbox listen on loopback. Every visitor shares the same two
 test wallets, balances and active approval. Restarting the service creates a new
 chain, enrollments and balances; no mainnet or public-testnet account is used.
 
+The service keeps public enrollment material and the current attempt in memory,
+without writing signature archives or per-attempt metadata files. The sandbox
+itself retains submitted transactions in its chain history.
+
 The backend runs as the dedicated `gnorix` system user. `gnorix-near-demo.service`
 provides automatic restart, protected state storage and a 1,200 MiB memory ceiling.
 The host needs Linux x86_64, systemd, nginx, CA certificates and the standard

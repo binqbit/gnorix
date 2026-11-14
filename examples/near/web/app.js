@@ -9,7 +9,7 @@ const state = {
     connected: false,
     requestInFlight: false,
     readPromise: null,
-    dismissedProofs: new Set(),
+    dismissedProofId: null,
     imageKey: null,
     imageRequest: 0,
     pointsKey: null,
@@ -83,7 +83,7 @@ function transferInput() {
 
 function displayedProof() {
     const prepared = state.server?.prepared;
-    if (!prepared || prepared.wallet !== state.wallet || state.dismissedProofs.has(prepared.id)) return null;
+    if (!prepared || prepared.wallet !== state.wallet || state.dismissedProofId === prepared.id) return null;
     if (prepared.capture_id !== activeCapture()?.id) return null;
     // Only an unsubmitted authorization must match the editable draft. A
     // completed attempt retains its own signed payload and receipt as evidence.
@@ -111,7 +111,7 @@ function showFormError(message) {
 
 function dismissProof() {
     if (state.server?.phase === "signed" && state.server.prepared) {
-        state.dismissedProofs.add(state.server.prepared.id);
+        state.dismissedProofId = state.server.prepared.id;
     }
     showFormError(null);
     render();
@@ -495,7 +495,7 @@ async function fetchState() {
         const snapshot = await response.json();
         const restarted = state.server && state.server.token !== snapshot.token;
         if (restarted) {
-            state.dismissedProofs.clear();
+            state.dismissedProofId = null;
             state.imageKey = null;
             state.pointsKey = null;
             state.captureKey = null;
@@ -503,6 +503,7 @@ async function fetchState() {
             state.wallet = null;
             $("amount").value = "";
         }
+        if (snapshot.prepared?.id !== state.dismissedProofId) state.dismissedProofId = null;
         state.server = snapshot;
         state.connected = true;
         if (snapshot.wallets.length && (state.wallet === null || !activeWallet())) {
