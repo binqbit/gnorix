@@ -1279,7 +1279,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "gnorix"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "gnorix-core",
  "gnorix-near",
@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "gnorix-core"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "gnorix-example-support",
  "image",
@@ -1299,7 +1299,7 @@ dependencies = [
 
 [[package]]
 name = "gnorix-example-support"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "ed25519-dalek 3.0.0",
  "gnorix-core",
@@ -1314,14 +1314,14 @@ dependencies = [
 
 [[package]]
 name = "gnorix-ft-test-receiver"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "near-sdk",
 ]
 
 [[package]]
 name = "gnorix-lab"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -1337,7 +1337,7 @@ dependencies = [
 
 [[package]]
 name = "gnorix-near"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "borsh",
  "ed25519-dalek 3.0.0",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "gnorix-near-token"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "near-contract-standards",
  "near-sdk",
@@ -1359,7 +1359,7 @@ dependencies = [
 
 [[package]]
 name = "gnorix-near-wallet"
-version = "0.1.0-dev.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",
