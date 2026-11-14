@@ -1,0 +1,22 @@
+[package]
+name = "gnorix-near"
+description = "Gnorix authorization verification and enrollment state for NEAR contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gnorix-core.workspace = true
+serde.workspace = true
+borsh = { version = "1.6", features = ["derive"] }
+near-account-id = { version = "3", features = ["serde", "borsh"] }
+near-sdk = { version = "5.30.2", default-features = false, features = ["non-contract-usage"] }
+ed25519-dalek.workspace = true
+
+[dev-dependencies]
+gnorix-example-support.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

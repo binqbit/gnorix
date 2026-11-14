@@ -19,6 +19,7 @@ The application retains control over enrollment ownership, permitted actions, re
 - [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
 - [Fingerprint signing](docs/fingerprint-signing.md) covers regional point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
 - [Fingerprint test stand](docs/fingerprint-lab.md) provides a local Rust web interface for preparing regions, selecting circular captures, testing spatially varying capture artifacts and inspecting real signatures and matching feature points.
+- [NEAR contract integration](docs/near-sdk.md) covers owner-controlled enrollment, contract verification and core authorization conversion.
 
 ## Development
 
@@ -33,4 +34,4 @@ cargo test --workspace --all-targets --locked
 cargo run -p gnorix-core --example merkle --locked
 ```
 
-The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection, protected persistence and the NEAR execution adapter remain development work. See [Development](docs/development.md) for the complete workflow and test scope.
+The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. The optional `near` feature adds contract verification and enrollment lifecycle management; signing uses the existing core API. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection and protected persistence remain development work. See [Development](docs/development.md) for the complete workflow and test scope.

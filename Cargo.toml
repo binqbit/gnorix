@@ -9,15 +9,22 @@ publish.workspace = true
 [features]
 default = ["core"]
 core = ["dep:gnorix-core"]
+near = ["dep:gnorix-near"]
 
 [dependencies]
 gnorix-core = { workspace = true, optional = true }
+gnorix-near = { workspace = true, optional = true }
 
 [lints]
 workspace = true
 
 [workspace]
-members = ["crates/core", "examples/fingerprint-lab", "examples/support"]
+members = [
+    "crates/core",
+    "crates/near",
+    "examples/fingerprint-lab",
+    "examples/support",
+]
 resolver = "3"
 
 [workspace.package]
@@ -29,6 +36,7 @@ publish = false
 [workspace.dependencies]
 gnorix = { path = "." }
 gnorix-core = { path = "crates/core" }
+gnorix-near = { path = "crates/near" }
 gnorix-example-support = { path = "examples/support" }
 ed25519-dalek = "3.0.0"
 hkdf = "0.13.0"

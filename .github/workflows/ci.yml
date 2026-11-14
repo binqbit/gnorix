@@ -42,6 +42,7 @@ jobs:
         run: |
           cargo check -p gnorix --no-default-features --locked
           cargo check -p gnorix --no-default-features --features core --locked
+          cargo check -p gnorix --no-default-features --features near --locked
 
   fingerprint-reports:
     runs-on: ubuntu-latest

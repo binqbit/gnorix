@@ -2,7 +2,7 @@
 
 ## Workspace and setup
 
-The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
+The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation and `crates/near` the optional NEAR SDK. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile and file/JSON adapters used by examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
 Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
 
@@ -38,7 +38,7 @@ use gnorix::core::biometrics::fingerprint;
 // The direct API is also available: use gnorix::biometrics::fingerprint;
 ```
 
-Without default features, `gnorix` does not include the core implementation; enabling `core` restores it. `core` is currently the only public feature. NEAR and other integrations will receive their own implementations and feature wiring when added; they are not selectable yet.
+With no features selected, `gnorix` has no implementation dependencies. `core` exposes the biometric and signing APIs. The optional `near` feature adds `gnorix::near::contract::Enrollment` for persistent contract authorization state and strict Ed25519 verification, together with bounded public transport types. NEAR uses the core implementation internally even when its direct facade exports are disabled. Signing remains in the core API. See the [NEAR contract guide](near-sdk.md) for dependencies, ownership and replay rules.
 
 The CLI examples belong to the implementation package at `crates/core/examples/`, so their commands use `-p gnorix-core`. Application consumers continue to use `gnorix`.
 
@@ -55,6 +55,8 @@ cargo test --workspace --release --locked
 cargo doc --workspace --no-deps --locked
 cargo check -p gnorix --no-default-features --locked
 cargo check -p gnorix --no-default-features --features core --locked
+cargo check -p gnorix --no-default-features --features near --locked
+cargo test -p gnorix-near --locked
 cargo run -p gnorix-core --example merkle --locked
 ```
 
@@ -128,7 +130,7 @@ The engine owns alignment, descriptor extraction, fusion, quantization, local un
 
 Implement `CryptoProvider` for the selected KDF and signature suite. Its identifier must cover the algorithms, parameters and key/signature encodings. `derive_key` receives canonical candidate bytes, the full framed enrollment context and the optional independent secret. The implementation must bind all required inputs, deterministically reproduce the same key/public-key encoding for identical inputs, and follow its crypto library's valid-key rules. Signing keys implement `ZeroizeOnDrop`; implementations remain responsible for intermediate buffers and copies. There is no default or placeholder production provider.
 
-`SignatureVerifier` is the narrower public verification interface. `CryptoProvider` extends it, while `authorization::verify` requires only `SignatureVerifier`. A verifier or future NEAR adapter therefore implements no key-derivation or signing stubs.
+`SignatureVerifier` is the narrower public verification interface. `CryptoProvider` extends it, while `authorization::verify` requires only `SignatureVerifier`. The NEAR adapter implements strict Ed25519 verification without key-derivation or signing stubs.
 
 The enrollment chooses `SecretPolicy::Absent` or `SecretPolicy::Required`. Supplying a secret to an absent-secret enrollment, or omitting a required one, is rejected. An empty secret is rejected; no minimum entropy or password-strength rule is inferred from byte length. `Candidate`, `SecretInput` and pixel buffers clear their owned bytes on drop. That does not erase caller copies, arbitrary algorithm models, registers or the whole device's memory.
 
@@ -162,11 +164,11 @@ The application defines canonical operation payloads and a consistent unit for e
 
 ## Integration and remaining work
 
-The core is independent of NEAR. A future adapter must supply trusted registry state, canonical actions, permissions, replay reservation and asynchronous pending/success/failure handling. Root registration, replacement and recovery need their own authority. No contract API, custody model, callback/retry policy or deployment is implied by the library interfaces.
+The core is independent of NEAR. The [NEAR contract integration](near-sdk.md) supplies owner-authorized commitment registration/replacement/revocation, read-only signature verification and optional one-time acceptance with durable nonce state. Both verification methods return `Result<()>`; neither executes business actions. The application stores the registration, defines canonical signed data, enforces permissions and executes its own logic. Arbitrary cross-contract execution, custody, recovery authorities, callbacks and retry policy are outside this adapter's scope; no deployment is implied.
 
 Canonical container-v2 `.grx` persistence covers public context, optional hash-bound profile parameters and retained Merkle hashes. Fingerprint consumers require the canonical parameter record; generic constant profiles may omit it. Protected model storage, encrypted backups and recovery authority remain application work. The package does not serialize an arbitrary `MeasurementEngine` model or captured features. Container-v1 files are unsupported by the current decoder; generic authorization verification with a retained original trusted commitment remains separate from loading an old file.
 
-Tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy, resistance to biometric attacks, or on-chain gas/execution. Those require the separate measurement and integration validation plans.
+Core tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy or resistance to biometric attacks. They also do not establish production network deployment or production gas limits. Those require separate measurement and integration validation.
 
 ## Static fingerprint report
 
