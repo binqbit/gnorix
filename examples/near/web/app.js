@@ -368,21 +368,8 @@ function renderForm() {
     setText("approval-note", prepared && state.server?.phase === "signed" ? "Signature ready. Submit to execute this exact transfer." : "Fresh capture per approval. Signs this exact transfer.");
 }
 
-function bytesHex(value) {
-    return Array.isArray(value) ? value.map((byte) => Number(byte).toString(16).padStart(2, "0")).join("") : typeof value === "string" ? value : "—";
-}
-
 function renderProof() {
-    const prepared = displayedProof();
-    const authorization = prepared?.authorization;
-    setText("proof-root", prepared ? activeWallet().root : "—");
-    setText("proof-public-key", bytesHex(authorization?.public_key));
-    setText("proof-signature", bytesHex(authorization?.signature));
-    setText("proof-nonce", authorization?.action?.nonce ?? "—");
-    setText("proof-depth", authorization?.siblings?.length ?? "—");
-    setText("proof-json", authorization ? JSON.stringify(authorization, null, 2) : "Sign a transfer to inspect its public evidence.");
-    setText("proof-hint", prepared ? `${transferFinished() ? "Previous transfer · " : ""}${prepared.verified ? "Verified" : "Unverified"} · ${prepared.attempts} ${prepared.attempts === 1 ? "candidate" : "candidates"} checked` : "No signature yet");
-    $("copy-proof").disabled = !authorization;
+    GnorixProof.render(activeWallet(), displayedProof(), transferFinished());
 }
 
 function setPhase(id, status) {
@@ -600,8 +587,7 @@ $("refresh-state").addEventListener("click", () => {
     if (!busy()) void performRequest("/api/refresh", {});
 });
 $("copy-proof").addEventListener("click", () => {
-    const prepared = displayedProof();
-    if (prepared) void copyText($("copy-proof"), JSON.stringify(prepared.authorization, null, 2), "Copy JSON");
+    void copyText($("copy-proof"), GnorixProof.text(), "Copy evidence");
 });
 $("copy-transaction").addEventListener("click", () => {
     void copyText($("copy-transaction"), state.server?.transaction?.tx_hash, "Copy");

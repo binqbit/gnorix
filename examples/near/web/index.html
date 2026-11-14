@@ -7,6 +7,7 @@
         <title>GNORIX · Transaction lab</title>
         <link rel="icon" type="image/svg+xml" href="/logo.svg" />
         <link rel="stylesheet" href="/app.css" />
+        <script src="/proof.js" defer></script>
         <script src="/app.js" defer></script>
     </head>
     <body>
@@ -52,10 +53,10 @@
                     <button class="text-button refresh-button" id="refresh-state" type="button" disabled>
                         <span aria-hidden="true">↻</span><span id="refresh-label">Refresh balances</span>
                     </button>
-                    <details class="enrollment-summary">
-                        <summary>Registered Merkle root</summary>
+                    <div class="enrollment-summary">
+                        <span class="enrollment-label">Registered Merkle root</span>
                         <code id="enrollment-root">—</code>
-                    </details>
+                    </div>
                     <div class="wallet-help">
                         <span class="help-line" aria-hidden="true"></span>
                         <p>Choose a wallet.<br />Sign with its fingerprint.<br />Send to the other wallet.</p>
@@ -172,20 +173,36 @@
                 </div>
             </section>
 
-            <details class="proof-panel panel" id="proof-details">
-                <summary><span><span class="proof-icon" aria-hidden="true">{ }</span> Signature &amp; Merkle proof</span><span class="summary-hint" id="proof-hint">No signature yet</span></summary>
-                <div class="proof-content">
-                    <p class="proof-description">Public evidence included when you submit to the wallet contract. The private signing key is not part of this authorization.</p>
-                    <dl class="proof-fields">
-                        <div><dt>Merkle root</dt><dd><code id="proof-root">—</code></dd></div>
-                        <div><dt>Public key</dt><dd><code id="proof-public-key">—</code></dd></div>
-                        <div><dt>Signature</dt><dd><code id="proof-signature">—</code></dd></div>
-                        <div class="compact-proof"><dt>Nonce</dt><dd id="proof-nonce">—</dd><dt>Merkle siblings</dt><dd id="proof-depth">—</dd></div>
-                    </dl>
-                    <div class="raw-heading"><h3>Authorization JSON</h3><button class="text-button" id="copy-proof" type="button" disabled>Copy JSON</button></div>
-                    <pre id="proof-json" tabindex="0" aria-label="Public authorization JSON">Sign a transfer to inspect its public evidence.</pre>
+            <section class="proof-panel panel" id="proof-details" aria-labelledby="proof-title">
+                <div class="proof-heading">
+                    <h2 id="proof-title"><span class="proof-icon" aria-hidden="true">{ }</span> Signature &amp; Merkle proof</h2>
+                    <span id="proof-hint">Sign a transfer to reveal its membership path</span>
                 </div>
-            </details>
+                <div class="proof-content">
+                    <div class="signature-evidence">
+                        <div class="evidence-heading"><h3>Public signature</h3><button class="text-button" id="copy-proof" type="button" disabled>Copy evidence</button></div>
+                        <p class="proof-description">Hex strings you can inspect and copy. The private key never appears here.</p>
+                        <dl class="proof-fields" tabindex="0" aria-label="Public signature details">
+                            <div><dt>Registered root</dt><dd><code id="proof-root">—</code></dd></div>
+                            <div><dt>Public key</dt><dd><code id="proof-public-key">Available after signing</code></dd></div>
+                            <div><dt>Signature</dt><dd><code id="proof-signature">Available after signing</code></dd></div>
+                            <div class="proof-metrics">
+                                <div><dt>Nonce</dt><dd id="proof-nonce">—</dd></div>
+                                <div><dt>Leaves</dt><dd id="proof-leaf-count">—</dd></div>
+                                <div><dt>Path levels</dt><dd id="proof-depth">—</dd></div>
+                            </div>
+                        </dl>
+                    </div>
+                    <div class="merkle-evidence">
+                        <div class="evidence-heading"><h3>Merkle membership path</h3><span id="merkle-status" class="tag" role="status">Awaiting signature</span></div>
+                        <p class="proof-description">Selected leaf → sibling hashes → registered root. Each sibling represents the other subtree.</p>
+                        <div id="merkle-scroll" class="merkle-scroll" tabindex="0" role="region" aria-label="Merkle path from the selected leaf to the registered root">
+                            <p id="merkle-empty" class="merkle-empty">An enrolled key will connect to this root through a Merkle path. Approve a transfer to see the exact nodes.</p>
+                            <ol id="merkle-path" class="merkle-path"></ol>
+                        </div>
+                    </div>
+                </div>
+            </section>
             <noscript><p class="form-error">JavaScript is required to use this local demonstration.</p></noscript>
         </main>
         <footer><span>GNORIX <span class="footer-divider">/</span> NEAR</span><span>A fingerprint. A proof. A transaction.</span></footer>

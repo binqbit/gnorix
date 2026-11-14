@@ -18,6 +18,7 @@ use gnorix::{
             },
         },
         enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
+        merkle,
         package::EnrollmentPackage,
         policy::{Limits, SecretPolicy},
     },
@@ -62,6 +63,7 @@ pub struct FingerprintView {
 
 pub struct SignedFingerprint {
     pub authorization: Authorization,
+    pub leaf_hash: merkle::Hash,
     pub matched_feature_ids: Vec<usize>,
     pub attempts: usize,
 }
@@ -198,8 +200,16 @@ impl FingerprintWallet {
             )
         })?;
 
+        let context = self
+            .package
+            .commitment()
+            .context
+            .encode(&limits(SEARCH_WORK))?;
+        let leaf_hash = merkle::leaf_hash(&context, &signed.public_key);
+
         Ok(SignedFingerprint {
             authorization: Authorization::from_core(&signed)?,
+            leaf_hash,
             matched_feature_ids: search.last_feature_ids().to_vec(),
             attempts: attempts.get(),
         })

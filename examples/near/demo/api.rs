@@ -20,6 +20,7 @@ pub fn router(app: App) -> Router {
         .route("/", get(index))
         .route("/app.css", get(css))
         .route("/app.js", get(javascript))
+        .route("/proof.js", get(proof_javascript))
         .route("/logo.svg", get(logo))
         .route("/api/state", get(state))
         .route("/api/fingerprints/{id}", get(image))
@@ -147,6 +148,12 @@ async fn javascript() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../web/app.js"),
+    )
+}
+async fn proof_javascript() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../web/proof.js"),
     )
 }
 async fn logo() -> impl IntoResponse {

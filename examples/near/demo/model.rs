@@ -51,6 +51,8 @@ pub struct PreparedView {
     pub memo: Option<String>,
     pub expires_at_ms: String,
     pub authorization: Authorization,
+    /// Public, context-bound leaf used to display the exact membership path.
+    pub leaf_hash: String,
     pub matched_feature_ids: Vec<usize>,
     pub attempts: usize,
     pub verified: bool,

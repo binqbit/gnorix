@@ -299,6 +299,15 @@ async fn verify_exact_prepared_request(app: &App, view: &PreparedView, units: u1
     ensure!(prepared.transfer == expected && prepared.authorization == view.authorization);
     ensure!(view.authorization.action.operation == TRANSFER_OPERATION);
     ensure!(view.authorization.action.payload == expected.signing_payload());
+    let commitment = engine.wallets[view.wallet].commitment()?.to_core()?;
+    let context = commitment
+        .context
+        .encode(&gnorix::near::verification_limits())?;
+    let leaf = gnorix::core::merkle::leaf_hash(&context, &view.authorization.public_key);
+    ensure!(
+        view.leaf_hash == hex(&leaf),
+        "displayed Merkle leaf differs from the signed key"
+    );
     ensure!(
         engine
             .chain

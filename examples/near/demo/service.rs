@@ -398,6 +398,7 @@ impl App {
             memo: transfer.memo.clone(),
             expires_at_ms: expires_at_ms.to_string(),
             authorization: signed.authorization.clone(),
+            leaf_hash: hex(&signed.leaf_hash),
             matched_feature_ids: signed.matched_feature_ids,
             attempts: signed.attempts,
             verified: true,

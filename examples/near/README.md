@@ -34,8 +34,7 @@ users should run this example in WSL. No Docker, Compose, Node.js, separate RPC
 service or `cargo-near` installation is required for this web demo.
 
 1. Select **Wallet 1** or **Wallet 2**. Its fingerprint, eligible feature points
-   and on-chain token balance appear. Open **Registered Merkle root** to inspect
-   the enrollment.
+   and on-chain token balance appear alongside the registered Merkle root.
 2. Enter the amount and approve signing. Each click selects a **new random
    circular sample**. The circle covers at least
    one third of the enrollment's confirmed pattern pixels. Everything
@@ -43,7 +42,7 @@ service or `cargo-near` installation is required for this web demo.
    extracts fresh features only from this unchanged partial sample, reconstructs
    a signing key, and checks the signature and Merkle proof through the deployed
    wallet's read-only verifier. Matched fresh points receive outer rings.
-3. Review the authorization and submit it to NEAR. A separate local relayer sends
+3. Review the public key, signature and Merkle membership path, then submit to NEAR. A separate local relayer sends
    one transaction. The page shows its hash, receipt/callback result, gas and
    balances read from the token contract.
 4. A capture can fail. Its image, softly revealed sample and observed features stay visible;
@@ -63,7 +62,11 @@ use the documented release build. The HTTP page remains responsive during it.
 
 The fingerprint, transfer controls and execution panels keep stable dimensions
 through signing, submission and receipt updates. Long status messages and transfer
-details scroll within their panels; expanding the proof is an explicit action.
+details scroll within their panels. The public evidence panel stays open: hashes,
+public key and signature use hexadecimal text, and every membership-path level
+shows its left/right inputs and parent hash, followed by the count-bound root.
+The diagram represents the selected path; sibling hashes represent the other
+subtrees. It is a presentation of the proof, not a replacement transport format.
 
 If a transaction result cannot be observed, **Check transaction status** queries
 the same hash. It does not resend, and another transfer is blocked until that
