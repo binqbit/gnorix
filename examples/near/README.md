@@ -345,14 +345,16 @@ Combination selection uses the strongest included point's score: above 0.9
 receives 50% of selections, 0.5–0.9 receives 25%, and below 0.5 receives 25%.
 Empty or exhausted groups pass their allowance to the others. Enrollment targets
 three times the eligible regional point count, then adds any required point
-coverage witnesses; capacity and those witnesses can change the final shares.
+coverage witnesses and compact local groups around individual points; these
+additions and capacity can change the final shares. The local groups improve
+partial-capture coverage while preserving the configured point-count and anchor constraints.
 Signing applies the same group preference to its lazy combination search.
 The signing work budget is 100 million units, including geometry and descriptor
 bytes, not 100 million key attempts. It preserves priority order and checks a
 subset's complete positional neighborhood before moving to the next subset.
 Eligible points in a crop do not guarantee that an enrolled combination lies
 entirely within it: enrollment selects a bounded set of combinations.
-These selection rules use example profile v8; earlier enrollments must be recreated.
+These selection rules use example profile v9; earlier enrollments must be recreated.
 
 The public enrollment packages stay in memory; private keys and extracted
 candidate descriptors are not cached for subsequent signatures. Each signature

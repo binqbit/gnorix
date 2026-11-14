@@ -14,7 +14,7 @@ Both the library iterator and signing pipeline have explicit bounds. Natural exh
 
 Each region contributes `Σ C(N, k)` subsets for `k = min_points..min(max_points, N)` before overlap deduplication. Each k-point subset has up to `(1 + 3L(L + 1))^k` positional assignments. The search neither collects them in advance nor requires their full product to fit a count limit. It holds the current traversal state and produces the next assignment on demand. A small search space is exhausted completely if the work budget permits it; larger searches stop at the first member or explicitly reach a limit.
 
-This flow uses combination JSON v7, example profile v8 and `.grx` container v2. Enrollment commits only baseline keys, while signing searches positional uncertainty; both enforce the retained priority and spatial policy. Earlier fingerprint profiles must be recreated. The current CLI rejects old container files. Existing authorizations remain checkable through the generic verifier with their retained original trusted commitment. Coordinate hashing, context encoding and signature framing are unchanged.
+This flow uses combination JSON v7, example profile v9 and `.grx` container v2. Enrollment commits only baseline keys, while signing searches positional uncertainty; both enforce the retained priority and spatial policy. Earlier fingerprint profiles must be recreated. The current CLI rejects old container files. Existing authorizations remain checkable through the generic verifier with their retained original trusted commitment. Coordinate hashing, context encoding and signature framing are unchanged.
 
 ## Run the example
 
@@ -56,6 +56,6 @@ Verification uses the independently trusted enrollment commitment, expected acti
 
 ## Validation scope
 
-Recreate packages and crop checks after changing the fingerprint profile. Earlier profile-v7 leaf counts, first-match counts and crop outcomes are historical; they do not describe the current profile-v8 schedule. A successful same-image or crop test verifies the implemented extraction/search/signature/Merkle path; it does not establish repeatability across independent sensor acquisitions.
+Recreate packages and crop checks after changing the fingerprint profile. Earlier profiles' leaf counts, first-match counts and crop outcomes are historical; they do not describe the current profile-v9 selection. A successful same-image or crop test verifies the implemented extraction/search/signature/Merkle path; it does not establish repeatability across independent sensor acquisitions.
 
 Historical profile-v7 negative controls produced cross-finger matches with the coordinate-only descriptor. A valid signature and Merkle proof establish membership of the derived key, not that the scan belongs to the enrolled person. Changing the subset schedule does not change coordinate hashing or resolve that biometric ambiguity; new enrollments need fresh positive and negative controls.

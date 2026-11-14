@@ -7,7 +7,7 @@ mod tests;
 
 use super::{
     CombinationConfig, CombinationError, CombinationPoint, CombinationRegion, FingerprintError,
-    FingerprintFeatures, Point, RegionBounds, WorkBudget, enumeration, spatial,
+    FingerprintFeatures, Point, RegionBounds, WorkBudget, enumeration, local, spatial,
 };
 
 pub(super) struct RegionCandidates {
@@ -78,7 +78,7 @@ fn select_region(
     work: &mut WorkBudget,
 ) -> Result<RegionSelection, CombinationError> {
     let (priorities, positions) = regional_data(points, &region.indices, work)?;
-    let coverage = enumeration::enumerate_spatial(
+    let mut coverage = enumeration::enumerate_spatial(
         &priorities,
         &positions,
         config.min_points,
@@ -92,6 +92,15 @@ fn select_region(
             feature_id: points[region.indices[rank]].id,
         });
     }
+    local::supplement(
+        &priorities,
+        &positions,
+        config.min_points,
+        config.max_points.min(region.indices.len()),
+        spatial,
+        &mut coverage.subsets,
+        work,
+    )?;
     Ok(RegionSelection {
         region: CombinationRegion {
             id: region.id,

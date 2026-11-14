@@ -2,6 +2,7 @@
 
 mod allocation;
 mod enumeration;
+mod local;
 mod regions;
 mod search;
 mod spatial;
@@ -156,6 +157,9 @@ impl Error for CombinationError {
 /// low (<0.5) priority, allocated in a 2:1:1 cycle with quality ordering within
 /// each band. Empty or exhausted bands redistribute their share. Additional
 /// point-coverage witnesses can exceed the target and change those proportions.
+/// Compact witnesses around each regional feature supplement that selection so
+/// partial observations can retain a local group without the strongest distant
+/// features. They use the same subset-size and separated-anchor requirements.
 /// Every eligible regional point must occur in at least one valid subset; otherwise
 /// the complete operation fails with its region and source ID. Spatial anchors
 /// can occur more often than stronger, compact neighbors. Valid subsets retain

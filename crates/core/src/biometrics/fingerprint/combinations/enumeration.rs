@@ -286,9 +286,9 @@ fn add_coverage_witnesses(
         return Ok(());
     }
     let mut witnesses = Vec::new();
-    for required in 0..priorities.len() {
+    for (required, &covered) in selected.covered.iter().enumerate() {
         work.spend(1)?;
-        if selected.covered[required] {
+        if covered {
             continue;
         }
         let mut ranked = RankedSubsets::including(priorities, minimum, maximum, required, work)?;
@@ -384,7 +384,7 @@ fn push_child(
     Ok(())
 }
 
-fn ranked_subset(priorities: &[f64], ranks: Vec<usize>) -> RankedSubset {
+pub(super) fn ranked_subset(priorities: &[f64], ranks: Vec<usize>) -> RankedSubset {
     let squared_sum: f64 = ranks
         .iter()
         .map(|&rank| priorities[rank] * priorities[rank])
@@ -395,7 +395,7 @@ fn ranked_subset(priorities: &[f64], ranks: Vec<usize>) -> RankedSubset {
     RankedSubset { ranks, score }
 }
 
-fn compare_subsets(first: &RankedSubset, second: &RankedSubset) -> Ordering {
+pub(super) fn compare_subsets(first: &RankedSubset, second: &RankedSubset) -> Ordering {
     second
         .score
         .total_cmp(&first.score)
