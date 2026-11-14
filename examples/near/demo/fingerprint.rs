@@ -407,7 +407,7 @@ fn combination_config(points_per_combination: Option<usize>) -> CombinationConfi
         min_priority: 0.1,
         spatial: SpatialPolicy {
             min_anchor_points: 3,
-            min_anchor_distance_units: 6.0,
+            min_anchor_distance_units: 5.0,
         },
         radius_units: 30.0,
         max_work: ENROLLMENT_WORK,

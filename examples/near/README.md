@@ -127,7 +127,7 @@ fixture and optional SOCOFing Lab gallery are separate inputs.
 | --- | --- | --- |
 | Points per combination | 3–6 | Exactly 5 |
 | Minimum feature priority | 0.1 | 0.1 |
-| Anchor count / pairwise distance | At least 3 / at least 6R | Same |
+| Anchor count / pairwise distance | At least 3 / at least 5R | Same |
 | Search-region radius | 30R | Same |
 | Positional uncertainty | 1 neighbor step during signing | Same |
 | Signing work budget | 300,000,000 work units | Same |

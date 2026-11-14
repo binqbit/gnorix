@@ -25,7 +25,7 @@ in nginx. Full lifecycle behavior is in the [demo README](../README.md#browser-s
 
 The supplied service enrolls and searches combinations of **exactly five points**,
 matching the local five-point experiment. It requires at least three anchors,
-each separated from every other anchor by at least **6R**, and a minimum feature
+each separated from every other anchor by at least **5R**, and a minimum feature
 priority of **0.1**. Other points must lie inside the anchor outline. R is the
 measured average dark-ridge thickness. The service sets
 `--points-per-combination 5`; omitting that flag in a standalone local launch

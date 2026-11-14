@@ -70,8 +70,8 @@ fn reported_five_point_capture_signs_with_local_coverage() {
             &AtomicBool::new(false),
         )
         .unwrap();
-    // These five observed points correspond to one compact enrolled group.
-    assert_eq!(signed.matched_feature_ids, [21, 28, 29, 31, 36]);
+    // The shared 5R policy changes the first eligible signing group.
+    assert_eq!(signed.matched_feature_ids, [21, 24, 29, 31, 36]);
     assert_signed_action(&wallet, action, signed);
 }
 
