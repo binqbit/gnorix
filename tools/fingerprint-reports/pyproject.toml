@@ -1,6 +1,6 @@
 [project]
 name = "gnorix-fingerprint-reports"
-version = "0.1.0"
+version = "1.0.0"
 description = "Native fingerprint analysis and PNG reports for Gnorix"
 license = "MIT"
 license-files = ["LICENSE"]
