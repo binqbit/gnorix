@@ -118,7 +118,7 @@ fn snapshot(
         .collect();
 
     json!({
-        "schema": "gnorix.feature-combinations.v6",
+        "schema": "gnorix.feature-combinations.v7",
         "source": {"image": input.to_string_lossy(), "width": width, "height": height},
         "unit_px": unit_px,
         "config": {
@@ -139,8 +139,8 @@ fn snapshot(
             "region_coverage": "minimum cell count whose half-diagonals fit the initial radius; closest-to-square cells break ties",
             "initial_radius": "radius_units * measured mean ridge width R",
             "point_weight": "0.1 + 0.9 * priority^2",
-            "combination_score": "mean point weight",
-            "selection": "rank bands by strongest included point; quotas N, ceil(N/2), ... with a floor of one, plus coverage witnesses",
+            "combination_score": "mean point weight; descending order within each absolute priority band",
+            "selection": "strongest included priority: high > 0.9, medium 0.5..=0.9, low < 0.5; cycle high/medium/high/low over valid unique subsets; target 3N per region plus coverage witnesses; skip exhausted bands",
             "subset_sizes": "min_points through max_points, bounded by regional availability",
             "coverage": "each eligible regional point occurs at least once per region",
             "identity": "original feature IDs within this capture",
@@ -254,7 +254,7 @@ mod tests {
             work_used: 0,
         };
         let document = snapshot(Path::new("capture.png"), 1, 1, 4.0, &config, &result);
-        assert_eq!(document["schema"], "gnorix.feature-combinations.v6");
+        assert_eq!(document["schema"], "gnorix.feature-combinations.v7");
         assert_eq!(document["config"]["min_priority"], 0.5);
         assert_eq!(document["config"]["max_points"], 6);
         assert_eq!(document["config"]["spatial"]["min_anchor_points"], 3);

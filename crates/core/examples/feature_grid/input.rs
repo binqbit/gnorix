@@ -34,8 +34,8 @@ pub(super) fn parse(document: Value) -> Result<CombinationInput> {
     let Value::Object(mut metadata) = document else {
         return Err("input JSON must be an object".into());
     };
-    if metadata.get("schema").and_then(Value::as_str) != Some("gnorix.feature-combinations.v6") {
-        return Err("expected schema gnorix.feature-combinations.v6".into());
+    if metadata.get("schema").and_then(Value::as_str) != Some("gnorix.feature-combinations.v7") {
+        return Err("expected schema gnorix.feature-combinations.v7".into());
     }
     let unit_px = finite(metadata.get("unit_px"), "unit_px")?;
     if unit_px <= 0.0 {

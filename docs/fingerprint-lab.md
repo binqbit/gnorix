@@ -58,7 +58,7 @@ Each number field is paired with a slider, including circle coordinates and comp
 
 The stand exposes minimum and maximum points per combination, minimum feature priority, region radius in R, minimum anchor count, minimum anchor distance in R, grid uncertainty steps, enrollment memory budget and one search-work budget. These determine admission and computation, not cryptographic strength in bits. The initial point-count range is **3–6**. Maximum points limits each combination; it does not discard other eligible regional features.
 
-All points meeting the priority cutoff inside a region remain eligible. Sparse circles expand automatically to reach the configured maximum, or all available points if fewer exist. Enrollment's [automatic band allocation](feature-combinations.md#automatic-weighted-selection) favors stronger combinations while also selecting alternatives without stronger points. There is no pool multiplier or per-region combination control. Any point unable to enter a valid subset fails the whole generation. A work limit prevents unbounded feasibility searches and reports that selection could not be completed.
+All points meeting the priority cutoff inside a region remain eligible. Sparse circles expand automatically to reach the configured maximum, or all available points if fewer exist. The [absolute priority bands](feature-combinations.md#automatic-weighted-selection) use the strongest included point: H `> 0.9`, M `0.5..=0.9`, L `< 0.5`. With N eligible regional points, enrollment targets 3N distinct valid subsets in H, M, H, L order, skips exhausted bands, then adds coverage witnesses. Signing uses the same cycle without the 3N cap; positional variants of one subset finish before the next subset starts. Shares count subsets, not key attempts or point occurrences. There is no pool multiplier or per-region combination control. Any point unable to enter a valid subset fails the whole generation. A work limit prevents unbounded feasibility searches and reports that selection could not be completed.
 
 **Enrollment memory budget** defaults to **2 GiB** and accepts **1–10 GiB** under Computation limits. Preparation uses a conservative peak-memory estimate with reserved headroom to derive consistent limits for baseline candidates, retained leaves and package size. It shows the estimated peak and supported candidate limit before key generation. If the complete requested baseline set exceeds these limits, preparation fails; it never silently truncates the set. This is an estimate, not an operating-system memory cap: actual process memory may vary.
 
@@ -75,7 +75,7 @@ Changing enrollment parameters, including minimum feature priority, requires a n
 - **Incomplete:** the work budget stopped signing. This is not a completed no-match result. Enrollment baseline counts that exceed the memory-derived limits are rejected during preparation, before a package is created.
 - **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
 
-The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The anchor policy uses profile v7 and is retained inside container-v2 `.grx` packages; signing reads the saved policy. Recreate earlier test enrollments rather than mixing the interpretations.
+The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The selection and anchor policy uses profile v8 and is retained inside container-v2 `.grx` packages; signing reads the saved policy. Recreate earlier test enrollments rather than mixing the interpretations.
 
 ## Local data
 
@@ -85,19 +85,10 @@ The stand binds to loopback and requires its session token for mutations. It acc
 
 ## Validation scope
 
-Use the full source as a control, then test smaller circles and altered scans. Inspect the actual eligible features, selected regions, attempted keys and final status; fewer visible points or a changed extraction can prevent a crop from containing an enrolled subset. Old profile-v6 leaf counts and crop outcomes require regeneration under profile v7.
+Use the full source as a control, then test smaller circles and altered scans. Inspect the actual eligible features, selected regions, attempted keys and final status; fewer visible points or a changed extraction can prevent a crop from containing an enrolled subset. Profile-v8 enrollments need fresh positive and negative controls; previous leaf counts and crop outcomes do not describe the current schedule.
 
-A successful signature verifies that the generated key belongs to the retained Merkle set. Coordinate-only descriptors have also produced cross-finger matches in local negative controls; this configuration simplification does not fix that mechanism or qualify biometric identity verification.
+A successful signature verifies that the generated key belongs to the retained Merkle set; this alone does not qualify biometric identity verification.
 
-With profile v7 defaults, full-source controls produced the following baseline sets. Each newly extracted full source found a member on its first candidate, and signature/Merkle verification passed:
+Historical profile-v7 full-source controls verified enrollment, reconstruction and signatures for the synthetic fixture and five gallery images. Their subset/leaf counts and first-match positions must not be treated as current profile-v8 results.
 
-| Source | Eligible points | Regions | Selected subsets | Merkle leaves |
-|---|---:|---:|---:|---:|
-| Synthetic fixture | 30 | 4 | 110 | 110 |
-| SOCOFing 226 / right middle | 47 | 4 | 209 | 208 |
-| SOCOFing 270 / right index | 20 | 2 | 75 | 75 |
-| SOCOFing 53 / right ring | 14 | 2 | 54 | 54 |
-| SOCOFing 560 / left little | 25 | 2 | 82 | 81 |
-| SOCOFing 590 / left middle | 16 | 2 | 46 | 46 |
-
-Distinct point subsets can quantize to identical descriptors, so leaf count can be smaller. These same-source controls do not measure recognition accuracy. The profile-v7 negative control enrolling 270 / right index and signing with 226 / right middle still found a member after 414 candidates; both signature and proof verified. The descriptor therefore still needs separate biometric-discrimination work.
+The historical profile-v7 negative control enrolling 270 / right index and signing with 226 / right middle found a member after 414 candidates; both signature and proof verified. Distinct point subsets can quantize to identical descriptors. The new band schedule does not change that encoding, so biometric discrimination still requires separate validation.

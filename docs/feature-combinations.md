@@ -25,20 +25,30 @@ Check source coordinates before rotation, snapping or hashing. An admitted subse
 
 ## Automatic weighted selection
 
-Sort the N regional points by descending priority, using source ID to break ties. Partition valid subsets by their **strongest included point**: band 0 contains the strongest point, band 1 omits it and contains the next, and so on. Lower bands therefore provide alternatives without stronger points.
+Sort the N eligible regional points by descending priority, using source ID to break ties. Assign each valid subset to an **absolute band by its strongest included point**:
 
-The first band receives up to N distinct subsets. Each subsequent band receives half the previous allowance, rounded up, with a minimum of one. Empty or exhausted bands contribute only their available valid subsets. Within a band, select in descending score:
+| Band | Strongest included priority | Share while all bands remain available |
+|---|---|---:|
+| H | `> 0.9` | 50% |
+| M | `0.5..=0.9` | 25% |
+| L | `< 0.5` | 25% |
+
+These are fixed priority thresholds, not percentiles of the current image. The minimum-priority cutoff is unchanged: excluded points do not become eligible to fill a band. For example, a cutoff of 0.5 leaves L empty.
+
+Cycle **H, M, H, L**, skipping exhausted bands so available bands use the remaining turns. A turn selects one valid, distinct point subset; rejected geometry and duplicates do not consume its allocation. Within each band, use descending score:
 
 ```text
 point weight = 0.1 + 0.9 × priority²
 subset score = mean(point weights)
 ```
 
-Ties use lexicographic point-rank order. The allowance is automatic, not a user-controlled per-region budget. It is a preference among bands, not a promise of exact per-point occurrence ratios: weaker points also occur alongside stronger points, and geometry restricts possible subsets.
+Ties use lexicographic point-rank order. Enrollment targets **3N subsets per region**, or all admissible subsets if fewer exist. This target is automatic, not a user-controlled per-region budget. The shares describe subset selection, not point occurrence, key attempts or random probabilities; a subset may contain weaker points alongside its strongest point.
 
-After band selection, add valid coverage witnesses for any still-unrepresented regional points. If a point cannot participate in **any** admissible subset within the configured size range, fail the whole preparation with its region and source ID. Do not silently drop it. If the work budget prevents proving coverage or completing selection, report budget exhaustion instead of claiming geometric impossibility. Coverage witnesses can increase the output beyond the sum of band allowances.
+After band selection, add valid coverage witnesses for any still-unrepresented regional points. If a point cannot participate in **any** admissible subset within the configured size range, fail the whole preparation with its region and source ID. Do not silently drop it. If the work budget prevents proving coverage or completing selection, report budget exhaustion instead of claiming geometric impossibility. Coverage witnesses can increase the output beyond 3N.
 
-Merge identical point sets from overlapping regions, retaining all contributing region IDs. IDs inside each entry are ascending; the global list is ordered by descending score, then IDs. Identical inputs and controls reproduce the same list. Signing searches all admissible regional subsets lazily in priority order, rather than applying enrollment's finite band selection to the new capture.
+Merge identical point sets from overlapping regions, retaining all contributing region IDs. IDs inside each entry are ascending; the final exported list is ordered by descending score, then IDs. Coverage additions, overlap deduplication, exhausted bands and a final partial cycle can change the output's overall percentages. Identical inputs and controls reproduce the same list.
+
+Signing uses the same absolute bands and H, M, H, L schedule, but searches admissible regional subsets lazily without enrollment's 3N selection target. It searches every positional variant of the current subset before scheduling another subset. The [search work budget](fingerprint-signing.md#candidate-search) still applies.
 
 ## Run the small example
 
@@ -62,7 +72,7 @@ Choose an output file that does not already exist. The adapter reads environment
 
 The library receives an explicit `CombinationConfig`; these defaults belong to the examples. Counts must be positive with `min_points <= max_points` and an anchor count that fits the maximum. Priority is finite in `[0, 1]`; distance is finite and nonnegative; radius is finite and positive. Changing the retained selection policy requires a new enrollment.
 
-The export uses `gnorix.feature-combinations.v6`. It records controls, the direct spatial policy, eligible points, actual circles with their `feature_ids`, unique combinations and occurrence diagnostics. Imported enrollment validates these records before hashing. Old combination exports and fingerprint profiles require regeneration.
+The export uses `gnorix.feature-combinations.v7`. It records controls, the direct spatial policy, eligible points, actual circles with their `feature_ids`, unique combinations and occurrence diagnostics. Imported enrollment validates these records before hashing. Old combination exports and fingerprint profiles require regeneration.
 
 ## Scale and coverage
 

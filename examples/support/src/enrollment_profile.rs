@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::Result;
 
-const DOMAIN: &str = "gnorix.example.imported-grid-profile.v7";
-const SCHEMA: &str = "gnorix.feature-combinations.v6";
+const DOMAIN: &str = "gnorix.example.imported-grid-profile.v8";
+const SCHEMA: &str = "gnorix.feature-combinations.v7";
 
 /// Validated public policy and its exact canonical package representation.
 #[derive(Clone, Debug)]
@@ -246,11 +246,11 @@ mod tests {
         for (pointer, replacement) in [
             (
                 "/domain",
-                serde_json::json!("gnorix.example.imported-grid-profile.v6"),
+                serde_json::json!("gnorix.example.imported-grid-profile.v7"),
             ),
             (
                 "/schema",
-                serde_json::json!("gnorix.feature-combinations.v5"),
+                serde_json::json!("gnorix.feature-combinations.v6"),
             ),
             ("/max_points", serde_json::json!(2)),
             ("/spatial/min_anchor_points", serde_json::json!(0)),

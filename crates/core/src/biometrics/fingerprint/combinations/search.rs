@@ -7,8 +7,11 @@ use std::{
 };
 
 use super::{
-    CombinationError, CombinationPoint, Point, RegionBounds, WorkBudget, collect_points,
-    enumeration::RankedSubsets, regions, spatial, validate_min_priority, validate_point_range,
+    CombinationError, CombinationPoint, Point, RegionBounds, WorkBudget,
+    allocation::{BandSchedule, PriorityBand},
+    collect_points,
+    enumeration::RankedSubsets,
+    regions, spatial, validate_min_priority, validate_point_range,
 };
 use crate::{
     biometrics::{
@@ -32,7 +35,8 @@ pub struct SigningSearchConfig {
     pub radius_units: f64,
     /// Hex-neighbor steps per point; also the fixed padding used at enrollment.
     pub uncertainty_steps: u32,
-    /// Cumulative projection, regions, frontier, deduplication and geometry work.
+    /// Cumulative projection, regions, frontier, deduplication, geometry and
+    /// descriptor-byte work.
     /// The caller's authorization limits separately bound candidate attempts.
     pub max_work: usize,
     pub max_descriptor_bytes: NonZeroUsize,
@@ -72,7 +76,10 @@ impl SigningSearchConfig {
 /// Adaptive circles cover the confirmed pattern and grow to include the maximum, or all eligible points when fewer exist. Every point meeting the
 /// priority minimum inside a circle remains eligible. Overlapping circles never
 /// repeat the same subset.
-/// Subsets are merged by mean `0.1 + 0.9 * priority²`, then global point rank;
+/// The strongest included point assigns high (>0.9), middle (0.5..=0.9) or low
+/// (<0.5) priority. Valid unique subsets follow a high, middle, high, low cycle;
+/// empty or exhausted bands release their turns. Within each band, regional
+/// streams merge by mean `0.1 + 0.9 * priority²`, then global point rank;
 /// equal point priorities use ascending source IDs. Only known priorities at or
 /// above the configured minimum are eligible. There is no global-search fallback.
 /// Only source figures satisfying the retained separated-anchor
@@ -224,14 +231,12 @@ impl SigningSearch {
                 }
                 self.active = None;
             }
-            let Some(ranks) = self.subsets.next(&mut self.work)? else {
+            let Some(ranks) = self
+                .subsets
+                .next(&self.points, self.spatial, &mut self.work)?
+            else {
                 return Ok(None);
             };
-            if !spatial::point_subset(&self.points, &ranks, self.spatial, &mut self.work)? {
-                // Rejected source geometry spends work, but creates no grid
-                // assignment and consumes no cryptographic candidate attempt.
-                continue;
-            }
             self.work.spend(ranks.len())?;
             let mut selected = ranks
                 .iter()
@@ -315,15 +320,16 @@ fn describe_regions(
 struct RegionCursor {
     indices: Vec<usize>,
     priorities: Vec<f64>,
-    subsets: RankedSubsets,
+    subsets: [RankedSubsets; 3],
 }
 
-/// Keep one head per regional stream; expand a consumed head only on demand.
+/// Keep one head per regional band; expand a consumed head only on demand.
 struct RegionalSubsets {
     regions: Vec<RegionCursor>,
-    pending: BinaryHeap<RegionHead>,
-    deferred: Option<usize>,
+    pending: [BinaryHeap<RegionHead>; 3],
+    deferred: [Option<usize>; 3],
     seen: BTreeSet<Vec<usize>>,
+    schedule: BandSchedule,
 }
 
 impl RegionalSubsets {
@@ -336,9 +342,10 @@ impl RegionalSubsets {
     ) -> Result<Self, CombinationError> {
         let mut search = Self {
             regions: Vec::new(),
-            pending: BinaryHeap::new(),
-            deferred: None,
+            pending: std::array::from_fn(|_| BinaryHeap::new()),
+            deferred: [None; 3],
             seen: BTreeSet::new(),
+            schedule: BandSchedule::new(),
         };
         for circle in circles {
             work.spend(1)?;
@@ -349,28 +356,58 @@ impl RegionalSubsets {
                 .map(|&index| points[index].priority)
                 .collect();
             let maximum_size = maximum.min(priorities.len());
-            let subsets = RankedSubsets::new(&priorities, minimum, maximum_size, work)?;
+            let subsets = RankedSubsets::bands(&priorities, minimum, maximum_size, work)?;
             let region = search.regions.len();
             search.regions.push(RegionCursor {
                 indices: circle.indices,
                 priorities,
                 subsets,
             });
-            search.replenish(region, work)?;
+            for band in PriorityBand::ALL {
+                search.replenish(region, band, work)?;
+            }
         }
         Ok(search)
     }
 
-    fn next(&mut self, work: &mut WorkBudget) -> Result<Option<Vec<usize>>, CombinationError> {
+    fn next(
+        &mut self,
+        points: &[CombinationPoint],
+        spatial: spatial::SpatialPixels,
+        work: &mut WorkBudget,
+    ) -> Result<Option<Vec<usize>>, CombinationError> {
         loop {
-            if let Some(region) = self.deferred.take() {
-                self.replenish(region, work)?;
+            let Some(band) = self.schedule.current() else {
+                return Ok(None);
+            };
+            let Some(ranks) = self.next_in_band(band, work)? else {
+                self.schedule.exhaust(band);
+                continue;
+            };
+            if spatial::point_subset(points, &ranks, spatial, work)? {
+                self.schedule.accepted();
+                return Ok(Some(ranks));
             }
-            let Some(head) = self.pending.pop() else {
+            // Rejected geometry spends work, but cannot consume a live band's
+            // valid-subset turn or a cryptographic candidate attempt.
+        }
+    }
+
+    fn next_in_band(
+        &mut self,
+        band: PriorityBand,
+        work: &mut WorkBudget,
+    ) -> Result<Option<Vec<usize>>, CombinationError> {
+        let index = band.index();
+        loop {
+            if let Some(region) = self.deferred[index].take() {
+                self.replenish(region, band, work)?;
+            }
+            let Some(head) = self.pending[index].pop() else {
                 return Ok(None);
             };
             work.spend(1)?;
-            self.deferred = Some(head.region);
+            self.deferred[index] = Some(head.region);
             // Global ranks identify the same source IDs in every circle. Charge
             // the lookup/copy even when an overlapping circle repeats a subset.
             work.spend(head.ranks.len())?;
@@ -380,14 +417,19 @@ impl RegionalSubsets {
         }
     }
 
-    fn replenish(&mut self, region: usize, work: &mut WorkBudget) -> Result<(), CombinationError> {
+    fn replenish(
+        &mut self,
+        region: usize,
+        band: PriorityBand,
+        work: &mut WorkBudget,
+    ) -> Result<(), CombinationError> {
         let cursor = &mut self.regions[region];
-        let Some(subset) = cursor.subsets.next(&cursor.priorities, work)? else {
+        let Some(subset) = cursor.subsets[band.index()].next(&cursor.priorities, work)? else {
             return Ok(());
         };
         work.spend(1)?;
         work.spend(subset.ranks.len())?;
-        self.pending.push(RegionHead {
+        self.pending[band.index()].push(RegionHead {
             region,
             ranks: subset
                 .ranks
@@ -524,6 +566,33 @@ mod tests {
         .unwrap()
     }
 
+    /// Independent exhaustive oracle: partition already score-sorted subsets,
+    /// then consume the literal 2:1:1 sequence without production scheduling.
+    fn band_order(ordered: Vec<Vec<usize>>, points: &[CombinationPoint]) -> Vec<Vec<usize>> {
+        let mut groups: [std::collections::VecDeque<_>; 3] =
+            std::array::from_fn(|_| std::collections::VecDeque::new());
+        for ranks in ordered {
+            let priority = points[ranks[0]].priority;
+            let group = if priority > 0.9 {
+                0
+            } else if priority >= 0.5 {
+                1
+            } else {
+                2
+            };
+            groups[group].push_back(ranks);
+        }
+        let mut result = Vec::new();
+        while groups.iter().any(|group| !group.is_empty()) {
+            for group in [0, 1, 0, 2] {
+                if let Some(ranks) = groups[group].pop_front() {
+                    result.push(ranks);
+                }
+            }
+        }
+        result
+    }
+
     #[test]
     fn a_single_circle_searches_every_subset_in_the_exact_size_range_and_enrolled_frame() {
         let mut source = points(6);
@@ -550,14 +619,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
         expected.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let expected = band_order(
+            expected.into_iter().map(|(ranks, _)| ranks).collect(),
+            &ranked,
+        );
         assert_eq!(expected.len(), 50);
-        assert!(expected.iter().any(|(ranks, _)| ranks == &[4, 5]));
+        assert!(expected.iter().any(|ranks| ranks == &[4, 5]));
 
         source.reverse();
         let mut actual = search(source.clone(), config(2, 0));
         assert_eq!(actual.subsets.regions.len(), 1);
         assert!(actual.last_feature_ids().is_empty());
-        for (ranks, _) in &expected {
+        for ranks in &expected {
             let mut ids: Vec<_> = ranks.iter().map(|&rank| ranked[rank].id).collect();
             ids.sort_unstable();
             let candidate = actual.next().unwrap().unwrap();
@@ -571,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn merges_the_exhaustive_regional_union_in_priority_order_without_global_fallback() {
+    fn merges_the_exhaustive_regional_union_in_band_order_without_duplicates_or_global_fallback() {
         for priority_case in 0..3 {
             let mut source = points(8);
             for (index, point) in source.iter_mut().enumerate() {
@@ -623,6 +696,7 @@ mod tests {
             };
             let mut expected: Vec<_> = expected.into_iter().collect();
             expected.sort_unstable_by(|a, b| score(b).total_cmp(&score(a)).then(a.cmp(b)));
+            let expected = band_order(expected, &source);
             assert!(
                 expected.len() < occurrences,
                 "overlap must exercise deduplication"
@@ -807,8 +881,9 @@ mod tests {
     fn ranked_subsets_are_exhausted_one_at_a_time_with_center_first() {
         let source = points(3);
         let mut actual = search(source.clone(), config(2, 1));
-        // Subset ranking is unchanged; only its positional variants are nested.
-        for ids in [vec![2, 3], vec![1, 3], vec![1, 2, 3], vec![1, 2]] {
+        // High, middle, then the remaining high subsets: every selected subset
+        // completes its neighborhood before the next band's turn.
+        for ids in [vec![2, 3], vec![1, 2], vec![1, 3], vec![1, 2, 3]] {
             let diagnostic = prepare_grid_shapes(
                 &source,
                 &[FeatureCombination {

@@ -51,7 +51,7 @@ The output file must not already exist. The adapter reads the combination export
 
 The JSON retains source metadata, the selected points/combinations, each hull and frame, aligned coordinates, signed snapped nodes, padded baseline cells and grid phase. It streams all positional variants and records collision groups. Input and output JSON are bounded to 64 MiB; an unsuccessful write removes its partial new output. The standard fingerprint report refresh removes these previous-capture results only after successful publication.
 
-With profile-v7 defaults, the checked-in fixture supplies **110 selected subsets and baselines** at radius 30R; see the [current test-stand controls](fingerprint-lab.md#validation-scope). A complete positional diagnostic sums `(1 + 3L(L + 1))^n` over those subsets and may exceed its export limit even when baseline enrollment fits. That count describes positional alternatives searched later, not registered keys.
+The selected subset count depends on the current absolute-band selection, available geometry and coverage witnesses. Recreate combination JSON v7 and profile-v8 enrollments before measuring counts; previous profile-v7 figures are historical. A complete positional diagnostic sums `(1 + 3L(L + 1))^n` over the selected subsets and may exceed its export limit even when baseline enrollment fits. That count describes positional alternatives searched later, not registered keys.
 
 ## Interpretation
 

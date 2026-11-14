@@ -251,7 +251,7 @@ mod tests {
 
     fn imported() -> CombinationInput {
         crate::input::parse(json!({
-            "schema":"gnorix.feature-combinations.v6", "unit_px":4.0,
+            "schema":"gnorix.feature-combinations.v7", "unit_px":4.0,
             "bounds":{"min":[0,0],"max":[12,12]},
             "config":{"min_points":3,"max_points":6,"min_priority":0.5,
                 "radius_units":30.0,

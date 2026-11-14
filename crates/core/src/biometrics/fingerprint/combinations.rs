@@ -1,5 +1,6 @@
 //! Deterministic regional subsets of assessed, surviving fingerprint features.
 
+mod allocation;
 mod enumeration;
 mod regions;
 mod search;
@@ -150,6 +151,11 @@ impl Error for CombinationError {
 /// Selects automatically bounded, quality-ranked subsets in adaptive ridge-scale circles.
 ///
 /// Unknown scores and priorities below the configured minimum are excluded.
+/// Each region targets three times its eligible point count in valid subsets.
+/// Their strongest included point assigns high (>0.9), middle (0.5..=0.9) or
+/// low (<0.5) priority, allocated in a 2:1:1 cycle with quality ordering within
+/// each band. Empty or exhausted bands redistribute their share. Additional
+/// point-coverage witnesses can exceed the target and change those proportions.
 /// Every eligible regional point must occur in at least one valid subset; otherwise
 /// the complete operation fails with its region and source ID. Spatial anchors
 /// can occur more often than stronger, compact neighbors. Valid subsets retain
@@ -456,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn thresholded_regions_never_refill_with_weaker_points_and_keep_quality_order() {
+    fn thresholded_regions_never_refill_with_weaker_points_and_search_preserves_the_set() {
         let (mut fingerprint, ids) = threshold_fingerprint();
         let mut controls = threshold_config(0.5);
         controls.min_points = 2;
@@ -475,11 +481,25 @@ mod tests {
                 && region.feature_ids.iter().all(|id| eligible.contains(id))
         }));
         let mut search = prepare_signing_search(&fingerprint, &signing_config(controls)).unwrap();
-        for combination in &selected.combinations {
-            search.next().unwrap().unwrap();
-            assert_eq!(search.last_feature_ids(), combination.feature_ids);
+        let mut searched = std::collections::BTreeSet::new();
+        while let Some(candidate) = search.next() {
+            candidate.unwrap();
+            assert!(searched.insert(search.last_feature_ids().to_vec()));
         }
-        assert!(search.next().is_none());
+        assert_eq!(
+            searched,
+            selected
+                .combinations
+                .iter()
+                .map(|c| c.feature_ids.clone())
+                .collect()
+        );
+        assert!(
+            selected
+                .combinations
+                .windows(2)
+                .all(|pair| pair[0].score >= pair[1].score)
+        );
 
         controls.min_priority = 1.0;
         let expected = CombinationError::InsufficientPoints {
