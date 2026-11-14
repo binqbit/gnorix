@@ -43,6 +43,7 @@ jobs:
           cargo check -p gnorix --no-default-features --locked
           cargo check -p gnorix --no-default-features --features core --locked
           cargo check -p gnorix --no-default-features --features near --locked
+          cargo check -p gnorix --all-features --locked
 
   near-sandbox:
     runs-on: ubuntu-latest
@@ -76,7 +77,12 @@ jobs:
       - run: uv sync --project tools/fingerprint-reports --locked
       - run: uv run --project tools/fingerprint-reports --locked ruff check tools/fingerprint-reports
       - run: uv run --project tools/fingerprint-reports --locked ruff format --check tools/fingerprint-reports
+      - name: Check the gallery importer
+        run: |
+          uv run --project tools/fingerprint-reports --locked ruff check --config tools/fingerprint-reports/pyproject.toml tools/fingerprint-gallery
+          uv run --project tools/fingerprint-reports --locked ruff format --check --config tools/fingerprint-reports/pyproject.toml tools/fingerprint-gallery
       - run: uv run --project tools/fingerprint-reports --locked python -m unittest discover -s tools/fingerprint-reports/tests -v
+      - run: uv run --project tools/fingerprint-reports --locked python -m unittest discover -s tools/fingerprint-gallery -v
       - name: Install Rust for the extraction-to-report check
         run: rustup toolchain install 1.99.1 --profile minimal
       - name: Generate the complete native fingerprint report

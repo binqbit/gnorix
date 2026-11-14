@@ -33,6 +33,10 @@ The selection followed visual review of native results from 44 larger originals 
 Importer tests use local fixtures and require no dataset download:
 
 ```sh
-uv run --project tools/fingerprint-reports --locked python -m unittest discover \
+uv run --project tools/fingerprint-reports --locked ruff check \
+  --config tools/fingerprint-reports/pyproject.toml tools/fingerprint-gallery
+uv run --project tools/fingerprint-reports --locked ruff format --check \
+  --config tools/fingerprint-reports/pyproject.toml tools/fingerprint-gallery
+uv run --project tools/fingerprint-reports --locked python -Werror -m unittest discover \
   -s tools/fingerprint-gallery -p 'test_*.py'
 ```

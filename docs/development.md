@@ -72,6 +72,7 @@ cargo doc --workspace --no-deps --locked
 cargo check -p gnorix --no-default-features --locked
 cargo check -p gnorix --no-default-features --features core --locked
 cargo check -p gnorix --no-default-features --features near --locked
+cargo check -p gnorix --all-features --locked
 cargo test -p gnorix-near --locked
 cargo run -p gnorix-core --example merkle --locked
 ```
@@ -89,7 +90,8 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 
 Native NEAR tests enable the SDK's official mock host through development
 dependencies, including account context and cryptographic host functions. Wasm
-contract builds use the chain host.
+contract builds use the chain host. CI also runs the opt-in sandbox suites and
+the Python report and gallery checks.
 
 ## Implemented responsibilities
 

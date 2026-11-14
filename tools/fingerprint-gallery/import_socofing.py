@@ -78,8 +78,12 @@ def import_gallery(dataset: Path, output: Path) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True, help="SOCOFing directory containing Real/")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="local gallery PNG directory")
+    parser.add_argument(
+        "--source", type=Path, required=True, help="SOCOFing directory containing Real/"
+    )
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_OUTPUT, help="local gallery PNG directory"
+    )
     args = parser.parse_args()
     try:
         count = import_gallery(args.source, args.output)
