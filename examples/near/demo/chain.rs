@@ -41,6 +41,8 @@ const TOKEN_UNIT: u128 = 10_u128.pow(24);
 const INITIAL_BALANCE: u128 = 1_000 * TOKEN_UNIT;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SUBMISSION_WAIT: Duration = Duration::from_secs(20);
+/// Attached to each demo transfer, distinct from the gas its receipts consume.
+pub const TRANSFER_GAS_TGAS: u64 = 100;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -427,7 +429,7 @@ impl Chain {
                     args: serde_json::to_vec(
                         &json!({"transfer": transfer, "authorization": authorization}),
                     )?,
-                    gas: near_primitives::gas::Gas::from_teragas(100),
+                    gas: near_primitives::gas::Gas::from_teragas(TRANSFER_GAS_TGAS),
                     deposit: near_primitives::types::Balance::ZERO,
                 },
             ))],

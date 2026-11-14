@@ -6,11 +6,11 @@ test wallets, balances and active approval. Restarting the service creates a new
 chain, enrollments and balances; no mainnet or public-testnet account is used.
 
 The page marks the prototype's security limits and provides a short **How it
-works** explanation.
-
-The service keeps public enrollment material and the current attempt in memory,
-without writing signature archives or per-attempt metadata files. The sandbox
-itself retains submitted transactions in its chain history.
+works** explanation. The service keeps public enrollment material and the
+current attempt in memory, without writing signature archives or per-attempt
+metadata files. The sandbox itself retains submitted transactions in its chain
+history. Transfers attach 100 Tgas; the UI shows this limit separately from
+measured gas consumption.
 
 The backend runs as the dedicated `gnorix` system user. `gnorix-near-demo.service`
 provides automatic restart, protected state storage and a 1,200 MiB memory ceiling.

@@ -190,8 +190,9 @@
                     <span class="label">TRANSACTION HASH</span><code id="transaction-hash"></code>
                     <button id="copy-transaction" class="text-button" type="button">Copy</button>
                 </div>
-                <div class="transaction-gas" id="gas-row" hidden>
-                    <span class="label">GAS BURNED</span><code id="gas-burned" title="Total gas reported for the transaction and its receipts."></code>
+                <div class="transaction-gas">
+                    <span class="gas-metric"><span class="label">GAS LIMIT</span><code id="gas-limit" title="Maximum gas attached to the transfer request. Actual consumption is shown separately.">—</code></span>
+                    <span class="gas-metric" id="gas-row" hidden><span class="label">GAS BURNED</span><code id="gas-burned" title="Total gas reported for the transaction and its receipts."></code></span>
                 </div>
             </section>
 

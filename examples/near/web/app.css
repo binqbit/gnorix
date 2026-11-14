@@ -212,6 +212,8 @@ input[readonly] { color: #8fcba2; }
 .transaction-row .label, .transaction-gas .label { color: var(--muted); font-size: 8px; }
 .transaction-row code, .transaction-gas code { color: #91e6a7; font-size: 10px; overflow-wrap: anywhere; }
 .transaction-gas { grid-row: 3; grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; }
+.gas-metric { display: inline-flex; align-items: baseline; gap: 8px; }
+.gas-metric + .gas-metric { border-left: 1px solid var(--border); padding-left: 12px; }
 .proof-panel { margin-top: 12px; }
 .proof-heading { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 12px 18px; }
 .proof-heading h2 { display: flex; align-items: center; gap: 10px; font-size: 13px; }
@@ -328,7 +330,7 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     .fingerprint-footer { padding: 12px 16px 7px; }
     .capture-description { margin-inline: 16px; }
     #transfer-form { grid-template-rows: 220px 112px 46px 40px minmax(0, 1fr); padding: 0 16px 16px; }
-    .execution-panel { height: 236px; padding: 14px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: 18px 96px 50px 18px; }
+    .execution-panel { height: 254px; padding: 14px 16px; grid-template-columns: minmax(0, 1fr); grid-template-rows: 18px 96px 50px 36px; }
     .execution-heading { flex-direction: row; align-items: center; justify-content: space-between; }
     .execution-steps { grid-column: 1; grid-row: 2; gap: 8px; margin: 0; }
     .execution-steps li { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -337,6 +339,7 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     .transaction-row { grid-row: 3; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; }
     .transaction-row .label { grid-column: 1 / -1; }
     .transaction-gas { grid-row: 4; }
+    .gas-metric { flex-direction: column; align-items: flex-start; gap: 1px; }
     .proof-heading { height: 96px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 30px 30px; gap: 6px; padding: 14px 16px; align-items: start; }
     .proof-heading h2 { font-size: 11px; }
     #proof-hint { text-align: left; }

@@ -101,6 +101,12 @@ async fn transfers_use_real_balances_and_retain_uncertain_submissions() -> Resul
     let transfer = chain.transfer_request(0, TOKEN_UNIT, Some("demo chain test".into()))?;
     let signed = sign(&chain, 0, &packages[0], 71, &transfer).await?;
     assert!(chain.verify(0, &transfer, &signed).await?);
+    let transaction = chain.sign_transaction(0, &transfer, &signed).await?;
+    let [TransactionAction::FunctionCall(call)] = transaction.transaction.actions() else {
+        panic!("expected a single transfer function call");
+    };
+    assert_eq!(call.method_name, "transfer");
+    assert_eq!(call.gas.as_gas(), 100_000_000_000_000);
     let mut wrong_token = transfer.clone();
     wrong_token.token_id = contexts[1].wallet_id.parse()?;
     assert!(chain.submit(0, &wrong_token, &signed).await.is_err());
@@ -111,11 +117,10 @@ async fn transfers_use_real_balances_and_retain_uncertain_submissions() -> Resul
     let sent = chain.submit(0, &transfer, &signed).await?;
     assert_eq!(sent.status, SubmissionStatus::Succeeded, "{sent:?}");
     assert!(sent.tx_hash.as_ref().is_some_and(|hash| !hash.is_empty()));
-    assert!(
-        sent.gas_burnt
-            .as_ref()
-            .is_some_and(|gas| gas.parse::<u128>().unwrap() > 0)
-    );
+    assert!(sent.gas_burnt.as_ref().is_some_and(|gas| {
+        let gas = gas.parse::<u128>().unwrap();
+        gas > 0 && gas <= u128::from(call.gas.as_gas())
+    }));
     assert!(sent.failures.is_empty());
     assert!(sent.logs.iter().any(|log| log.contains("ft_transfer")));
     assert_eq!(

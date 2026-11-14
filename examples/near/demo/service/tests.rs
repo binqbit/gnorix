@@ -28,6 +28,7 @@ async fn fingerprint_approvals_execute_real_transfers_between_both_wallets() -> 
 
 async fn exercise_application(app: &App) -> Result<()> {
     let ready = wait_for_phase(app, "ready").await?;
+    ensure!(ready.transfer_gas_tgas == 100);
     ensure!(ready.wallets.len() == 2);
     ensure!(ready.wallets[0].account_id != ready.wallets[1].account_id);
     ensure!(ready.wallets[0].root != ready.wallets[1].root);

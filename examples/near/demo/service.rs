@@ -6,7 +6,7 @@ use gnorix_near_wallet::{TRANSFER_OPERATION, Transfer};
 use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
 
 use super::{
-    chain::{Chain, SubmissionStatus, TransferResult},
+    chain::{Chain, SubmissionStatus, TRANSFER_GAS_TGAS, TransferResult},
     config::Config,
     fingerprint::FingerprintWallet,
     model::{
@@ -66,6 +66,7 @@ impl App {
                 token_id: None,
                 symbol: "GXT",
                 decimals: TOKEN_DECIMALS,
+                transfer_gas_tgas: TRANSFER_GAS_TGAS,
                 wallets: Vec::new(),
                 prepared: None,
                 capture: None,

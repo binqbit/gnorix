@@ -480,6 +480,7 @@ function renderExecution() {
 }
 
 function render() {
+    setText("gas-limit", state.server?.transfer_gas_tgas === undefined ? "—" : `${state.server.transfer_gas_tgas} Tgas`);
     renderConnection();
     renderWallets();
     renderFingerprint();

@@ -22,6 +22,8 @@ pub struct Snapshot {
     pub token_id: Option<String>,
     pub symbol: &'static str,
     pub decimals: u32,
+    /// Prepaid transaction allowance; actual consumption comes from receipts.
+    pub transfer_gas_tgas: u64,
     pub wallets: Vec<WalletView>,
     pub prepared: Option<PreparedView>,
     pub capture: Option<CaptureView>,
