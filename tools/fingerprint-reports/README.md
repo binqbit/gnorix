@@ -4,7 +4,7 @@ Generate the current native fingerprint analysis and its PNG report with one com
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
-  --image crates/gnorix/tests/assets/test-fingerprint.png
+  --image crates/core/tests/assets/test-fingerprint.png
 ```
 
 The command runs the Rust extractor, validates its measurements and geometry, and publishes the complete result in **`reports/fingerprint/`**. Every successful run refreshes this same directory. Open `overview.png` first; the generated `README.md` links the detailed figures and records the actual run's measurements.

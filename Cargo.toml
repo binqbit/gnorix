@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gnorix", "examples/fingerprint-lab", "examples/support"]
+members = ["crates/core", "examples/fingerprint-lab", "examples/support"]
 resolver = "3"
 
 [workspace.package]
@@ -9,7 +9,7 @@ rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
-gnorix = { path = "crates/gnorix" }
+gnorix = { path = "crates/core" }
 gnorix-example-support = { path = "examples/support" }
 ed25519-dalek = "3.0.0"
 hkdf = "0.13.0"

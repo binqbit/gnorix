@@ -1441,7 +1441,7 @@ mod tests {
         assert_eq!(restored.spatial(), retained);
 
         let source = image::load_from_memory(include_bytes!(
-            "../../../crates/gnorix/tests/assets/test-fingerprint.png"
+            "../../../crates/core/tests/assets/test-fingerprint.png"
         ))
         .unwrap()
         .to_luma8();

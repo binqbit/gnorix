@@ -9,8 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
-const DEFAULT_PNG: &[u8] =
-    include_bytes!("../../../crates/gnorix/tests/assets/test-fingerprint.png");
+const DEFAULT_PNG: &[u8] = include_bytes!("../../../crates/core/tests/assets/test-fingerprint.png");
 
 #[derive(Clone, Serialize)]
 pub struct ImageView {

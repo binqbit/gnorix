@@ -22,7 +22,7 @@ The application retains control over enrollment ownership, permitted actions, re
 
 ## Development
 
-The Rust workspace contains the independent `gnorix` library in `crates/gnorix`. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice.
+The Rust workspace contains the independent `gnorix` library in `crates/core`. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice.
 
 The [Fingerprint Lab application](examples/fingerprint-lab/README.md) is a separate workspace package with its own manifest and web dependencies. Run it with `cargo run -p gnorix-lab --release --locked`.
 

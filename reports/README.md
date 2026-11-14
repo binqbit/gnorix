@@ -6,7 +6,7 @@ Generate or refresh the complete report from the repository root:
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
-  --image crates/gnorix/tests/assets/test-fingerprint.png
+  --image crates/core/tests/assets/test-fingerprint.png
 ```
 
 The command runs native Rust extraction and publishes one consistent bundle in `reports/fingerprint/`. The next successful run replaces it. Source images and measurements are retained under its `data/` directory. Generated content is ignored by Git; this README is maintained documentation.

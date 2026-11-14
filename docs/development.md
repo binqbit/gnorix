@@ -2,7 +2,7 @@
 
 ## Workspace and setup
 
-The repository uses a Rust 2024 Cargo workspace. `crates/gnorix` is the reusable library; `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the existing shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
+The repository uses a Rust 2024 Cargo workspace. `crates/core` is the reusable library; `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the existing shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
 Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
 
@@ -50,7 +50,7 @@ Use `RUSTDOCFLAGS="-D warnings"` for documentation checks on a POSIX shell. Carg
 | Limits and errors | `src/policy.rs`, `src/error.rs` | Caller-selected software bounds, per-enrollment secret policy and typed failures with algorithm error sources. |
 | Byte framing | `src/encoding.rs` | Bounded, unambiguous field framing for contexts and signed messages. |
 
-Locations in this table are relative to `crates/gnorix`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipelines are `enrollment::enroll` / `enroll_candidates`, `authorization::sign` / `sign_candidates` and `authorization::verify`.
+Locations in this table are relative to `crates/core`. High-level functions call named mechanisms; the mechanisms delegate hashing, framing and algorithm operations to their respective components. The pipelines are `enrollment::enroll` / `enroll_candidates`, `authorization::sign` / `sign_candidates` and `authorization::verify`.
 
 ### Fingerprint implementation layout
 
@@ -81,7 +81,7 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/enroll_grid.rs` consumes that same combination input, prepares one rounded baseline per subset with `prepare_grid_baselines`, streams those candidate hashes through the shared enrollment pipeline, and writes a verified [`.grx` package](grx-packages.md). It supplies an explicit HKDF-SHA256/Ed25519 provider through development dependencies; the library retains its caller-selected crypto boundary. The grid helpers keep baseline-enrollment limits separate from the full diagnostic variant limit.
 
-`examples/fingerprint_signing.rs` loads the retained public policy, extracts a fresh image and searches ranked subsets within adaptive overlapping regions. It checks the retained anchor count, pairwise distance in R and anchor envelope before grid preparation. Each admitted subset's baseline and neighbor assignments are generated and tested one at a time; the first member of the existing package signs the action. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls and evidence. CLI-only modules under `crates/gnorix/examples/support/` own image decoding, combination/grid controls and secret input. The shared `gnorix-example-support` package at [`examples/support/`](../examples/support/) owns the enrollment profile, crypto provider, bounded authorization JSON and exclusive file output; file I/O remains outside the reusable library.
+`examples/fingerprint_signing.rs` loads the retained public policy, extracts a fresh image and searches ranked subsets within adaptive overlapping regions. It checks the retained anchor count, pairwise distance in R and anchor envelope before grid preparation. Each admitted subset's baseline and neighbor assignments are generated and tested one at a time; the first member of the existing package signs the action. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls and evidence. CLI-only modules under `crates/core/examples/support/` own image decoding, combination/grid controls and secret input. The shared `gnorix-example-support` package at [`examples/support/`](../examples/support/) owns the enrollment profile, crypto provider, bounded authorization JSON and exclusive file output; file I/O remains outside the reusable library.
 
 The [`gnorix-lab` application](../examples/fingerprint-lab/README.md) serves the [local test stand](fingerprint-lab.md). It has its own [`Cargo.toml`](../examples/fingerprint-lab/Cargo.toml), `src/main.rs`, HTTP adapter, typed request/view models, biometric workflows and circular capture adapter. Its `web/` assets and `gallery.json` are embedded at build time. Run `cargo run -p gnorix-lab --release --locked` from the repository root, or `cargo run --release --locked` inside `examples/fingerprint-lab`. The application depends on `gnorix` through its public API and uses `gnorix-example-support` for the shared example adapters. Its single-entry analyzed-capture cache retains only compact features and the crop offset; source revision, circular selection and extraction controls identify a cache entry. Downstream policy changes rebuild selection/search from those features. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
 
@@ -111,7 +111,7 @@ Use these public entry points in order:
 4. Read the expected enrollment commitment/status from a trusted registry and call `authorization::verify` with the expected action and trusted current time.
 5. Apply the application's permissions and durable replay/execution policy before performing the action.
 
-The [lifecycle integration tests](../crates/gnorix/tests/lifecycle/main.rs) demonstrate this wiring with deliberately nonproduction measurement and crypto doubles. The suite groups enrollment, verification and failure behavior into cohesive modules with shared fixtures. They are test fixtures, not algorithms to copy into an application.
+The [lifecycle integration tests](../crates/core/tests/lifecycle/main.rs) demonstrate this wiring with deliberately nonproduction measurement and crypto doubles. The suite groups enrollment, verification and failure behavior into cohesive modules with shared fixtures. They are test fixtures, not algorithms to copy into an application.
 
 For an existing fingerprint `.grx` package, validate its retained public policy, then call `fingerprint::analyze` → `fingerprint::signing_candidates` → `authorization::sign_candidates`, followed by the same trusted verification. Profile v7 binds the explicit point-count range, shared priority cutoff, direct anchor distance in R, baseline enrollment and shared padding. `CombinationConfig::spatial` and `SigningSearchConfig::spatial` share one `SpatialPolicy`; no fraction-to-R conversion or separate resolved record is needed. All remaining points must lie in the anchor hull. Enrollment considers every eligible regional point, selects automatic priority bands and fails if any point cannot enter a valid subset. Invalid source subsets consume work without yielding keys. Every admitted signing subset retains full Cartesian uncertainty search; signing stops at the first member without changing enrollment. Earlier fingerprint profiles require a new enrollment.
 
@@ -145,7 +145,7 @@ The [fingerprint report tool](../tools/fingerprint-reports/README.md) runs the n
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
-  --image crates/gnorix/tests/assets/test-fingerprint.png
+  --image crates/core/tests/assets/test-fingerprint.png
 ```
 
 The complete report lives in `reports/fingerprint/`. Each successful run refreshes this same directory. `overview.png` provides the main overview; detailed PNGs show observed structure, full-source width and coverage, bootstrap measurements, local normalization, source-based clarity, reconstructed contours and feature strength. Geometry visibility follows the native segment clarity while unsupported measurements remain explicit. `feature-strength.png` shows all primary candidates, including weak ones, using extended source-confirmed context, local source/geometry and eight controlled extraction variants. Intrinsic strength and crowding-adjusted priority are separate; marker brightness follows final priority. These diagnostic ranks do not remove candidates or choose contour repairs. The generated index links every figure. Source rasters and `features.json` remain together under `data/`.

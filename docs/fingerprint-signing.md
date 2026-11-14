@@ -24,13 +24,13 @@ First create the package using the [enrollment example](grx-packages.md#run-the-
 grx_package=reports/enrollment/REPLACE_WITH_MERKLE_ROOT.grx
 
 cargo run -p gnorix --example fingerprint_signing --release --locked -- \
-  sign crates/gnorix/tests/assets/test-fingerprint.png "$grx_package" \
-  crates/gnorix/examples/fingerprint_signing/action.json \
+  sign crates/core/tests/assets/test-fingerprint.png "$grx_package" \
+  crates/core/examples/fingerprint_signing/action.json \
   reports/enrollment/signing/example-authorization.json
 
 cargo run -p gnorix --example fingerprint_signing --release --locked -- \
   verify "$grx_package" \
-  crates/gnorix/examples/fingerprint_signing/action.json \
+  crates/core/examples/fingerprint_signing/action.json \
   reports/enrollment/signing/example-authorization.json "$(date +%s)"
 ```
 

@@ -31,7 +31,7 @@ Missing required evidence is `null`, distinct from measured zero. These scores d
 
 ![Cleaned fingerprint contours with surviving feature priorities strictly above 0.30](assets/fingerprint-priority-over-30.png)
 
-On the [checked-in test image](../crates/gnorix/tests/assets/test-fingerprint.png), **41 surviving features** have `priority > 0.30`: **35 endings and 6 bifurcations**, with R = 16.82 px. Circles mark endings; triangles mark bifurcations. Color progresses from red through orange and yellow to bright green as priority increases, with 40–90% opacity. Three markers retain hollow × notation for unknown continuation. The 30% cutoff filters this illustration only; the full report retains all candidates and their scores.
+On the [checked-in test image](../crates/core/tests/assets/test-fingerprint.png), **41 surviving features** have `priority > 0.30`: **35 endings and 6 bifurcations**, with R = 16.82 px. Circles mark endings; triangles mark bifurcations. Color progresses from red through orange and yellow to bright green as priority increases, with 40–90% opacity. Three markers retain hollow × notation for unknown continuation. The 30% cutoff filters this illustration only; the full report retains all candidates and their scores.
 
 For example, ending **#160 at (466, 535)** has P = 0.829, G = 0.683, C = 0.989 and T = 1. With N = 1, its strength and priority are both **0.911**.
 
@@ -43,7 +43,7 @@ From the repository root:
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
-  --image crates/gnorix/tests/assets/test-fingerprint.png
+  --image crates/core/tests/assets/test-fingerprint.png
 ```
 
 The report command requires an opaque PNG and a Gnorix checkout with the pinned Rust toolchain. It runs the native extractor and refreshes the single `reports/fingerprint/` directory after extraction, validation and rendering succeed. It estimates ridge thickness and period from the image before scale-dependent extraction; there is no manual period argument or fallback to a sample-specific value. Transparent input is rejected instead of interpreting hidden RGB as scanner evidence; applications with missing pixels should supply a `Capture` validity mask. The PNG adapter and JSON export use development-only `image` and `serde_json` dependencies; the library itself accepts an existing `Capture` and adds no runtime dependencies.

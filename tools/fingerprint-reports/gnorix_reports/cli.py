@@ -53,7 +53,7 @@ def repository_root() -> Path:
     root = Path(__file__).resolve().parents[3]
     if (
         not (root / "Cargo.toml").is_file()
-        or not (root / "crates" / "gnorix" / "examples" / "fingerprint.rs").is_file()
+        or not (root / "crates" / "core" / "examples" / "fingerprint.rs").is_file()
     ):
         raise ValueError("cannot locate the Gnorix checkout; run the tool from its source checkout")
     return root

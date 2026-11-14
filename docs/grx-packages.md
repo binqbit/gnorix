@@ -62,7 +62,7 @@ Loading enforces byte, context, parameter and leaf-count bounds, validates field
 ```sh
 cargo run -p gnorix --example enroll_grid --release --locked -- \
   reports/fingerprint/feature-combinations.json \
-  crates/gnorix/examples/enroll_grid/context.json \
+  crates/core/examples/enroll_grid/context.json \
   reports/enrollment
 ```
 

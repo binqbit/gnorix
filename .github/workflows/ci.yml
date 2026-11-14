@@ -54,4 +54,4 @@ jobs:
       - name: Install Rust for the extraction-to-report check
         run: rustup toolchain install 1.99.1 --profile minimal
       - name: Generate the complete native fingerprint report
-        run: uv run --project tools/fingerprint-reports --locked gnorix-report --image crates/gnorix/tests/assets/test-fingerprint.png
+        run: uv run --project tools/fingerprint-reports --locked gnorix-report --image crates/core/tests/assets/test-fingerprint.png

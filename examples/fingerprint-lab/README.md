@@ -10,7 +10,7 @@ cargo run -p gnorix-lab --release --locked
 
 Or run `cargo run --release --locked` from this directory. Open **http://127.0.0.1:8765** and stop the application with Ctrl+C. Append `-- --port 8766` to choose another port.
 
-The application has its own `Cargo.toml` and depends on the local `gnorix` library and `gnorix-example-support` package. It shares the workspace lockfile and `target/` directory. Build from the repository checkout: the bundled image comes from `crates/gnorix/tests/assets/test-fingerprint.png`.
+The application has its own `Cargo.toml` and depends on the local `gnorix` library and `gnorix-example-support` package. It shares the workspace lockfile and `target/` directory. Build from the repository checkout: the bundled image comes from `crates/core/tests/assets/test-fingerprint.png`.
 
 - `src/` contains startup, HTTP handling, application state, capture processing and diagnostics.
 - `web/` contains the embedded HTML, CSS, JavaScript and logo.
