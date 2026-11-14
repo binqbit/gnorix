@@ -5,6 +5,14 @@ its private NEAR sandbox listen on loopback. Every visitor shares the same two
 test wallets, balances and active approval. Restarting the service creates a new
 chain, enrollments and balances; no mainnet or public-testnet account is used.
 
+The supplied service enrolls and searches combinations of **exactly five points**,
+matching the local five-point experiment. It requires at least three anchors,
+each separated from every other anchor by at least **6R**, and a minimum feature
+priority of **0.1**. Other points must lie inside the anchor outline. R is the
+measured average dark-ridge thickness. The service sets
+`--points-per-combination 5`; omitting that flag in a standalone local launch
+retains the example's default 3–6 point range.
+
 The page marks the prototype's security limits and provides a short **How it
 works** explanation. The service keeps public enrollment material and the
 current attempt in memory, without writing signature archives or per-attempt
@@ -125,7 +133,8 @@ sudo systemctl restart gnorix-near-demo
 ```
 
 A restart discards the shared demo session. Schedule updates after any active
-transfer resolves. To roll back, atomically restore the previous `current`
-symlink and restart the service. For the first deployment, rollback removes only
+transfer resolves. To roll back, restore the previous `current` symlink and its
+matching service configuration, run `systemctl daemon-reload`, then restart the
+service. Retain both when changing release arguments. For the first deployment, rollback removes only
 the Gnorix virtual-host symlink and stops its service; validate and reload nginx
 while preserving existing sites.

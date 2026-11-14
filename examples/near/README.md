@@ -122,6 +122,9 @@ The app listens only on loopback, restricts requests to local origins and an
 explicitly configured public HTTPS origin, and requires a per-session token for
 mutations. It uses public test fingerprints and temporary NEAR keys; public
 deployment does not change the private, disposable nature of the underlying chain.
+The supplied public service uses the same five-point profile as the local
+experiment above, with three or more anchors separated by 6R and minimum
+feature priority 0.1.
 
 This is one example with a single entry point:
 

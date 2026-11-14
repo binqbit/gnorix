@@ -15,7 +15,7 @@ WorkingDirectory=/var/lib/gnorix-near-demo
 Environment=HOME=/var/lib/gnorix-near-demo
 Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 Environment=SSL_CERT_DIR=/etc/ssl/certs
-ExecStart=/opt/gnorix-near-demo/current/run --port 8780 --public-origin https://gnorix.online
+ExecStart=/opt/gnorix-near-demo/current/run --port 8780 --public-origin https://gnorix.online --points-per-combination 5
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=20
