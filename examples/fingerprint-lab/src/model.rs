@@ -11,13 +11,7 @@ pub fn default_work_limit() -> usize {
     MAX_WORK
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Circle {
-    pub x: f64,
-    pub y: f64,
-    pub radius: f64,
-}
+pub use gnorix_example_support::fingerprint::Circle;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

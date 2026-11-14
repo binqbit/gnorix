@@ -1,7 +1,7 @@
-use gnorix::biometrics::Capture;
+use gnorix_core::biometrics::Capture;
 use image::GrayImage;
 
-use super::model::Circle;
+use super::Circle;
 use crate::Result;
 
 pub struct SelectedCapture {

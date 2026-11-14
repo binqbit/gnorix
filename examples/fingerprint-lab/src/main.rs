@@ -5,8 +5,6 @@ use gnorix_example_support::{
 };
 
 mod api;
-mod artifacts;
-mod capture;
 mod engine;
 mod gallery;
 mod model;

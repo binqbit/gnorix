@@ -19,11 +19,11 @@ use gnorix::{
     package::EnrollmentPackage,
     policy::{Limits, SecretPolicy},
 };
+use gnorix_example_support::fingerprint::{self as capture, apply_artifacts};
 use image::{GrayImage, ImageEncoder};
 use sha2::{Digest, Sha256};
 
 use super::{
-    artifacts, capture,
     model::*,
     resources::{DEFAULT_MEMORY_GIB, EnrollmentBudget},
 };
@@ -216,7 +216,7 @@ impl Engine {
             .checked_add(1)
             .ok_or("artifact revision overflow")?;
         phase("Rendering scan artifacts");
-        let image = artifacts::apply(&self.source, unit_px, request.level, u64::from(seed))?;
+        let image = apply_artifacts(&self.source, unit_px, request.level, u64::from(seed))?;
         let frame = ArtifactFrame::new(image, revision, request.level, seed, Some(unit_px))?;
         self.data.artifact = frame.view.clone();
         self.frame = frame;
@@ -1394,7 +1394,7 @@ mod tests {
             assert_eq!(engine.data.artifact.ridge_width_px, Some(5.0));
             let metadata = serde_json::to_value(&engine.data.artifact).unwrap();
             assert_eq!(metadata["ridge_width_px"], 5.0);
-            let reproduced = artifacts::apply(
+            let reproduced = apply_artifacts(
                 &source,
                 metadata["ridge_width_px"].as_f64().unwrap(),
                 metadata["level"].as_u64().unwrap() as u8,
