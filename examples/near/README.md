@@ -49,8 +49,10 @@ service or `cargo-near` installation is required for this web demo.
    click **Approve & sign** again to make another independent attempt. The server
    never secretly chooses another crop or falls back to the full image. Reaching
    the search budget means the search is incomplete, not a confirmed mismatch.
-5. Switch wallets and send tokens back. Editing the transfer after signing
-   requires a new signature; an accepted authorization cannot be reused.
+5. After the transfer finishes, the form is immediately ready for the next one.
+   Its previous amount, recipient, receipt and proof remain visible while you
+   edit the next transfer. Each approval creates a fresh signature; an accepted
+   authorization cannot be reused. You can also switch wallets to send tokens back.
 
 Use `-- --port 8781` to change the web port. Ctrl+C stops the app and its managed
 sandbox. Every launch creates fresh disposable accounts, roots and balances;

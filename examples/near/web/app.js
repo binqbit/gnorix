@@ -37,6 +37,10 @@ function unresolvedSubmission() {
     return state.server?.phase === "unknown" || ["pending", "unknown"].includes(state.server?.transaction?.status);
 }
 
+function transferFinished() {
+    return !unresolvedSubmission() && ["complete", "failed"].includes(state.server?.phase);
+}
+
 function formatUnits(value, decimals = 24) {
     const digits = BigInt(value).toString().padStart(decimals + 1, "0");
     const integer = decimals ? digits.slice(0, -decimals) : digits;
@@ -81,6 +85,9 @@ function displayedProof() {
     const prepared = state.server?.prepared;
     if (!prepared || prepared.wallet !== state.wallet || state.dismissedProofs.has(prepared.id)) return null;
     if (prepared.capture_id !== activeCapture()?.id) return null;
+    // Only an unsubmitted authorization must match the editable draft. A
+    // completed attempt retains its own signed payload and receipt as evidence.
+    if (state.server.phase !== "signed") return prepared;
     const recipient = recipientWallet();
     try {
         const amount = parseAmount($("amount").value);
@@ -102,7 +109,9 @@ function showFormError(message) {
 }
 
 function dismissProof() {
-    if (state.server?.prepared) state.dismissedProofs.add(state.server.prepared.id);
+    if (state.server?.phase === "signed" && state.server.prepared) {
+        state.dismissedProofs.add(state.server.prepared.id);
+    }
     showFormError(null);
     render();
 }
@@ -344,7 +353,7 @@ function renderFingerprint() {
 function renderForm() {
     const wallet = activeWallet();
     const recipient = recipientWallet();
-    const prepared = displayedProof();
+    const prepared = transferFinished() ? null : displayedProof();
     const mutable = state.connected && wallet && recipient && !busy() && !prepared && !unresolvedSubmission();
     $("transfer-fields").disabled = !mutable;
     $("refresh-state").disabled = !state.connected || !state.server?.token || busy();
@@ -368,8 +377,8 @@ function renderForm() {
     const canSubmit = prepared?.verified && state.server?.phase === "signed" && !busy() && state.connected;
     $("submit-button").hidden = !prepared || state.server?.phase !== "signed";
     $("submit-button").disabled = !canSubmit;
-    $("discard-button").hidden = !prepared || busy() || unresolvedSubmission();
-    setText("discard-button", state.server?.phase === "signed" ? "Edit transfer" : "New transfer");
+    $("discard-button").hidden = !prepared || state.server?.phase !== "signed" || busy() || unresolvedSubmission();
+    setText("discard-button", "Edit transfer");
     setText("approval-note", prepared && state.server?.phase === "signed" ? "Signature ready. Submit to execute this exact transfer." : "Each approval uses a fresh capture and signs this exact transfer.");
 }
 
@@ -386,7 +395,7 @@ function renderProof() {
     setText("proof-nonce", authorization?.action?.nonce ?? "—");
     setText("proof-depth", authorization?.siblings?.length ?? "—");
     setText("proof-json", authorization ? JSON.stringify(authorization, null, 2) : "Sign a transfer to inspect its public evidence.");
-    setText("proof-hint", prepared ? `${prepared.verified ? "Verified" : "Unverified"} · ${prepared.attempts} ${prepared.attempts === 1 ? "candidate" : "candidates"} checked` : "No signature yet");
+    setText("proof-hint", prepared ? `${transferFinished() ? "Previous transfer · " : ""}${prepared.verified ? "Verified" : "Unverified"} · ${prepared.attempts} ${prepared.attempts === 1 ? "candidate" : "candidates"} checked` : "No signature yet");
     $("copy-proof").disabled = !authorization;
 }
 
@@ -434,7 +443,7 @@ function renderExecution() {
             setPhase("phase-receipt", "current");
         } else if (transaction?.status === "succeeded") {
             message = server.message;
-            badge = "Transfer confirmed";
+            badge = "Previous transfer confirmed";
             kind = "success";
             setPhase("phase-submit", "complete");
             setPhase("phase-receipt", "complete");
@@ -445,7 +454,7 @@ function renderExecution() {
             setPhase("phase-receipt", "current");
         } else if (transaction?.status === "failed" || transaction?.status === "rejected" || server.phase === "failed") {
             message = server.error || server.message;
-            badge = transaction?.status === "rejected" ? "Request rejected" : "Transfer failed";
+            badge = transaction?.status === "rejected" ? "Previous request rejected" : "Previous transfer failed";
             kind = "error";
             setPhase("phase-submit", transaction?.status === "rejected" ? "failed" : "complete");
             setPhase("phase-receipt", "failed");
@@ -455,6 +464,10 @@ function renderExecution() {
         badge = activeCapture() ? "Capture failed" : "Request failed";
         kind = "error";
         if (activeCapture()) setPhase("phase-sign", "failed");
+    }
+    if (prepared && transferFinished()) {
+        const recipient = server.wallets.find((wallet) => wallet.id === prepared.recipient);
+        message = `${prepared.amount} ${server.symbol} to ${recipient?.name ?? "the signed recipient"}. ${message}`;
     }
     if (transaction?.observation_error) {
         message += ` Balance/status observation: ${transaction.observation_error}`;
