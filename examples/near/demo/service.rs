@@ -7,6 +7,7 @@ use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
 
 use super::{
     chain::{Chain, SubmissionStatus, TransferResult},
+    config::Config,
     fingerprint::FingerprintWallet,
     model::{
         CaptureView, PreparedView, SignRequest, Snapshot, SubmitRequest, TOKEN_DECIMALS,
@@ -17,7 +18,7 @@ use super::{
 
 #[derive(Clone)]
 pub struct App {
-    pub port: u16,
+    pub config: Config,
     state: Arc<Mutex<Snapshot>>,
     engine: Arc<AsyncMutex<Option<Engine>>>,
     task: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -50,11 +51,11 @@ enum Command {
 }
 
 impl App {
-    pub fn new(port: u16) -> Result<Self> {
+    pub fn new(config: Config) -> Result<Self> {
         let mut token = [0_u8; 32];
         getrandom::fill(&mut token).context("create local session token")?;
         Ok(Self {
-            port,
+            config,
             state: Arc::new(Mutex::new(Snapshot {
                 token: hex(&token),
                 phase: "starting",

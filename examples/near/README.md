@@ -56,7 +56,12 @@ service or `cargo-near` installation is required for this web demo.
    edit the next transfer. Each approval creates a fresh signature; an accepted
    authorization cannot be reused. You can also switch wallets to send tokens back.
 
-Use `-- --port 8781` to change the web port. Ctrl+C stops the app and its managed
+Use `-- --port 8781` to change the web port. For an HTTPS reverse proxy, set
+`-- --public-origin https://gnorix.online`; the listener stays on loopback and
+accepts the explicitly configured Host/Origin. Public visitors share the same
+disposable demo session.
+
+Ctrl+C stops the app and its managed
 sandbox. Every launch creates fresh disposable accounts, roots and balances;
 this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
 images and signing run locally. Fingerprint extraction can take tens of seconds;
@@ -76,9 +81,10 @@ outcome is resolved. A failed token call consumes its accepted nonce, so retryin
 requires a new approval and signature. A successful transfer with an unavailable
 balance refresh is reported separately from confirmed balance data.
 
-The app listens only on loopback, restricts requests to its local origin and
-requires a per-session token for mutations. It is a local demonstration with
-public test fingerprints and temporary NEAR keys, not a hosted wallet service.
+The app listens only on loopback, restricts requests to local origins and an
+explicitly configured public HTTPS origin, and requires a per-session token for
+mutations. It uses public test fingerprints and temporary NEAR keys; public
+deployment does not change the private, disposable nature of the underlying chain.
 
 This is one example with a single entry point:
 

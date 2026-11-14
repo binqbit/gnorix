@@ -11,7 +11,7 @@ use crate::model::TOKEN_UNIT;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "builds contracts, analyzes both bundled fingerprint images and runs a local Sandbox"]
 async fn fingerprint_approvals_execute_real_transfers_between_both_wallets() -> Result<()> {
-    let app = App::new(8780)?;
+    let app = App::new(Config::default())?;
     app.start();
     let outcome = timeout(Duration::from_secs(900), exercise_application(&app)).await;
     // Keep cleanup outside the scenario Result so failed assertions/timeouts

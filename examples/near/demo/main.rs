@@ -3,12 +3,13 @@
 mod api;
 mod capture;
 mod chain;
+mod config;
 mod fingerprint;
 mod model;
 mod runtime;
 mod service;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -23,11 +24,15 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
-    let port = port()?;
+    let config = config::Config::parse(std::env::args().skip(1))?;
+    let port = config.port;
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await
         .with_context(|| format!("cannot listen on http://127.0.0.1:{port}"))?;
-    let app = service::App::new(port)?;
+    if let Some(origin) = config.public_origin() {
+        println!("Public reverse-proxy origin: {origin}");
+    }
+    let app = service::App::new(config)?;
     app.start();
 
     println!("Gnorix transaction signing demo: http://127.0.0.1:{port}");
@@ -37,21 +42,6 @@ async fn run() -> Result<()> {
         .await;
     app.stop().await;
     result.context("HTTP server failed")
-}
-
-fn port() -> Result<u16> {
-    let mut args = std::env::args().skip(1);
-    match (args.next().as_deref(), args.next(), args.next()) {
-        (None, None, None) => Ok(8780),
-        (Some("--port"), Some(value), None) => {
-            let port: u16 = value.parse().context("port must be within 1..=65535")?;
-            if port == 0 {
-                bail!("port must be within 1..=65535");
-            }
-            Ok(port)
-        }
-        _ => bail!("usage: gnorix-near-demo [--port PORT]"),
-    }
 }
 
 async fn shutdown_signal() {

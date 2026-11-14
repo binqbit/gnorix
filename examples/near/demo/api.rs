@@ -42,20 +42,21 @@ async fn guard(State(app): State<App>, request: Request<Body>, next: Next) -> Re
         .headers()
         .get(header::ORIGIN)
         .map(|value| value.to_str().unwrap_or("invalid"));
-    if !trusted_request(app.port, host, origin) {
+    if !app.config.trusted_request(host, origin) {
         return error(
             StatusCode::FORBIDDEN,
-            "Only this local demo origin is allowed",
+            "Only a configured demo origin is allowed",
         );
     }
     if request.method() != Method::GET
+        && request.method() != Method::HEAD
         && request
             .headers()
             .get("X-Gnorix-Token")
             .and_then(|value| value.to_str().ok())
             != Some(app.snapshot().token.as_str())
     {
-        return error(StatusCode::FORBIDDEN, "Missing local session token");
+        return error(StatusCode::FORBIDDEN, "Missing demo session token");
     }
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
@@ -67,16 +68,6 @@ async fn guard(State(app): State<App>, request: Request<Body>, next: Next) -> Re
     headers.insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
     headers.insert("Content-Security-Policy", HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"));
     response
-}
-
-fn trusted_request(port: u16, host: Option<&str>, origin: Option<&str>) -> bool {
-    let allowed = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
-    host.is_some_and(|host| allowed.iter().any(|value| value == host))
-        && origin.is_none_or(|origin| {
-            allowed
-                .iter()
-                .any(|host| origin == format!("http://{host}"))
-        })
 }
 
 async fn state(State(app): State<App>) -> Response {
@@ -165,24 +156,61 @@ async fn logo() -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::{SocketAddr, TcpStream},
+        time::Duration,
+    };
 
-    #[test]
-    fn local_origin_guard_rejects_cross_site_and_rebinding_requests() {
-        assert!(trusted_request(8780, Some("127.0.0.1:8780"), None));
-        assert!(trusted_request(
-            8780,
-            Some("localhost:8780"),
-            Some("http://localhost:8780")
-        ));
-        for (host, origin) in [
-            (Some("example.com:8780"), None),
-            (Some("localhost:8780"), Some("https://evil.example")),
-            (Some("localhost:8780"), Some("null")),
-            (Some("localhost:8781"), None),
-            (None, None),
-        ] {
-            assert!(!trusted_request(8780, host, origin));
-        }
+    use super::*;
+    use crate::config::Config;
+
+    #[tokio::test]
+    async fn public_proxy_requests_keep_origin_and_session_token_protection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let config = Config::parse([
+            "--port".into(),
+            address.port().to_string(),
+            "--public-origin".into(),
+            "https://gnorix.online".into(),
+        ])
+        .unwrap();
+        let app = App::new(config).unwrap();
+        let token = app.snapshot().token;
+        // The HTTP guard needs no sandbox, contracts, or biometric enrollment.
+        let server = tokio::spawn(async move { axum::serve(listener, router(app)).await.unwrap() });
+        let result = tokio::task::spawn_blocking(move || {
+            let public = "Host: gnorix.online\r\nOrigin: https://gnorix.online\r\n";
+            assert_eq!(request(address, "GET", "/api/state", public), 200);
+            assert_eq!(request(address, "HEAD", "/", "Host: gnorix.online\r\n"), 200);
+            assert_eq!(request(address, "HEAD", "/api/state", public), 200);
+            assert_eq!(request(address, "HEAD", "/", "Host: gnorix.online\r\nOrigin: https://evil.example\r\n"), 403);
+            assert_eq!(request(address, "GET", "/api/state", &format!("Host: {address}\r\n")), 200);
+            assert_eq!(request(address, "GET", "/api/state", "Host: gnorix.online\r\nOrigin: https://evil.example\r\n"), 403);
+            assert_eq!(request(address, "GET", "/api/state", "Host: evil.example\r\nX-Forwarded-Host: gnorix.online\r\nX-Forwarded-Proto: https\r\n"), 403);
+            assert_eq!(request(address, "POST", "/api/refresh", public), 403);
+            assert_eq!(request(address, "POST", "/api/refresh", &format!("{public}X-Gnorix-Token: wrong\r\n")), 403);
+            assert_eq!(request(address, "POST", "/api/refresh", &format!("Host: gnorix.online\r\nOrigin: https://evil.example\r\nX-Gnorix-Token: {token}\r\n")), 403);
+            // The valid request reaches the service, which is still starting.
+            assert_eq!(request(address, "POST", "/api/refresh", &format!("{public}X-Gnorix-Token: {token}\r\n")), 409);
+        }).await;
+        server.abort();
+        let _ = server.await;
+        result.unwrap();
+    }
+
+    fn request(address: SocketAddr, method: &str, path: &str, headers: &str) -> u16 {
+        let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stream, "{method} {path} HTTP/1.1\r\n{headers}Content-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response.split_whitespace().nth(1).unwrap().parse().unwrap()
     }
 }
