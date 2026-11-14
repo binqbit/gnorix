@@ -46,20 +46,25 @@ fn package(revision: u64) -> EnrollmentPackage {
 }
 
 fn signed(package: &EnrollmentPackage, nonce: u64) -> Authorization {
-    let candidates = Box::new(std::iter::once(Ok(Candidate::new(vec![2; 32]).unwrap())));
-    let authorization = authorization::sign_candidates(
-        &ExampleCrypto,
-        candidates,
-        [9; 32],
+    signed_action(
         package,
         Action {
             operation: "counter.increment".into(),
             payload: 2_u64.to_be_bytes().to_vec(),
             nonce,
             expires_at_ms: 2_000,
-        }
-        .to_core()
-        .unwrap(),
+        },
+    )
+}
+
+fn signed_action(package: &EnrollmentPackage, action: Action) -> Authorization {
+    let candidates = Box::new(std::iter::once(Ok(Candidate::new(vec![2; 32]).unwrap())));
+    let authorization = authorization::sign_candidates(
+        &ExampleCrypto,
+        candidates,
+        [9; 32],
+        package,
+        action.to_core().unwrap(),
         None,
         &verification_limits(),
     )
@@ -75,6 +80,51 @@ fn record(package: &EnrollmentPackage) -> Enrollment {
         &account("alice.testnet"),
     )
     .unwrap()
+}
+
+#[test]
+fn verification_accepts_application_defined_operations_and_binary_payloads() {
+    let package = package(1);
+    let mut record = record(&package);
+    let payload = b"Terms version 2\0\xff";
+    let authorization = signed_action(
+        &package,
+        Action {
+            operation: "document.approve".into(),
+            payload: payload.to_vec(),
+            nonce: 0,
+            expires_at_ms: 2_000,
+        },
+    );
+    let original = borsh::to_vec(&record).unwrap();
+
+    assert_eq!(
+        record
+            .verify_at("document.approve", payload, &authorization, &runtime())
+            .unwrap(),
+        1,
+    );
+    assert!(
+        record
+            .verify_at("document.reject", payload, &authorization, &runtime())
+            .is_err()
+    );
+    assert!(
+        record
+            .verify_at(
+                "document.approve",
+                b"Terms version 2\0",
+                &authorization,
+                &runtime()
+            )
+            .is_err()
+    );
+    assert_eq!(borsh::to_vec(&record).unwrap(), original);
+
+    record
+        .verify_and_consume_at("document.approve", payload, &authorization, &runtime())
+        .unwrap();
+    assert_eq!(record.view().next_nonce, 1);
 }
 
 #[test]
