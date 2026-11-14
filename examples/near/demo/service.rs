@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use anyhow::{Context, Result, ensure};
 use gnorix::near::{Action, Authorization};
@@ -8,7 +11,7 @@ use tokio::{sync::Mutex as AsyncMutex, task::JoinHandle};
 use super::{
     chain::{Chain, SubmissionStatus, TRANSFER_GAS_TGAS, TransferResult},
     config::Config,
-    fingerprint::FingerprintWallet,
+    fingerprint::{FingerprintTemplate, FingerprintWallet},
     model::{
         CaptureView, PreparedView, SignRequest, Snapshot, SubmitRequest, TOKEN_DECIMALS,
         WalletView, format_amount, hex,
@@ -19,6 +22,7 @@ use super::{
 #[derive(Clone)]
 pub struct App {
     pub config: Config,
+    cancelled: Arc<AtomicBool>,
     state: Arc<Mutex<Snapshot>>,
     engine: Arc<AsyncMutex<Option<Engine>>>,
     task: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -56,6 +60,7 @@ impl App {
         getrandom::fill(&mut token).context("create local session token")?;
         Ok(Self {
             config,
+            cancelled: Arc::new(AtomicBool::new(false)),
             state: Arc::new(Mutex::new(Snapshot {
                 token: hex(&token),
                 phase: "starting",
@@ -100,6 +105,7 @@ impl App {
     }
 
     pub async fn stop(&self) {
+        self.cancelled.store(true, Ordering::Release);
         let task = self.task.lock().expect("demo task lock poisoned").take();
         if let Some(task) = task {
             task.abort();
@@ -218,13 +224,12 @@ impl App {
             ));
             let context = context.clone();
             let points_per_combination = self.config.points_per_combination;
+            let cancelled = Arc::clone(&self.cancelled);
             let wallet = tokio::task::spawn_blocking(move || {
-                FingerprintWallet::enroll(
-                    index,
-                    &format!("near:{}", context.chain_id),
-                    &context.wallet_id,
-                    points_per_combination,
-                )
+                ensure!(!cancelled.load(Ordering::Acquire), "demo is stopping");
+                let template = FingerprintTemplate::prepare(index, points_per_combination)?;
+                ensure!(!cancelled.load(Ordering::Acquire), "demo is stopping");
+                template.enroll(&format!("near:{}", context.chain_id), &context.wallet_id)
             })
             .await??;
             wallets.push(Arc::new(wallet));
@@ -370,18 +375,24 @@ impl App {
         self.progress("Analyzing only the selected partial scan and searching for its signing key");
         let app = self.clone();
         let capture_id = id.clone();
+        let cancelled = Arc::clone(&self.cancelled);
         let signed = tokio::task::spawn_blocking(move || {
-            fingerprint.sign(action, &sampled, |points| {
-                let mut state = app.state.lock().expect("demo state lock poisoned");
-                if let Some(capture) = state
-                    .capture
-                    .as_mut()
-                    .filter(|capture| capture.id == capture_id)
-                {
-                    capture.feature_count = Some(points.len());
-                    capture.points = points;
-                }
-            })
+            fingerprint.sign(
+                action,
+                &sampled,
+                |points| {
+                    let mut state = app.state.lock().expect("demo state lock poisoned");
+                    if let Some(capture) = state
+                        .capture
+                        .as_mut()
+                        .filter(|capture| capture.id == capture_id)
+                    {
+                        capture.feature_count = Some(points.len());
+                        capture.points = points;
+                    }
+                },
+                &cancelled,
+            )
         })
         .await??;
         self.progress("Checking the signature and Merkle proof against the deployed wallet");

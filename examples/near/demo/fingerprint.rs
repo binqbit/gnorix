@@ -1,23 +1,29 @@
-//! Real fingerprint extraction, enrollment and fresh key reconstruction for the
-//! two bundled synthetic demo images. Only public enrollment material is kept.
+//! Shared preparation of the two public synthetic demo images, session-specific
+//! enrollment, and fresh partial-scan key reconstruction. Cached descriptors are
+//! used only for enrollment; reconstructed private keys are never retained.
 
 use std::{
     cell::Cell,
     num::{NonZeroU64, NonZeroUsize},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use gnorix::{
     core::{
         authorization,
         biometrics::{
-            Capture,
+            Candidate, Candidates, Capture,
             fingerprint::{
                 self, CombinationConfig, CombinationPoint, ExtractionConfig, FingerprintFeatures,
                 GridBaselineConfig, SigningSearchConfig, SpatialPolicy,
             },
         },
         enrollment::{self, Domain, EnrollmentContext, EnrollmentSpec},
+        error::AlgorithmError,
         merkle,
         package::EnrollmentPackage,
         policy::{Limits, SecretPolicy},
@@ -68,22 +74,29 @@ pub struct SignedFingerprint {
     pub attempts: usize,
 }
 
-/// No candidate, reconstructed key or source analysis is cached for signing.
-pub struct FingerprintWallet {
+/// Image analysis and enrollment descriptors shared by visitor sessions.
+/// These bundled synthetic sources are public demo fixtures, not user captures.
+pub struct FingerprintTemplate {
+    fingerprint: Arc<PreparedFingerprint>,
+    candidates: Vec<Candidate>,
+}
+
+struct PreparedFingerprint {
     image_index: usize,
-    package: EnrollmentPackage,
     parameters: ProfileParameters,
     view: FingerprintView,
     pattern: PatternGeometry,
 }
 
-impl FingerprintWallet {
-    pub fn enroll(
-        index: usize,
-        network: &str,
-        wallet_id: &str,
-        points_per_combination: Option<usize>,
-    ) -> Result<Self> {
+/// Each visitor has a separate public enrollment package. The shared capture
+/// metadata contains no signing candidates or reconstructed private keys.
+pub struct FingerprintWallet {
+    fingerprint: Arc<PreparedFingerprint>,
+    package: EnrollmentPackage,
+}
+
+impl FingerprintTemplate {
+    pub fn prepare(index: usize, points_per_combination: Option<usize>) -> Result<Self> {
         let source = source_image(index)?;
         let capture = Capture::new(
             source.width(),
@@ -126,19 +139,10 @@ impl FingerprintWallet {
                 max_work: ENROLLMENT_WORK,
             },
         )?;
-        let context = enrollment_context(&parameters, network, wallet_id)?;
-        let limits = limits(MAX_BASELINES);
-        let enrolled = enrollment::enroll_candidates(
-            &ExampleCrypto,
-            grid.candidates(nonzero(MAX_DESCRIPTOR_BYTES)),
-            context,
-            None,
-            &limits,
-        )?;
-        let package = EnrollmentPackage::from_enrollment(&enrolled, &limits)?
-            .with_profile_parameters(parameters.encoded().to_vec(), &limits)?;
-        // Validate the exact public transport representation before publishing it.
-        Commitment::from_core(package.commitment())?;
+        let candidates = grid
+            .candidates(nonzero(MAX_DESCRIPTOR_BYTES))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(anyhow::Error::from_boxed)?;
         let points = feature_points(&combinations.points);
         let view = FingerprintView {
             image_url: format!("/api/fingerprints/{index}"),
@@ -149,25 +153,53 @@ impl FingerprintWallet {
         };
 
         Ok(Self {
-            image_index: index,
-            package,
-            parameters,
-            view,
-            pattern,
+            fingerprint: Arc::new(PreparedFingerprint {
+                image_index: index,
+                parameters,
+                view,
+                pattern,
+            }),
+            candidates,
         })
     }
 
+    /// Derive session-specific keys from fresh enrollment randomness. Only the
+    /// resulting public hash tree is retained; the template never stores keys.
+    pub fn enroll(&self, network: &str, wallet_id: &str) -> Result<FingerprintWallet> {
+        let parameters = &self.fingerprint.parameters;
+        let context = enrollment_context(parameters, network, wallet_id)?;
+        let limits = limits(MAX_BASELINES);
+        let candidates =
+            Box::new(self.candidates.iter().map(|candidate| {
+                Candidate::new(candidate.as_bytes().to_vec()).map_err(Into::into)
+            }));
+        let enrolled =
+            enrollment::enroll_candidates(&ExampleCrypto, candidates, context, None, &limits)?;
+        let package = EnrollmentPackage::from_enrollment(&enrolled, &limits)?
+            .with_profile_parameters(parameters.encoded().to_vec(), &limits)?;
+        // Validate the exact public transport representation before publishing it.
+        Commitment::from_core(package.commitment())?;
+
+        Ok(FingerprintWallet {
+            fingerprint: Arc::clone(&self.fingerprint),
+            package,
+        })
+    }
+}
+
+impl FingerprintWallet {
     pub fn commitment(&self) -> Result<Commitment> {
         Ok(Commitment::from_core(self.package.commitment())?)
     }
 
     pub fn view(&self) -> FingerprintView {
-        self.view.clone()
+        self.fingerprint.view.clone()
     }
 
     pub fn sample(&self, seed: u64) -> Result<SampledCapture> {
-        self.pattern
-            .sample_with_seed(&source_image(self.image_index)?, seed)
+        self.fingerprint
+            .pattern
+            .sample_with_seed(&source_image(self.fingerprint.image_index)?, seed)
     }
 
     pub fn sign(
@@ -175,24 +207,24 @@ impl FingerprintWallet {
         action: Action,
         sampled: &SampledCapture,
         on_features: impl FnOnce(Vec<FeaturePoint>),
+        cancelled: &AtomicBool,
     ) -> Result<SignedFingerprint> {
+        check_signing_cancelled(cancelled)?;
         let expected = action.to_core()?;
         // Only the cropped and masked observation enters extraction.
         let features = fingerprint::analyze(&sampled.capture, &ExtractionConfig::default())
             .context("the partial scan could not be analyzed")?;
+        check_signing_cancelled(cancelled)?;
         on_features(observed_points(&features, sampled.metadata.offset));
+        check_signing_cancelled(cancelled)?;
         let mut search =
             fingerprint::prepare_baseline_signing_search(&features, &self.search_config()?)?;
         let attempts = Cell::new(0_usize);
-        let candidates = Box::new(search.by_ref().inspect(|candidate| {
-            if candidate.is_ok() {
-                attempts.set(attempts.get() + 1);
-            }
-        }));
+        let candidates = signing_candidates(search.by_ref(), cancelled, &attempts);
         let signed = authorization::sign_candidates(
             &ExampleCrypto,
             candidates,
-            self.parameters.profile_id(),
+            self.fingerprint.parameters.profile_id(),
             &self.package,
             expected,
             None,
@@ -201,11 +233,12 @@ impl FingerprintWallet {
         .with_context(|| {
             format!(
                 "wallet {} fingerprint search failed after {} candidate attempts",
-                self.image_index + 1,
+                self.fingerprint.image_index + 1,
                 attempts.get()
             )
         })?;
 
+        check_signing_cancelled(cancelled)?;
         let context = self
             .package
             .commitment()
@@ -213,8 +246,11 @@ impl FingerprintWallet {
             .encode(&limits(SEARCH_WORK))?;
         let leaf_hash = merkle::leaf_hash(&context, &signed.public_key);
 
+        let authorization = Authorization::from_core(&signed)?;
+        check_signing_cancelled(cancelled)?;
+
         Ok(SignedFingerprint {
-            authorization: Authorization::from_core(&signed)?,
+            authorization,
             leaf_hash,
             matched_feature_ids: search.last_feature_ids().to_vec(),
             attempts: attempts.get(),
@@ -223,6 +259,7 @@ impl FingerprintWallet {
 
     fn search_config(&self) -> Result<SigningSearchConfig> {
         let controls = self
+            .fingerprint
             .parameters
             .controls(SEARCH_WORK)
             .map_err(anyhow::Error::from_boxed)?;
@@ -232,11 +269,56 @@ impl FingerprintWallet {
             min_priority: controls.min_priority,
             spatial: controls.spatial,
             radius_units: controls.radius_units,
-            uncertainty_steps: self.parameters.uncertainty_steps(),
+            uncertainty_steps: self.fingerprint.parameters.uncertainty_steps(),
             max_work: SEARCH_WORK,
             max_descriptor_bytes: nonzero(MAX_DESCRIPTOR_BYTES),
         })
     }
+}
+
+/// Cancellation is checked around each generation step, before the yielded
+/// descriptor reaches key derivation. An error terminates this stream.
+fn signing_candidates<'a>(
+    mut source: impl Iterator<Item = std::result::Result<Candidate, AlgorithmError>> + 'a,
+    cancelled: &'a AtomicBool,
+    attempts: &'a Cell<usize>,
+) -> Candidates<'a> {
+    let mut finished = false;
+    Box::new(std::iter::from_fn(move || {
+        if finished {
+            return None;
+        }
+        let result = (|| {
+            check_signing_cancelled(cancelled).map_err(anyhow::Error::into_boxed_dyn_error)?;
+            let Some(candidate) = source.next() else {
+                return Ok(None);
+            };
+            check_signing_cancelled(cancelled).map_err(anyhow::Error::into_boxed_dyn_error)?;
+            candidate.map(Some)
+        })();
+        match result {
+            Ok(Some(candidate)) => {
+                attempts.set(attempts.get() + 1);
+                Some(Ok(candidate))
+            }
+            Ok(None) => {
+                finished = true;
+                None
+            }
+            Err(error) => {
+                finished = true;
+                Some(Err(error))
+            }
+        }
+    }))
+}
+
+fn check_signing_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    ensure!(
+        !cancelled.load(Ordering::Relaxed),
+        "fingerprint signing was cancelled"
+    );
+    Ok(())
 }
 
 /// Preserve incomplete-search semantics instead of describing a resource stop
@@ -384,93 +466,4 @@ fn feature_points(points: &[CombinationPoint]) -> Vec<FeaturePoint> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn image_selection_rejects_unknown_sources() {
-        assert!(image(0).is_some());
-        assert!(image(1).is_some());
-        assert!(image(2).is_none());
-        assert!(FingerprintWallet::enroll(2, "near:local", "wallet.testnet", None).is_err());
-    }
-
-    #[test]
-    #[ignore = "runs real extraction and an extended cryptographic candidate search"]
-    fn reported_partial_capture_signs_with_enlarged_search_budget() {
-        let wallet =
-            FingerprintWallet::enroll(0, "near:regression", "wallet.fixture", None).unwrap();
-        // This exact capture reached the former 1m work limit with 12 usable
-        // features. Its selection remains independent of the signing outcome.
-        let sampled = wallet.sample(457).unwrap();
-        assert_eq!(sampled.metadata.circle.x, 2.0);
-        assert_eq!(sampled.metadata.circle.y, 134.0);
-        assert_eq!(sampled.metadata.circle.radius, 123.00406497347964);
-        let action = Action {
-            operation: "wallet.ft_transfer.v1".into(),
-            payload: b"reported-partial-capture-regression".to_vec(),
-            nonce: 0,
-            expires_at_ms: 2_000_000_000_000,
-        };
-
-        let signed = wallet
-            .sign(action.clone(), &sampled, |points| {
-                assert_eq!(points.len(), 12)
-            })
-            .unwrap();
-        assert!(signed.attempts > 0);
-        assert!(!signed.matched_feature_ids.is_empty());
-
-        assert_signed_action(&wallet, action, signed);
-    }
-
-    #[test]
-    #[ignore = "extracts both the enrollment and reported partial scan and searches real keys"]
-    fn reported_five_point_capture_signs_with_local_coverage() {
-        let wallet =
-            FingerprintWallet::enroll(1, "near:regression", "wallet.fixture", Some(5)).unwrap();
-        // Seed reproduces the reported circle, selected by its center rather
-        // than by a successful signing outcome. This crop previously had no
-        // registered descriptor even after its complete positional traversal.
-        let sampled = wallet.sample(118_278).unwrap();
-        assert_eq!(sampled.metadata.circle.x, 235.0);
-        assert_eq!(sampled.metadata.circle.y, 131.0);
-        assert_eq!(sampled.metadata.circle.radius, 119.26860441876563);
-        let action = Action {
-            operation: "wallet.ft_transfer.v1".into(),
-            payload: b"reported-five-point-capture".to_vec(),
-            nonce: 0,
-            expires_at_ms: 2_000_000_000_000,
-        };
-        let signed = wallet
-            .sign(action.clone(), &sampled, |points| {
-                assert_eq!(points.len(), 13)
-            })
-            .unwrap();
-        // These five observed points correspond to one compact enrolled group.
-        assert_eq!(signed.matched_feature_ids, [21, 28, 29, 31, 36]);
-        assert_signed_action(&wallet, action, signed);
-    }
-
-    fn assert_signed_action(wallet: &FingerprintWallet, action: Action, signed: SignedFingerprint) {
-        let commitment = wallet.commitment().unwrap().to_core().unwrap();
-        let authorization = signed.authorization.to_core().unwrap();
-        let mut expected = action.to_core().unwrap();
-        let verify = |expected: &gnorix::core::authorization::Action| {
-            authorization::verify(
-                &ExampleCrypto,
-                &commitment,
-                authorization::EnrollmentStatus::Active,
-                expected,
-                &authorization,
-                1_900_000_000_000,
-                &verification_limits(),
-            )
-        };
-        // Verify descriptor membership and the action signature. This does not
-        // assert correspondence to the same physical minutiae in both scans.
-        verify(&expected).unwrap();
-        expected.payload.push(0);
-        assert!(verify(&expected).is_err());
-    }
-}
+mod tests;
