@@ -93,7 +93,7 @@
                         <span><i class="point-legend" aria-hidden="true"></i><span id="point-status">Signing points appear after reconstruction</span></span>
                         <span id="source-size" class="mono"></span>
                     </div>
-                    <p id="capture-description" class="capture-description">Each approval analyzes a new random circular capture with mild image artifacts. Minimum feature priority: 0.3.</p>
+                    <p id="capture-description" class="capture-description" tabindex="0" aria-label="Capture details">Each approval analyzes a new random circular capture with mild image artifacts. Minimum feature priority: 0.3.</p>
                 </section>
 
                 <section class="transfer-panel panel" aria-labelledby="transfer-title">
@@ -119,23 +119,29 @@
                             <p class="field-note" id="amount-note">No GXT transfer fee. Up to 24 decimal places.</p>
                         </fieldset>
 
-                        <div class="transfer-review" id="transfer-review">
+                        <div class="transfer-review" id="transfer-review" tabindex="0" role="region" aria-label="Transfer summary">
                             <span class="label">TRANSFER SUMMARY</span>
                             <p id="review-amount">Enter an amount</p>
                             <span id="review-recipient">Choose the recipient before signing.</span>
                         </div>
-                        <p id="form-error" class="form-error" role="alert" hidden></p>
-                        <button id="sign-button" class="primary-button" type="submit" disabled>
-                            <span id="sign-label">Approve &amp; sign</span><span aria-hidden="true">↗</span>
-                        </button>
-                        <button id="submit-button" class="primary-button submit-button" type="button" hidden disabled>
-                            <span>Submit to NEAR</span><span aria-hidden="true">→</span>
-                        </button>
-                        <button id="discard-button" class="text-button discard-button" type="button" hidden>Edit transfer</button>
-                        <p class="approval-note" id="approval-note">Each approval uses a fresh capture and signs this exact transfer.</p>
+                        <div class="transfer-actions">
+                            <div class="primary-action-slot">
+                                <button id="sign-button" class="primary-button" type="submit" disabled>
+                                    <span id="sign-label">Approve &amp; sign</span><span aria-hidden="true">↗</span>
+                                </button>
+                                <button id="submit-button" class="primary-button submit-button" type="button" hidden disabled>
+                                    <span id="submit-label">Submit to NEAR</span><span aria-hidden="true">→</span>
+                                </button>
+                            </div>
+                            <button id="discard-button" class="text-button discard-button" type="button" hidden>Edit transfer</button>
+                        </div>
+                        <p class="approval-note" id="approval-note">Fresh capture per approval. Signs this exact transfer.</p>
                         <div class="action-status">
                             <span id="execution-badge" class="tag">Ready when you are</span>
-                            <div class="execution-message" id="execution-message" role="status" aria-live="polite" aria-atomic="true">No transfer submitted.</div>
+                            <div id="status-content" class="status-content" tabindex="0" role="region" aria-label="Transfer status details">
+                                <p id="form-error" class="form-error" role="alert" hidden></p>
+                                <div class="execution-message" id="execution-message" role="status" aria-live="polite" aria-atomic="true">No transfer submitted.</div>
+                            </div>
                         </div>
                     </form>
                 </section>

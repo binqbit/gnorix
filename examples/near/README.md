@@ -61,6 +61,10 @@ this demo does not persist a wallet or reconnect to testnet/mainnet. Both source
 images and signing run locally. Fingerprint extraction can take tens of seconds;
 use the documented release build. The HTTP page remains responsive during it.
 
+The fingerprint, transfer controls and execution panels keep stable dimensions
+through signing, submission and receipt updates. Long status messages and transfer
+details scroll within their panels; expanding the proof is an explicit action.
+
 If a transaction result cannot be observed, **Check transaction status** queries
 the same hash. It does not resend, and another transfer is blocked until that
 outcome is resolved. A failed token call consumes its accepted nonce, so retrying

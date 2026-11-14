@@ -104,6 +104,7 @@ function setText(id, text) {
 }
 
 function showFormError(message) {
+    if (message && $("form-error").textContent !== message) $("status-content").scrollTop = 0;
     setText("form-error", message ?? "");
     $("form-error").hidden = !message;
 }
@@ -373,13 +374,14 @@ function renderForm() {
     if (prepared) setText("review-amount", `${prepared.amount} GXT`);
     $("sign-button").hidden = Boolean(prepared);
     $("sign-button").disabled = !mutable || !valid;
-    setText("sign-label", state.server?.phase === "signing" && busy() ? "Reconstructing signature…" : "Approve & sign");
+    setText("sign-label", state.server?.phase === "signing" && busy() ? "Reconstructing…" : "Approve & sign");
     const canSubmit = prepared?.verified && state.server?.phase === "signed" && !busy() && state.connected;
-    $("submit-button").hidden = !prepared || state.server?.phase !== "signed";
+    $("submit-button").hidden = !prepared;
+    setText("submit-label", unresolvedSubmission() || state.server?.phase === "submitting" ? "Awaiting receipt…" : "Submit to NEAR");
     $("submit-button").disabled = !canSubmit;
     $("discard-button").hidden = !prepared || state.server?.phase !== "signed" || busy() || unresolvedSubmission();
     setText("discard-button", "Edit transfer");
-    setText("approval-note", prepared && state.server?.phase === "signed" ? "Signature ready. Submit to execute this exact transfer." : "Each approval uses a fresh capture and signs this exact transfer.");
+    setText("approval-note", prepared && state.server?.phase === "signed" ? "Signature ready. Submit to execute this exact transfer." : "Fresh capture per approval. Signs this exact transfer.");
 }
 
 function bytesHex(value) {
@@ -475,6 +477,7 @@ function renderExecution() {
     if (transaction?.failures?.length) {
         message += ` ${transaction.failures.map((failure) => `${failure.executor_id}: ${failure.error}`).join(" · ")}`;
     }
+    if ($("execution-message").textContent !== message) $("status-content").scrollTop = 0;
     setText("execution-message", message);
     $("execution-message").dataset.kind = kind;
     setText("execution-badge", badge);
