@@ -219,7 +219,10 @@ fn assert_regional_combinations(result: &mut fingerprint::Fingerprint) {
             min_anchor_distance_units: 0.0,
         },
         radius_units: 30.0,
-        max_work: 10_000_000,
+        // This unfiltered fixture also exercises all pair-midpoint witnesses
+        // in one dense region. Keep room for that case and verify the exact
+        // exhaustion boundary below, without changing application defaults.
+        max_work: 200_000_000,
     };
     let selected =
         fingerprint::generate_combinations(&result.features().unwrap(), &config).unwrap();
