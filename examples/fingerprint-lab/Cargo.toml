@@ -1,0 +1,24 @@
+[package]
+name = "gnorix-lab"
+description = "Local fingerprint enrollment and signing test stand"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gnorix.workspace = true
+gnorix-example-support.workspace = true
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+getrandom = "0.4.1"
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+
+[lints]
+workspace = true

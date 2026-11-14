@@ -293,15 +293,11 @@ dependencies = [
 name = "gnorix"
 version = "0.1.0-dev.1"
 dependencies = [
- "axum",
- "getrandom",
  "gnorix-example-support",
  "image",
  "serde",
  "serde_json",
  "sha2",
- "tokio",
- "tower",
  "zeroize",
 ]
 
@@ -317,6 +313,22 @@ dependencies = [
  "serde_json",
  "sha2",
  "zeroize",
+]
+
+[[package]]
+name = "gnorix-lab"
+version = "0.1.0-dev.1"
+dependencies = [
+ "axum",
+ "getrandom",
+ "gnorix",
+ "gnorix-example-support",
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

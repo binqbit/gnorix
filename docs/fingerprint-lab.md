@@ -3,8 +3,10 @@
 Run the local web interface from the checkout root:
 
 ```sh
-cargo run -p gnorix --example fingerprint_lab --release --locked
+cargo run -p gnorix-lab --release --locked
 ```
+
+The stand is an independent Cargo application at [`examples/fingerprint-lab/`](../examples/fingerprint-lab/README.md), with its own manifest, Rust modules and embedded web assets. It is a workspace member named `gnorix-lab`, depending on the local `gnorix` library and shared example adapters. The workspace supplies the lockfile and build directory. You can also run `cargo run --release --locked` from the application directory. Building requires the repository checkout, including the shared test fixture.
 
 Open **http://127.0.0.1:8765**. The server and all biometric and cryptographic operations run in Rust. HTML, CSS, JavaScript, the logo and the existing test fingerprint are bundled with the executable; no frontend installation or external services are needed. The first build needs Cargo dependencies. Use `-- --port 8766` after the command to choose another local port. Stop the server with Ctrl+C.
 

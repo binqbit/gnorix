@@ -2,7 +2,7 @@
 
 ## Workspace and setup
 
-The repository uses a Rust 2024 Cargo workspace with one reusable library at `crates/gnorix`. The package boundary supports consumption by applications and future integrations. Add another package only when it has a concrete independent responsibility.
+The repository uses a Rust 2024 Cargo workspace. `crates/gnorix` is the reusable library; `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the existing shared crypto, enrollment-profile and file/JSON adapters used by the Lab and CLI examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
 Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
 
@@ -13,7 +13,7 @@ cargo fetch --locked
 
 On a system-managed toolchain, including NixOS, provide the same tools through the system's package configuration and check `rustc --version` and `cargo --version`. The library needs no scanner, blockchain node, credentials or database to build and test. Keep `Cargo.lock` in version control for reproducible repository checks. Package publication is disabled during this foundation stage.
 
-The production dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
+The library dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
 
 ## Routine checks
 
@@ -83,7 +83,7 @@ The fingerprint example is an adapter: `examples/fingerprint.rs` coordinates inp
 
 `examples/fingerprint_signing.rs` loads the retained public policy, extracts a fresh image and searches ranked subsets within adaptive overlapping regions. It checks the retained anchor count, pairwise distance in R and anchor envelope before grid preparation. Each admitted subset's baseline and neighbor assignments are generated and tested one at a time; the first member of the existing package signs the action. Its `verify` command checks the public authorization against a separately supplied trusted package and expected action. [The signing guide](fingerprint-signing.md) documents controls and evidence. CLI-only modules under `crates/gnorix/examples/support/` own image decoding, combination/grid controls and secret input. The shared `gnorix-example-support` package at [`examples/support/`](../examples/support/) owns the enrollment profile, crypto provider, bounded authorization JSON and exclusive file output; file I/O remains outside the reusable library.
 
-`examples/fingerprint_lab.rs` serves the [local test stand](fingerprint-lab.md). Its HTTP adapter, typed view/request models, synchronous biometric workflows and circular capture adapter live in `examples/fingerprint_lab/`. The server calls the library directly and uses `gnorix-example-support` for its shared crypto provider, enrollment profile, authorization JSON and file adapters. Its single-entry analyzed-capture cache retains only compact features and the crop offset; source revision, circular selection and extraction controls identify a cache entry. Downstream policy changes rebuild selection/search from those features. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
+The [`gnorix-lab` application](../examples/fingerprint-lab/README.md) serves the [local test stand](fingerprint-lab.md). It has its own [`Cargo.toml`](../examples/fingerprint-lab/Cargo.toml), `src/main.rs`, HTTP adapter, typed request/view models, biometric workflows and circular capture adapter. Its `web/` assets and `gallery.json` are embedded at build time. Run `cargo run -p gnorix-lab --release --locked` from the repository root, or `cargo run --release --locked` inside `examples/fingerprint-lab`. The application depends on `gnorix` through its public API and uses `gnorix-example-support` for the shared example adapters. Its single-entry analyzed-capture cache retains only compact features and the crop offset; source revision, circular selection and extraction controls identify a cache entry. Downstream policy changes rebuild selection/search from those features. `prepare_signing_search` exposes actual region diagnostics and the source IDs of its last yielded candidate for inspection without reimplementing selection in JavaScript.
 
 In `tools/fingerprint-reports/gnorix_reports/`, `snapshot.py` loads and validates native bundles, `validation.py` supplies shared JSON primitives, and stage modules validate their own evidence. `structure.py` coordinates rendering; the rendering modules draw already validated measurements. `cli.py` runs extraction and publishes the complete report directory. Report filenames and native raster filenames each have one maintained inventory shared by their consumers.
 

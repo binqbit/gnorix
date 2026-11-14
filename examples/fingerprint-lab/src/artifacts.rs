@@ -4,7 +4,6 @@ use image::{GrayImage, Luma};
 
 use crate::Result;
 
-#[path = "artifacts/streaks.rs"]
 mod streaks;
 
 /// Smooth displacement, blur and exposure fields cover the whole image.

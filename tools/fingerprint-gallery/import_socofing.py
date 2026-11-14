@@ -13,7 +13,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = ROOT / "crates/gnorix/examples/fingerprint_lab/gallery.json"
+MANIFEST = ROOT / "examples/fingerprint-lab/gallery.json"
 DEFAULT_OUTPUT = ROOT / "test-data/fingerprint-gallery"
 
 

@@ -4,19 +4,12 @@ use gnorix_example_support::{
     authorization_json, enrollment_profile, example_crypto as provider, output,
 };
 
-#[path = "fingerprint_lab/api.rs"]
 mod api;
-#[path = "fingerprint_lab/artifacts.rs"]
 mod artifacts;
-#[path = "fingerprint_lab/capture.rs"]
 mod capture;
-#[path = "fingerprint_lab/engine.rs"]
 mod engine;
-#[path = "fingerprint_lab/gallery.rs"]
 mod gallery;
-#[path = "fingerprint_lab/model.rs"]
 mod model;
-#[path = "fingerprint_lab/resources.rs"]
 mod resources;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -62,9 +55,7 @@ fn options(mut args: impl Iterator<Item = String>, root: &std::path::Path) -> Re
                 ))
             }
             _ => {
-                return Err(
-                    "usage: fingerprint_lab [--port <port>] [--gallery <directory>]".into(),
-                );
+                return Err("usage: gnorix-lab [--port <port>] [--gallery <directory>]".into());
             }
         }
     }

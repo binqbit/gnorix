@@ -11,10 +11,6 @@ sha2.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
-getrandom = "0.4.1"
-tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
-tower = { version = "0.5.3", features = ["util"] }
 gnorix-example-support.workspace = true
 image.workspace = true
 serde_json.workspace = true

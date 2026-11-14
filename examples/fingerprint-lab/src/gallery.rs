@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
-const DEFAULT_PNG: &[u8] = include_bytes!("../../tests/assets/test-fingerprint.png");
+const DEFAULT_PNG: &[u8] =
+    include_bytes!("../../../crates/gnorix/tests/assets/test-fingerprint.png");
 
 #[derive(Clone, Serialize)]
 pub struct ImageView {
@@ -52,7 +53,7 @@ struct ImportedImage {
 
 impl Gallery {
     pub fn load(directory: &Path) -> Result<Self> {
-        let manifest: Manifest = serde_json::from_str(include_str!("gallery.json"))?;
+        let manifest: Manifest = serde_json::from_str(include_str!("../gallery.json"))?;
         Self::load_manifest(directory, manifest)
     }
 

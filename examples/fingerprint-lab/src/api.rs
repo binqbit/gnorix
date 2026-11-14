@@ -341,19 +341,22 @@ fn failure(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({"error": message}))).into_response()
 }
 async fn index() -> Response {
-    asset("text/html; charset=utf-8", include_bytes!("web/index.html"))
+    asset(
+        "text/html; charset=utf-8",
+        include_bytes!("../web/index.html"),
+    )
 }
 async fn css() -> Response {
-    asset("text/css; charset=utf-8", include_bytes!("web/app.css"))
+    asset("text/css; charset=utf-8", include_bytes!("../web/app.css"))
 }
 async fn javascript() -> Response {
     asset(
         "text/javascript; charset=utf-8",
-        include_bytes!("web/app.js"),
+        include_bytes!("../web/app.js"),
     )
 }
 async fn logo() -> Response {
-    asset("image/svg+xml", include_bytes!("web/logo.svg"))
+    asset("image/svg+xml", include_bytes!("../web/logo.svg"))
 }
 async fn source(State(app): State<App>, Path(id): Path<String>) -> Response {
     match app.gallery.get(&id) {

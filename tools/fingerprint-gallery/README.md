@@ -1,6 +1,6 @@
 # Fingerprint Lab gallery import
 
-The Lab keeps its synthetic test fingerprint and offers five curated SOCOFing originals when their local PNGs are installed. The selection is fixed in [gallery.json](../../crates/gnorix/examples/fingerprint_lab/gallery.json). The images are external research data, not bundled repository assets; see the [dataset provenance and usage terms](../../docs/fingerprint-testing.md).
+The Lab keeps its synthetic test fingerprint and offers five curated SOCOFing originals when their local PNGs are installed. The selection is fixed in [gallery.json](../../examples/fingerprint-lab/gallery.json). The images are external research data, not bundled repository assets; see the [dataset provenance and usage terms](../../docs/fingerprint-testing.md).
 
 From the repository root, after downloading SOCOFing version 2:
 

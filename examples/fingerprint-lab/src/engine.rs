@@ -1440,10 +1440,11 @@ mod tests {
         .unwrap();
         assert_eq!(restored.spatial(), retained);
 
-        let source =
-            image::load_from_memory(include_bytes!("../../tests/assets/test-fingerprint.png"))
-                .unwrap()
-                .to_luma8();
+        let source = image::load_from_memory(include_bytes!(
+            "../../../crates/gnorix/tests/assets/test-fingerprint.png"
+        ))
+        .unwrap()
+        .to_luma8();
         engine.source = source.clone();
         engine.frame = ArtifactFrame::new(source, 0, 0, 1, Some(5.0)).unwrap();
         engine
