@@ -108,6 +108,32 @@ pub fn prepare_signing_search(
     fingerprint: &FingerprintFeatures,
     config: &SigningSearchConfig,
 ) -> Result<SigningSearch, CombinationError> {
+    prepare_search(fingerprint, config, false)
+}
+
+/// Search an enrollment containing only canonical grid baselines prepared by
+/// [`super::super::prepare_grid_baselines`].
+///
+/// Each subset still completes its positional Cartesian traversal before the
+/// next subset. Assignments whose fixed-frame extrema cannot equal an enrolled
+/// baseline are skipped before descriptor hashing and key derivation. Remaining
+/// candidates keep their original order, phase, padding and coordinates.
+///
+/// The caller must know that the enrollment contains canonical baselines only.
+/// For arbitrary enrolled candidates or positional variants, use
+/// [`prepare_signing_search`] instead.
+pub fn prepare_baseline_signing_search(
+    fingerprint: &FingerprintFeatures,
+    config: &SigningSearchConfig,
+) -> Result<SigningSearch, CombinationError> {
+    prepare_search(fingerprint, config, true)
+}
+
+fn prepare_search(
+    fingerprint: &FingerprintFeatures,
+    config: &SigningSearchConfig,
+    baseline_only: bool,
+) -> Result<SigningSearch, CombinationError> {
     config.validate()?;
     let spacing = fingerprint.unit_px;
     if !spacing.is_finite() || spacing <= 0.0 {
@@ -124,7 +150,7 @@ pub fn prepare_signing_search(
         });
     }
     let bounds = regions::pattern_bounds(fingerprint, &points, &mut work)?;
-    SigningSearch::new(points, bounds, spacing, *config, work)
+    SigningSearch::new(points, bounds, spacing, *config, work, baseline_only)
 }
 
 /// One actual search circle, expressed in the current capture's pixel frame.
@@ -152,6 +178,7 @@ pub struct SigningSearch {
     config: SigningSearchConfig,
     work: WorkBudget,
     finished: bool,
+    baseline_only: bool,
 }
 
 impl SigningSearch {
@@ -178,6 +205,7 @@ impl SigningSearch {
         spacing: f64,
         config: SigningSearchConfig,
         mut work: WorkBudget,
+        baseline_only: bool,
     ) -> Result<Self, CombinationError> {
         if points.len() < config.min_points.max(config.spatial.min_anchor_points) {
             return Err(CombinationError::InsufficientPoints {
@@ -215,6 +243,7 @@ impl SigningSearch {
             config,
             work,
             finished: false,
+            baseline_only,
         })
     }
 
@@ -256,6 +285,7 @@ impl SigningSearch {
                 self.config.uncertainty_steps,
                 self.work.remaining,
                 self.config.max_descriptor_bytes,
+                self.baseline_only,
             )?;
             self.work.remaining = variants.remaining_work();
             self.active = Some(ActiveSubset {
@@ -520,8 +550,108 @@ mod tests {
             2.3,
             config,
             WorkBudget::new(config.max_work),
+            false,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn baseline_only_search_preserves_registered_hits_and_order_from_the_full_stream() {
+        use crate::biometrics::fingerprint::{
+            AnalyzedFeature, GridBaselineConfig, prepare_grid_baselines,
+        };
+        let original = points(6);
+        let groups: Vec<_> = (0..original.len())
+            .map(|excluded| FeatureCombination {
+                feature_ids: original
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, point)| (index != excluded).then_some(point.id))
+                    .collect(),
+                score: 1.0,
+                regions: vec![0],
+            })
+            .collect();
+        let controls = SigningSearchConfig {
+            min_points: 5,
+            max_points: 5,
+            max_work: 100_000_000,
+            ..config(5, 1)
+        };
+        let baselines = prepare_grid_baselines(
+            &original,
+            &groups,
+            2.3,
+            &GridBaselineConfig {
+                padding_steps: 1,
+                max_baselines: 6,
+                max_work: 1_000_000,
+            },
+        )
+        .unwrap();
+        let registered: BTreeSet<_> = baselines
+            .candidates(controls.max_descriptor_bytes)
+            .map(|candidate| candidate.unwrap().as_bytes().to_vec())
+            .collect();
+        let mut observed = original;
+        let shifted = observed[2].position;
+        observed[2].position = Point::new(shifted.x() + 2.3, shifted.y()).unwrap();
+        let fingerprint = FingerprintFeatures::new(
+            200,
+            200,
+            2.3,
+            Some(bounds(&observed)),
+            observed
+                .iter()
+                .map(|point| AnalyzedFeature {
+                    id: point.id,
+                    kind: point.kind,
+                    position: point.position,
+                    priority: Some(point.priority),
+                })
+                .collect(),
+        )
+        .unwrap();
+        let collect = |mut search: SigningSearch| {
+            let mut count = 0;
+            let mut hits = Vec::new();
+            while let Some(candidate) = search.next() {
+                let candidate = candidate.unwrap();
+                count += 1;
+                if registered.contains(candidate.as_bytes()) {
+                    hits.push((
+                        search.last_feature_ids().to_vec(),
+                        candidate.as_bytes().to_vec(),
+                    ));
+                }
+            }
+            (count, hits)
+        };
+        let (all_count, original_hits) =
+            collect(prepare_signing_search(&fingerprint, &controls).unwrap());
+        let (baseline_count, baseline_hits) =
+            collect(prepare_baseline_signing_search(&fingerprint, &controls).unwrap());
+        assert_eq!(all_count, 6 * 7_usize.pow(5));
+        assert!(baseline_count < all_count / 2);
+        assert!(!original_hits.is_empty());
+        assert_eq!(baseline_hits, original_hits);
+
+        let no_uncertainty = SigningSearchConfig {
+            uncertainty_steps: 0,
+            ..controls
+        };
+        let mut complete = prepare_signing_search(&fingerprint, &no_uncertainty).unwrap();
+        let mut baseline = prepare_baseline_signing_search(&fingerprint, &no_uncertainty).unwrap();
+        for _ in 0..6 {
+            assert_eq!(
+                complete.next().unwrap().unwrap().as_bytes(),
+                baseline.next().unwrap().unwrap().as_bytes()
+            );
+            assert_eq!(complete.last_feature_ids(), baseline.last_feature_ids());
+            assert_eq!(complete.work.remaining, baseline.work.remaining);
+        }
+        assert!(complete.next().is_none());
+        assert!(baseline.next().is_none());
     }
 
     fn bounds(points: &[CombinationPoint]) -> RegionBounds {
@@ -1144,7 +1274,8 @@ mod tests {
                 bounds(&points(2)),
                 2.3,
                 config(3, 1),
-                WorkBudget::new(100)
+                WorkBudget::new(100),
+                false,
             ),
             Err(CombinationError::InsufficientPoints {
                 required: 3,

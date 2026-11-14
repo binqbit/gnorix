@@ -16,6 +16,15 @@ Each region contributes `Σ C(N, k)` subsets for `k = min_points..min(max_points
 
 This flow uses combination JSON v7, example profile v9 and `.grx` container v2. Enrollment commits only baseline keys, while signing searches positional uncertainty; both enforce the retained priority and spatial policy. Earlier fingerprint profiles must be recreated. The current CLI rejects old container files. Existing authorizations remain checkable through the generic verifier with their retained original trusted commitment. Coordinate hashing, context encoding and signature framing are unchanged.
 
+For packages enrolled solely with `prepare_grid_baselines`, use
+`prepare_baseline_signing_search` to skip grid assignments that cannot equal any
+aligned enrollment baseline. It preserves the order of possible matches and
+completes each subset's neighborhood before advancing. An assignment must retain
+the enrollment's top and right padding boundaries; rejected placements consume
+work, but do not incur descriptor hashing or key derivation. The generic
+`prepare_signing_search` and diagnostic variant traversal remain complete and
+also support packages built from arbitrary positional candidates.
+
 ## Run the example
 
 First create the package using the [enrollment example](grx-packages.md#run-the-complete-example). Use the package path printed by enrollment; signing loads its reconstruction policy automatically:

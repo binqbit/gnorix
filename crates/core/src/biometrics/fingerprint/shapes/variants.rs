@@ -19,6 +19,7 @@ pub(in super::super) struct CandidateVariants {
     max_descriptor_bytes: NonZeroUsize,
     first: bool,
     finished: bool,
+    baseline_padding: Option<u32>,
 }
 
 impl CandidateVariants {
@@ -29,6 +30,7 @@ impl CandidateVariants {
         remaining_work: usize,
         descriptor_bytes: usize,
         max_descriptor_bytes: NonZeroUsize,
+        baseline_padding: Option<u32>,
     ) -> Result<Self, AlgorithmError> {
         if baseline.is_empty() || offsets.is_empty() || phase > 1 {
             return Err(Box::new(GridShapeError::InvalidInput(
@@ -52,6 +54,7 @@ impl CandidateVariants {
             max_descriptor_bytes,
             first: true,
             finished: false,
+            baseline_padding,
         })
     }
 
@@ -60,22 +63,44 @@ impl CandidateVariants {
     }
 
     fn advance(&mut self) -> Result<Option<Candidate>, AlgorithmError> {
-        if !self.first && !advance_choices(&mut self.choices, self.offsets.len()) {
-            return Ok(None);
+        loop {
+            if !self.first && !advance_choices(&mut self.choices, self.offsets.len()) {
+                return Ok(None);
+            }
+            self.first = false;
+            let positions = place_positions(
+                &self.baseline,
+                self.phase,
+                &self.offsets,
+                &self.choices,
+                &mut self.work,
+            )?;
+            if let Some(padding) = self.baseline_padding {
+                self.work.spend(positions.len())?;
+                if !has_baseline_bounds(&positions, self.phase, padding) {
+                    continue;
+                }
+            }
+            self.work.spend(self.descriptor_bytes)?;
+            return super::grid_candidate(&positions, self.phase, self.max_descriptor_bytes)
+                .map(Some)
+                .map_err(Into::into);
         }
-        self.first = false;
-        let positions = place_positions(
-            &self.baseline,
-            self.phase,
-            &self.offsets,
-            &self.choices,
-            &mut self.work,
-        )?;
-        self.work.spend(self.descriptor_bytes)?;
-        super::grid_candidate(&positions, self.phase, self.max_descriptor_bytes)
-            .map(Some)
-            .map_err(Into::into)
     }
+}
+
+/// `align_and_pad` always puts an enrolled baseline's upper/right extrema on
+/// these exact boundaries. Inspect the physical staggered horizontal coordinate
+/// rather than the column alone. Wide arithmetic also handles extreme cells.
+fn has_baseline_bounds(positions: &[GridCell], phase: u8, padding: u32) -> bool {
+    let mut top = u64::MAX;
+    let mut right = u128::MAX;
+    for position in positions {
+        top = top.min(position.row);
+        let stagger = (u128::from(position.row) + u128::from(phase)) % 2;
+        right = right.min(2 * u128::from(position.column) + stagger);
+    }
+    top == u64::from(padding) && right == 2 * u128::from(padding)
 }
 
 impl Iterator for CandidateVariants {
@@ -365,6 +390,66 @@ mod tests {
             preparation_work: 0,
             remaining_work,
         }
+    }
+
+    #[test]
+    fn baseline_filter_reports_budget_exhaustion_while_skipping_impossible_assignments() {
+        let baseline = vec![
+            cell(28, 1),
+            cell(21, 2),
+            cell(11, 11),
+            cell(5, 2),
+            cell(1, 1),
+        ];
+        let offsets = neighborhood_offsets(1, &mut WorkBudget::new(100)).unwrap();
+        let bytes = NonZeroUsize::new(4096).unwrap();
+        let descriptor = super::super::encoding::descriptor_size(baseline.len(), bytes).unwrap();
+        let mut candidates =
+            CandidateVariants::new(baseline, 1, offsets, 170, descriptor, bytes, Some(1)).unwrap();
+        // Constructor costs 5, the baseline costs 155, and the next impossible
+        // assignment costs 10. Reaching the next placement must report a limit.
+        assert!(candidates.next().unwrap().is_ok());
+        assert!(matches!(
+            candidates
+                .next()
+                .unwrap()
+                .unwrap_err()
+                .downcast_ref::<GridShapeError>(),
+            Some(GridShapeError::WorkLimit)
+        ));
+        assert_eq!(candidates.remaining_work(), 0);
+        assert!(candidates.next().is_none());
+    }
+
+    #[test]
+    fn baseline_bounds_use_physical_stagger_and_handle_extreme_coordinates() {
+        assert!(has_baseline_bounds(&[cell(1, 1)], 1, 1));
+        assert!(!has_baseline_bounds(&[cell(1, 1)], 0, 1));
+        assert!(!has_baseline_bounds(&[cell(u64::MAX, u64::MAX)], 1, 1));
+    }
+
+    #[test]
+    fn baseline_filter_does_not_hide_coordinate_overflow() {
+        let bytes = NonZeroUsize::new(4096).unwrap();
+        let mut candidates = CandidateVariants::new(
+            vec![cell(u64::MAX, u64::MAX)],
+            0,
+            vec![GridPoint { q: 0, r: 0 }, GridPoint { q: -1, r: 0 }],
+            1000,
+            super::super::encoding::descriptor_size(1, bytes).unwrap(),
+            bytes,
+            Some(1),
+        )
+        .unwrap();
+        assert!(matches!(
+            candidates
+                .next()
+                .unwrap()
+                .unwrap_err()
+                .downcast_ref::<GridShapeError>(),
+            Some(GridShapeError::Geometry(GeometryError::CoordinateOverflow))
+        ));
+        assert!(candidates.next().is_none());
     }
 
     #[test]

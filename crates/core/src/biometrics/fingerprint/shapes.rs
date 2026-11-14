@@ -338,6 +338,7 @@ pub(super) fn candidate_variants(
     padding: u32,
     max_work: usize,
     max_descriptor_bytes: NonZeroUsize,
+    baseline_only: bool,
 ) -> Result<CandidateVariants, crate::error::AlgorithmError> {
     let mut work = WorkBudget::new(max_work);
     let descriptor_bytes = encoding::descriptor_size(positions.len(), max_descriptor_bytes)?;
@@ -354,6 +355,7 @@ pub(super) fn candidate_variants(
         work.remaining,
         descriptor_bytes,
         max_descriptor_bytes,
+        (baseline_only && padding > 0).then_some(padding),
     )
 }
 

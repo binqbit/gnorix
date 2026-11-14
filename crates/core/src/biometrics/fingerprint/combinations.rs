@@ -12,7 +12,8 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use super::{FeatureKind, FingerprintError, FingerprintFeatures, Point};
 
 pub use search::{
-    SigningRegion, SigningSearch, SigningSearchConfig, prepare_signing_search, signing_candidates,
+    SigningRegion, SigningSearch, SigningSearchConfig, prepare_baseline_signing_search,
+    prepare_signing_search, signing_candidates,
 };
 pub use spatial::{SpatialPolicy, satisfies_spatial_requirements};
 

@@ -349,9 +349,12 @@ coverage witnesses and compact local groups around individual points; these
 additions and capacity can change the final shares. The local groups improve
 partial-capture coverage while preserving the configured point-count and anchor constraints.
 Signing applies the same group preference to its lazy combination search.
-The signing work budget is 100 million units, including geometry and descriptor
-bytes, not 100 million key attempts. It preserves priority order and checks a
+The signing work budget is 300 million units, including geometry and descriptor
+bytes, not 300 million key attempts. It preserves priority order and checks a
 subset's complete positional neighborhood before moving to the next subset.
+Because enrollment stores aligned baselines only, variants whose padded
+boundaries cannot match any enrolled baseline are skipped before hashing and
+key derivation. Their placement and boundary checks still consume work.
 Eligible points in a crop do not guarantee that an enrolled combination lies
 entirely within it: enrollment selects a bounded set of combinations.
 These selection rules use example profile v9; earlier enrollments must be recreated.

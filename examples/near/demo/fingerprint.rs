@@ -33,7 +33,7 @@ use serde::Serialize;
 use super::capture::{PatternGeometry, SampledCapture};
 
 const ENROLLMENT_WORK: usize = 1_000_000;
-const SEARCH_WORK: usize = 100_000_000;
+const SEARCH_WORK: usize = 300_000_000;
 const MAX_BASELINES: usize = 100_000;
 const UNCERTAINTY_STEPS: u32 = 1;
 const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
@@ -181,7 +181,8 @@ impl FingerprintWallet {
         let features = fingerprint::analyze(&sampled.capture, &ExtractionConfig::default())
             .context("the partial scan could not be analyzed")?;
         on_features(observed_points(&features, sampled.metadata.offset));
-        let mut search = fingerprint::prepare_signing_search(&features, &self.search_config()?)?;
+        let mut search =
+            fingerprint::prepare_baseline_signing_search(&features, &self.search_config()?)?;
         let attempts = Cell::new(0_usize);
         let candidates = Box::new(search.by_ref().inspect(|candidate| {
             if candidate.is_ok() {
@@ -420,6 +421,38 @@ mod tests {
         assert!(signed.attempts > 0);
         assert!(!signed.matched_feature_ids.is_empty());
 
+        assert_signed_action(&wallet, action, signed);
+    }
+
+    #[test]
+    #[ignore = "extracts both the enrollment and reported partial scan and searches real keys"]
+    fn reported_five_point_capture_signs_with_local_coverage() {
+        let wallet =
+            FingerprintWallet::enroll(1, "near:regression", "wallet.fixture", Some(5)).unwrap();
+        // Seed reproduces the reported circle, selected by its center rather
+        // than by a successful signing outcome. This crop previously had no
+        // registered descriptor even after its complete positional traversal.
+        let sampled = wallet.sample(118_278).unwrap();
+        assert_eq!(sampled.metadata.circle.x, 235.0);
+        assert_eq!(sampled.metadata.circle.y, 131.0);
+        assert_eq!(sampled.metadata.circle.radius, 119.26860441876563);
+        let action = Action {
+            operation: "wallet.ft_transfer.v1".into(),
+            payload: b"reported-five-point-capture".to_vec(),
+            nonce: 0,
+            expires_at_ms: 2_000_000_000_000,
+        };
+        let signed = wallet
+            .sign(action.clone(), &sampled, |points| {
+                assert_eq!(points.len(), 13)
+            })
+            .unwrap();
+        // These five observed points correspond to one compact enrolled group.
+        assert_eq!(signed.matched_feature_ids, [21, 28, 29, 31, 36]);
+        assert_signed_action(&wallet, action, signed);
+    }
+
+    fn assert_signed_action(wallet: &FingerprintWallet, action: Action, signed: SignedFingerprint) {
         let commitment = wallet.commitment().unwrap().to_core().unwrap();
         let authorization = signed.authorization.to_core().unwrap();
         let mut expected = action.to_core().unwrap();
