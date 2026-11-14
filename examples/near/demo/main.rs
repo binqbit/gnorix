@@ -25,6 +25,11 @@ fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let config = config::Config::parse(std::env::args().skip(1))?;
+    if let Some(points) = config.points_per_combination {
+        println!(
+            "Fingerprint test policy: exactly {points} points per combination, at least 3 anchors separated by 6R"
+        );
+    }
     let port = config.port;
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await

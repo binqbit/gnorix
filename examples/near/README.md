@@ -68,6 +68,20 @@ accepts the explicitly configured Host/Origin. See [public deployment](deploy/RE
 for the release bundle, systemd service and nginx configuration. Public visitors
 share the same disposable demo session.
 
+For the local five-point experiment, run:
+
+```sh
+cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --points-per-combination 5
+```
+
+This enrolls and searches combinations of **exactly five points**. At least three
+anchors must each be at least **6R** from every other anchor; remaining points
+must lie inside their outline. Equal distances are not required. R is the
+measured average dark-ridge thickness. This is five points per combination, not
+a limit on how many features can be detected. Without the flag, the default
+range remains 3–6. The selected count is retained with enrollment parameters and
+also applies to later signing attempts; changing it requires a new demo session.
+
 Set `GNORIX_DEMO_CONTRACTS_DIR` to a directory containing both prebuilt Wasm
 contracts to skip startup compilation. Without it, the local build behavior is
 unchanged. Ctrl+C stops the app and its managed

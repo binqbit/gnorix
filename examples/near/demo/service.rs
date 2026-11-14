@@ -217,11 +217,13 @@ impl App {
                 index + 1
             ));
             let context = context.clone();
+            let points_per_combination = self.config.points_per_combination;
             let wallet = tokio::task::spawn_blocking(move || {
                 FingerprintWallet::enroll(
                     index,
                     &format!("near:{}", context.chain_id),
                     &context.wallet_id,
+                    points_per_combination,
                 )
             })
             .await??;

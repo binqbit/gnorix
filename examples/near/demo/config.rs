@@ -1,11 +1,13 @@
 use anyhow::{Context, Result, bail, ensure};
 use axum::http::uri::Authority;
 
-const USAGE: &str = "usage: gnorix-near-demo [--port PORT] [--public-origin https://HOST[:PORT]]";
+const USAGE: &str = "usage: gnorix-near-demo [--port PORT] [--public-origin https://HOST[:PORT]] [--points-per-combination N (at least 3)]";
 
 #[derive(Clone)]
 pub struct Config {
     pub port: u16,
+    /// Fix both enrollment and signing subset sizes; absent keeps the 3–6 range.
+    pub points_per_combination: Option<usize>,
     public_origin: Option<PublicOrigin>,
 }
 
@@ -19,6 +21,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             port: 8780,
+            points_per_combination: None,
             public_origin: None,
         }
     }
@@ -28,6 +31,7 @@ impl Config {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut args = args.into_iter();
         let mut port = None;
+        let mut points_per_combination = None;
         let mut public_origin = None;
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -42,11 +46,23 @@ impl Config {
                 "--public-origin" if public_origin.is_none() => {
                     public_origin = Some(PublicOrigin::parse(&args.next().context(USAGE)?)?);
                 }
+                "--points-per-combination" if points_per_combination.is_none() => {
+                    let value = args.next().context(USAGE)?;
+                    let count = value
+                        .parse::<usize>()
+                        .context("points per combination must be an integer of at least 3")?;
+                    ensure!(
+                        count >= 3,
+                        "points per combination must be at least 3 to include the required anchors"
+                    );
+                    points_per_combination = Some(count);
+                }
                 _ => bail!(USAGE),
             }
         }
         Ok(Self {
             port: port.unwrap_or(8780),
+            points_per_combination,
             public_origin,
         })
     }
@@ -148,6 +164,63 @@ mod tests {
                 "https://gnorix.online",
             ],
             vec!["--unexpected"],
+        ] {
+            assert!(parse_config(&args).is_err(), "accepted {args:?}");
+        }
+    }
+
+    #[test]
+    fn fixed_point_count_is_optional_and_accepts_existing_options_in_any_order() {
+        assert_eq!(Config::default().points_per_combination, None);
+        assert_eq!(parse_config(&[]).unwrap().points_per_combination, None);
+        assert_eq!(
+            parse_config(&["--points-per-combination", "3"])
+                .unwrap()
+                .points_per_combination,
+            Some(3)
+        );
+        for args in [
+            [
+                "--points-per-combination",
+                "5",
+                "--port",
+                "8781",
+                "--public-origin",
+                "https://gnorix.online",
+            ],
+            [
+                "--port",
+                "8781",
+                "--public-origin",
+                "https://gnorix.online",
+                "--points-per-combination",
+                "5",
+            ],
+        ] {
+            let config = parse_config(&args).unwrap();
+            assert_eq!(config.points_per_combination, Some(5));
+            assert_eq!(config.port, 8781);
+            assert_eq!(config.public_origin(), Some("https://gnorix.online"));
+        }
+    }
+
+    #[test]
+    fn fixed_point_count_rejects_incomplete_invalid_and_duplicate_options() {
+        for args in [
+            vec!["--points-per-combination"],
+            vec!["--points-per-combination", "0"],
+            vec!["--points-per-combination", "1"],
+            vec!["--points-per-combination", "2"],
+            vec!["--points-per-combination", "-5"],
+            vec!["--points-per-combination", "5.0"],
+            vec!["--points-per-combination", "five"],
+            vec!["--points-per-combination", "184467440737095516160"],
+            vec![
+                "--points-per-combination",
+                "5",
+                "--points-per-combination",
+                "5",
+            ],
         ] {
             assert!(parse_config(&args).is_err(), "accepted {args:?}");
         }

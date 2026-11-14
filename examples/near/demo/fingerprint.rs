@@ -78,7 +78,12 @@ pub struct FingerprintWallet {
 }
 
 impl FingerprintWallet {
-    pub fn enroll(index: usize, network: &str, wallet_id: &str) -> Result<Self> {
+    pub fn enroll(
+        index: usize,
+        network: &str,
+        wallet_id: &str,
+        points_per_combination: Option<usize>,
+    ) -> Result<Self> {
         let source = source_image(index)?;
         let capture = Capture::new(
             source.width(),
@@ -101,7 +106,7 @@ impl FingerprintWallet {
             &extracted.scale.pattern_support,
         )?;
         drop(extracted);
-        let config = combination_config();
+        let config = combination_config(points_per_combination);
         let combinations =
             fingerprint::generate_combinations(&features, &config).with_context(|| {
                 format!(
@@ -302,7 +307,7 @@ fn observed_points(features: &FingerprintFeatures, offset: [f64; 2]) -> Vec<Feat
         .iter()
         .filter_map(|feature| {
             let priority = feature.priority?;
-            (priority >= combination_config().min_priority).then(|| FeaturePoint {
+            (priority >= combination_config(None).min_priority).then(|| FeaturePoint {
                 id: feature.id,
                 x: feature.position.x() + offset[0],
                 y: feature.position.y() + offset[1],
@@ -312,10 +317,10 @@ fn observed_points(features: &FingerprintFeatures, offset: [f64; 2]) -> Vec<Feat
         .collect()
 }
 
-fn combination_config() -> CombinationConfig {
+fn combination_config(points_per_combination: Option<usize>) -> CombinationConfig {
     CombinationConfig {
-        min_points: 3,
-        max_points: 6,
+        min_points: points_per_combination.unwrap_or(3),
+        max_points: points_per_combination.unwrap_or(6),
         min_priority: 0.1,
         spatial: SpatialPolicy {
             min_anchor_points: 3,
@@ -386,13 +391,14 @@ mod tests {
         assert!(image(0).is_some());
         assert!(image(1).is_some());
         assert!(image(2).is_none());
-        assert!(FingerprintWallet::enroll(2, "near:local", "wallet.testnet").is_err());
+        assert!(FingerprintWallet::enroll(2, "near:local", "wallet.testnet", None).is_err());
     }
 
     #[test]
     #[ignore = "runs real extraction and an extended cryptographic candidate search"]
     fn reported_partial_capture_signs_with_enlarged_search_budget() {
-        let wallet = FingerprintWallet::enroll(0, "near:regression", "wallet.fixture").unwrap();
+        let wallet =
+            FingerprintWallet::enroll(0, "near:regression", "wallet.fixture", None).unwrap();
         // This exact capture reached the former 1m work limit with 12 usable
         // features. Its selection remains independent of the signing outcome.
         let sampled = wallet.sample(457).unwrap();
