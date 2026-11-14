@@ -2,7 +2,7 @@
 
 ## Workspace and setup
 
-The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation and `crates/near` the optional NEAR SDK. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile and file/JSON adapters used by examples. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
+The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation and `crates/near` the optional NEAR SDK. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile and file/JSON adapters used by examples. `examples/near-contract` contains the protected counter contract; `examples/near-integration-tests` runs the explicit, feature-gated sandbox test. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
 Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
 
@@ -164,11 +164,11 @@ The application defines canonical operation payloads and a consistent unit for e
 
 ## Integration and remaining work
 
-The core is independent of NEAR. The [NEAR contract integration](near-sdk.md) supplies owner-authorized commitment registration/replacement/revocation, read-only signature verification and optional one-time acceptance with durable nonce state. Both verification methods return `Result<()>`; neither executes business actions. The application stores the registration, defines canonical signed data, enforces permissions and executes its own logic. Arbitrary cross-contract execution, custody, recovery authorities, callbacks and retry policy are outside this adapter's scope; no deployment is implied.
+The core is independent of NEAR. The [NEAR contract integration](near-sdk.md) supplies owner-authorized commitment registration/replacement/revocation, read-only signature verification and optional one-time acceptance with durable nonce state. Both verification methods return `Result<()>`; neither executes business actions. The application stores the registration, defines canonical signed data, enforces permissions and executes its own logic. The counter example demonstrates atomic nonce consumption and application changes in one receipt. Arbitrary cross-contract execution, custody, recovery authorities, callbacks and retry policy are outside this adapter's scope; no deployment is implied.
 
 Canonical container-v2 `.grx` persistence covers public context, optional hash-bound profile parameters and retained Merkle hashes. Fingerprint consumers require the canonical parameter record; generic constant profiles may omit it. Protected model storage, encrypted backups and recovery authority remain application work. The package does not serialize an arbitrary `MeasurementEngine` model or captured features. Container-v1 files are unsupported by the current decoder; generic authorization verification with a retained original trusted commitment remains separate from loading an old file.
 
-Core tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy or resistance to biometric attacks. They also do not establish production network deployment or production gas limits. Those require separate measurement and integration validation.
+Core tests cover software invariants and library composition. They do not measure real-scan repeatability, false acceptance, entropy or resistance to biometric attacks. The explicitly enabled NEAR sandbox test additionally exercises contract execution locally; it does not establish production network deployment or production gas limits. Those require separate measurement and integration validation.
 
 ## Static fingerprint report
 

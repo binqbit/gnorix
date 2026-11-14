@@ -166,7 +166,14 @@ back a successful caller when a later receipt fails. See
   A provider must use Ed25519 with compatible strict verification and raw byte
   encodings. Key derivation remains its own explicit policy.
 
-## Validation boundaries
+## Runnable example and evidence
+
+The [counter contract](../examples/near-contract/README.md) and
+[core-to-contract test](../examples/near-integration-tests/README.md) show owner
+registration, relayed signing, execution, replay rejection, altered requests,
+expiry, revocation, rotation and application bounds on a local NEAR sandbox.
+They use the explicitly named example HKDF-SHA256/Ed25519 provider and synthetic
+candidate digests to isolate protocol behavior from fingerprint repeatability.
 
 The integration is not a claim of biometric security. The current fingerprint
 descriptor has a recorded cross-subject match in local testing; correct Merkle

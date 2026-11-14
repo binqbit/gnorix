@@ -1,0 +1,17 @@
+[package]
+name = "gnorix-near-counter"
+description = "NEAR contract demonstrating Gnorix-authorized application actions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gnorix = { workspace = true, default-features = false, features = ["near"] }
+near-sdk = "=5.30.2"
+
+[lints]
+workspace = true
