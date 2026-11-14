@@ -28,11 +28,33 @@
                 <span>GNORIX<small>BIOMETRIC AUTHORIZATION</small></span>
             </a>
             <span class="network-label">NEAR <span>/</span> LOCAL SANDBOX</span>
-            <div class="connection" id="connection" data-state="connecting">
-                <span class="status-dot" aria-hidden="true"></span>
-                <span id="connection-label">Connecting to local node</span>
+            <div class="header-actions">
+                <button class="how-button" id="open-how-it-works" type="button" aria-haspopup="dialog" aria-controls="how-it-works">How it works <span aria-hidden="true">↗</span></button>
+                <div class="connection" id="connection" data-state="connecting">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span id="connection-label">Connecting to local node</span>
+                </div>
             </div>
         </header>
+
+        <aside class="demo-notice" aria-label="Prototype notice">
+            <span class="notice-label">PROTOTYPE</span>
+            <p>This demo shows how biometrics can sign an action. Its cryptographic security is still experimental and is not guaranteed.</p>
+        </aside>
+
+        <dialog class="how-dialog" id="how-it-works" aria-labelledby="how-title">
+            <div class="how-heading">
+                <div><p class="eyebrow">FROM FINGERPRINT TO APPROVAL</p><h2 id="how-title">How it works</h2></div>
+                <form method="dialog"><button class="how-close" type="submit" aria-label="Close explanation" autofocus>×</button></form>
+            </div>
+            <ol class="how-steps">
+                <li><h3>Find the useful details</h3><p>Gnorix finds distinctive points in a fingerprint, such as where a line ends or splits, and rates how clearly each one appears.</p></li>
+                <li><h3>Prepare many ways to sign</h3><p>It combines these points in different groups, giving clearer details more weight. Each chosen combination produces a signing key. One public ID represents this set of prepared keys.</p></li>
+                <li><h3>Use a smaller sample</h3><p>A fresh scan can contain just part of the fingerprint. Gnorix tries combinations from that sample, allowing for small shifts, until it recovers a registered key. If it cannot find one, the attempt does not produce a signature.</p></li>
+                <li><h3>Approve the exact transfer</h3><p>The recovered key signs the chosen recipient and amount. NEAR checks the signature and verifies that the key belongs to the registered set before moving the test tokens.</p></li>
+            </ol>
+            <p class="how-footnote">This shared demo uses test fingerprints and test tokens on a private local chain.</p>
+        </dialog>
 
         <main>
             <div class="workspace-heading">

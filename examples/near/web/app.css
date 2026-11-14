@@ -7,7 +7,7 @@
     --accent: #39ff75;
     --green: #00ed83;
     --danger: #ffb4a4;
-    --workbench-height: clamp(600px, calc(100svh - 180px), 720px);
+    --workbench-height: clamp(600px, calc(100svh - 224px), 720px);
     --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
     font: 14px/1.5 var(--mono);
     font-synthesis: none;
@@ -47,6 +47,28 @@ button:not(:disabled):active { transform: translateY(1px); }
 .brand small { display: block; margin-top: 5px; color: #82cd98; text-shadow: none; font: 8px var(--mono); letter-spacing: .13em; }
 .network-label { color: #80dea0; font: 10px var(--mono); letter-spacing: .1em; }
 .network-label span { color: #278346; margin: 0 10px; }
+.header-actions { display: flex; align-items: center; gap: 18px; }
+.how-button { min-height: 40px; padding: 8px 0; border: 0; background: none; color: #a8efba; font-size: 11px; white-space: nowrap; }
+.how-button span { color: var(--accent); margin-left: 6px; }
+.how-button:hover { color: var(--accent); text-shadow: 0 0 12px #39ff7550; }
+.demo-notice { max-width: 1640px; margin: auto; padding: 10px 32px; display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid #174a2b; background: #041209; }
+.notice-label { flex: 0 0 auto; color: #91d7a3; font-size: 9px; letter-spacing: .09em; }
+.demo-notice p { margin: 0; color: #a2c5ac; font-size: 12px; line-height: 1.7; }
+body:has(.how-dialog[open]) { overflow: hidden; }
+.how-dialog { width: min(600px, calc(100% - 32px)); max-height: calc(100svh - 32px); padding: 24px; color: var(--text); background: #031008; border: 1px solid #39ff7580; border-radius: 4px; box-shadow: 0 0 50px #00ed8320; }
+.how-dialog::backdrop { background: #000b; backdrop-filter: blur(5px); }
+.how-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.how-heading h2 { font-size: 22px; }
+.how-heading .eyebrow { font-size: 9px; }
+.how-close { width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 2px; color: var(--accent); background: #082312; font-size: 24px; line-height: 1; }
+.how-close:hover { border-color: var(--accent); }
+.how-steps { margin: 26px 0 20px; padding: 0; list-style: none; counter-reset: explanation; }
+.how-steps li { position: relative; padding: 0 0 20px 42px; counter-increment: explanation; }
+.how-steps li:last-child { padding-bottom: 0; }
+.how-steps li::before { content: "0" counter(explanation); position: absolute; left: 0; top: 1px; width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid #267e46; color: var(--accent); font-size: 10px; }
+.how-steps h3 { margin: 0 0 6px; color: #b8f7c9; font-size: 13px; font-weight: 600; }
+.how-steps p, .how-footnote { margin: 0; color: #9ec9aa; font-size: 12px; line-height: 1.75; }
+.how-footnote { border-top: 1px solid var(--border); padding-top: 14px; font-size: 10px; }
 .connection { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 11px/1.5 var(--mono); padding: 7px 10px; border: 1px solid var(--border); border-radius: 2px; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #96a69b; flex: 0 0 auto; }
 .connection[data-state="ready"] { color: #6fff99; border-color: #24b858; background: #03170a; box-shadow: 0 0 14px #00ff6120; }
@@ -234,7 +256,8 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     .workspace-heading { min-height: 54px; }
 }
 @media (min-width: 961px) and (max-width: 1180px) {
-    .topbar, main { padding-inline: 24px; }
+    .topbar, main, .demo-notice { padding-inline: 24px; }
+    .topbar { gap: 16px; }
     .workspace { grid-template-columns: 174px minmax(0, 1fr) 316px; gap: 14px; }
     .panel-heading { padding-inline: 16px; }
     .wallet-card { padding: 12px; gap: 8px; }
@@ -247,6 +270,8 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
 }
 @media (max-width: 960px) {
     .topbar { padding-inline: 24px; }
+    .demo-notice { padding-inline: 24px; }
+    .network-label { display: none; }
     main { padding-inline: 24px; }
     .workspace { grid-template-columns: minmax(0, 1fr) 354px; gap: 16px; }
     .wallet-section { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 20px; padding: 0; align-items: center; }
@@ -264,7 +289,15 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     footer { padding-inline: 24px; }
 }
 @media (max-width: 760px) {
-    .topbar { min-height: 66px; padding: 10px 16px; gap: 12px; }
+    .topbar { min-height: 66px; padding: 10px 16px; gap: 10px; }
+    .header-actions { flex-direction: column; align-items: flex-end; gap: 0; }
+    .how-button { min-height: 30px; padding: 4px 0; font-size: 10px; }
+    .demo-notice { padding: 8px 16px; gap: 8px; }
+    .notice-label { font-size: 8px; }
+    .demo-notice p { font-size: 11px; }
+    .how-dialog { padding: 20px; }
+    .how-steps { margin-top: 22px; }
+    .how-steps li { padding-left: 38px; }
     .brand { font-size: 18px; gap: 7px; }
     .brand img { width: 36px; height: 36px; }
     .brand small { font-size: 7px; letter-spacing: .05em; }
@@ -318,7 +351,7 @@ footer > span:first-child { letter-spacing: .14em; color: #5ec47c; }
     footer > span:last-child { max-width: 170px; text-align: right; }
 }
 @media (max-width: 390px) {
-    .topbar, main { padding-inline: 12px; }
+    .topbar, main, .demo-notice { padding-inline: 12px; }
     .brand { font-size: 16px; }
     .brand small { font-size: 6px; }
     .connection { max-width: 124px; font-size: 8px; }

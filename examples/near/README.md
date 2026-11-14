@@ -12,6 +12,10 @@ by verifying that account's signature. Funding this wallet moves tokens into its
 own balance. The included token demonstrates this without adding delegation
 methods to the token.
 
+The page identifies this as an experimental biometric signing demo, without
+guaranteed cryptographic security. **How it works** in the header explains the
+enrollment and partial-fingerprint signing flow in plain language.
+
 ## Open the demo
 
 From the repository root, run:

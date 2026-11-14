@@ -5,6 +5,9 @@ its private NEAR sandbox listen on loopback. Every visitor shares the same two
 test wallets, balances and active approval. Restarting the service creates a new
 chain, enrollments and balances; no mainnet or public-testnet account is used.
 
+The page marks the prototype's security limits and provides a short **How it
+works** explanation.
+
 The service keeps public enrollment material and the current attempt in memory,
 without writing signature archives or per-attempt metadata files. The sandbox
 itself retains submitted transactions in its chain history.

@@ -593,6 +593,29 @@ async function poll() {
     setTimeout(poll, state.connected ? 500 : 1500);
 }
 
+function configureHelpDialog() {
+    const dialog = $("how-it-works");
+    let pressedBackdrop = false;
+    const isBackdrop = (event) => {
+        const bounds = dialog.getBoundingClientRect();
+        return event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right
+            || event.clientY < bounds.top || event.clientY > bounds.bottom);
+    };
+
+    $("open-how-it-works").addEventListener("click", () => dialog.showModal());
+    dialog.addEventListener("pointerdown", (event) => {
+        pressedBackdrop = event.isPrimary && event.button === 0 && isBackdrop(event);
+    });
+    dialog.addEventListener("click", (event) => {
+        const dismiss = pressedBackdrop && event.button === 0 && isBackdrop(event);
+        pressedBackdrop = false;
+        if (dismiss) dialog.close();
+    });
+    dialog.addEventListener("pointercancel", () => { pressedBackdrop = false; });
+    dialog.addEventListener("close", () => { pressedBackdrop = false; });
+}
+
+configureHelpDialog();
 $("transfer-form").addEventListener("submit", signTransfer);
 $("amount").addEventListener("input", dismissProof);
 $("amount").addEventListener("blur", () => {
