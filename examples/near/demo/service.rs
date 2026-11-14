@@ -342,7 +342,7 @@ impl App {
             .checked_add(1)
             .context("capture sequence exhausted")?;
         let id = engine.sequence.to_string();
-        self.progress("Selecting a new random partial scan with light capture artifacts");
+        self.progress("Selecting a new random circular sample from the fingerprint");
         let sampler = Arc::clone(&fingerprint);
         let mut sampled = tokio::task::spawn_blocking(move || sampler.sample(seed)).await??;
         let clean_view = fingerprint.view();
@@ -354,7 +354,6 @@ impl App {
             height: clean_view.height,
             region: sampled.metadata.circle,
             pattern_fraction: sampled.metadata.coverage_fraction,
-            artifact_level: sampled.metadata.artifact_level,
             feature_count: None,
             points: Vec::new(),
             matched_feature_ids: Vec::new(),

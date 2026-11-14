@@ -3,23 +3,21 @@
 
 use anyhow::{Context, Result, ensure};
 use gnorix::core::biometrics::Capture;
-use gnorix_example_support::fingerprint::{Circle, apply_artifacts, select};
+use gnorix_example_support::fingerprint::{Circle, select};
 use image::{GrayImage, ImageEncoder};
 use serde::Serialize;
 
 pub struct PatternGeometry {
     width: u32,
     height: u32,
-    unit_px: f64,
     pixels: Vec<[u32; 2]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CaptureMetadata {
     pub circle: Circle,
-    /// Crop origin in the full altered image, for fresh-feature overlays.
+    /// Crop origin in the full source image, for fresh-feature overlays.
     pub offset: [f64; 2],
-    pub artifact_level: u8,
     pub pattern_pixels: usize,
     pub covered_pattern_pixels: usize,
     pub coverage_fraction: f64,
@@ -27,24 +25,20 @@ pub struct CaptureMetadata {
 
 pub struct SampledCapture {
     pub capture: Capture,
-    /// The same altered full frame from which `capture` was selected. The UI
-    /// clips it to `metadata.circle`; analysis receives only the masked crop.
+    /// The unchanged full frame from which `capture` was selected. The UI
+    /// blurs outside `metadata.circle`; analysis receives only the masked crop.
     pub png: Vec<u8>,
     pub metadata: CaptureMetadata,
 }
 
 impl PatternGeometry {
-    pub fn new(width: u32, height: u32, unit_px: f64, support: &[bool]) -> Result<Self> {
+    pub fn new(width: u32, height: u32, support: &[bool]) -> Result<Self> {
         let count = usize::try_from(width)?
             .checked_mul(usize::try_from(height)?)
             .context("pattern dimensions overflow")?;
         ensure!(
             count > 0 && support.len() == count,
             "pattern support dimensions differ from the image"
-        );
-        ensure!(
-            unit_px.is_finite() && unit_px > 0.0,
-            "pattern ridge width must be finite and positive"
         );
         let pixels: Vec<_> = support
             .iter()
@@ -60,14 +54,13 @@ impl PatternGeometry {
         Ok(Self {
             width,
             height,
-            unit_px,
             pixels,
         })
     }
 
     /// The caller supplies a fresh random seed for each user-approved attempt.
     /// A fixed seed exists only to reproduce a test. No outcome-based resampling
-    /// occurs: one center, one radius and one artifact frame are produced.
+    /// occurs: one center and one radius select unchanged source pixels.
     pub fn sample_with_seed(&self, source: &GrayImage, seed: u64) -> Result<SampledCapture> {
         ensure!(
             source.dimensions() == (self.width, self.height),
@@ -76,10 +69,7 @@ impl PatternGeometry {
         let mut random = SamplingRandom(seed);
         let center = self.pixels[random.index(self.pixels.len())];
         let circle = self.covering_circle(center);
-        let artifact_level = 6 + random.index(5) as u8;
-        let altered = apply_artifacts(source, self.unit_px, artifact_level, random.next())
-            .map_err(anyhow::Error::from_boxed)?;
-        let selected = select(&altered, Some(circle)).map_err(anyhow::Error::from_boxed)?;
+        let selected = select(source, Some(circle)).map_err(anyhow::Error::from_boxed)?;
         let covered_pattern_pixels = self
             .pixels
             .iter()
@@ -92,7 +82,6 @@ impl PatternGeometry {
         let metadata = CaptureMetadata {
             circle,
             offset: selected.offset,
-            artifact_level,
             pattern_pixels: self.pixels.len(),
             covered_pattern_pixels,
             coverage_fraction: covered_pattern_pixels as f64 / self.pixels.len() as f64,
@@ -100,9 +89,9 @@ impl PatternGeometry {
         let capture = sanitize(selected.capture)?;
         let mut png = Vec::new();
         image::codecs::png::PngEncoder::new(&mut png).write_image(
-            altered.as_raw(),
-            altered.width(),
-            altered.height(),
+            source.as_raw(),
+            source.width(),
+            source.height(),
             image::ExtendedColorType::L8,
         )?;
         Ok(SampledCapture {
@@ -202,19 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn one_seed_reproduces_actual_artifacts_and_coverage_of_confirmed_pixels() -> Result<()> {
+    fn seeded_selection_preserves_source_pixels_and_excludes_outside_data() -> Result<()> {
         let (source, support) = fixture();
-        let pattern = PatternGeometry::new(120, 160, 6.0, &support)?;
+        let pattern = PatternGeometry::new(120, 160, &support)?;
         let first = pattern.sample_with_seed(&source, 17)?;
         let same = pattern.sample_with_seed(&source, 17)?;
         let other = pattern.sample_with_seed(&source, 18)?;
         assert_eq!(first.png, same.png);
         assert_eq!(first.metadata.circle, same.metadata.circle);
-        assert_ne!(first.png, other.png);
-        let altered = image::load_from_memory(&first.png)?.to_luma8();
-        assert_ne!(altered, source);
+        assert_ne!(first.metadata.circle, other.metadata.circle);
+        assert_eq!(first.png, other.png);
+        let preview = image::load_from_memory(&first.png)?.to_luma8();
+        assert_eq!(preview, source);
         let metadata = &first.metadata;
-        assert!((6..=10).contains(&metadata.artifact_level));
         assert!(metadata.coverage_fraction >= 1.0 / 3.0 && metadata.coverage_fraction < 0.35);
         assert_eq!(
             metadata.pattern_pixels,
@@ -229,7 +218,7 @@ mod tests {
             let x = metadata.offset[0] as u32 + index as u32 % first.capture.width();
             let y = metadata.offset[1] as u32 + index as u32 / first.capture.width();
             if valid {
-                assert_eq!(first.capture.pixels()[index], altered.get_pixel(x, y).0[0]);
+                assert_eq!(first.capture.pixels()[index], source.get_pixel(x, y).0[0]);
                 observed_supported += usize::from(support[(y * 120 + x) as usize]);
             } else {
                 assert_eq!(first.capture.pixels()[index], 255);
@@ -242,16 +231,15 @@ mod tests {
     #[test]
     fn distance_quantile_uses_the_pattern_instead_of_the_frame_area() -> Result<()> {
         let (source, support) = fixture();
-        let pattern = PatternGeometry::new(120, 160, 6.0, &support)?;
+        let pattern = PatternGeometry::new(120, 160, &support)?;
         for seed in 0..24 {
             let sample = pattern.sample_with_seed(&source, seed)?;
             assert!(sample.metadata.covered_pattern_pixels >= pattern.pixels.len().div_ceil(3));
             assert!(sample.metadata.coverage_fraction < 0.35);
         }
-        assert!(PatternGeometry::new(0, 1, 1.0, &[]).is_err());
-        assert!(PatternGeometry::new(120, 160, f64::NAN, &support).is_err());
-        assert!(PatternGeometry::new(120, 160, 6.0, &support[..1]).is_err());
-        assert!(PatternGeometry::new(120, 160, 6.0, &vec![false; support.len()]).is_err());
+        assert!(PatternGeometry::new(0, 1, &[]).is_err());
+        assert!(PatternGeometry::new(120, 160, &support[..1]).is_err());
+        assert!(PatternGeometry::new(120, 160, &vec![false; support.len()]).is_err());
         assert!(pattern.sample_with_seed(&GrayImage::new(1, 1), 1).is_err());
         Ok(())
     }

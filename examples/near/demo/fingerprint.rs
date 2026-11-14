@@ -31,13 +31,14 @@ use serde::Serialize;
 
 use super::capture::{PatternGeometry, SampledCapture};
 
-const MAX_WORK: usize = 1_000_000;
+const ENROLLMENT_WORK: usize = 1_000_000;
+const SEARCH_WORK: usize = 100_000_000;
 const MAX_BASELINES: usize = 100_000;
 const UNCERTAINTY_STEPS: u32 = 1;
 const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 
 const IMAGES: [&[u8]; 2] = [
-    include_bytes!("../../../crates/core/tests/assets/test-fingerprint.png"),
+    include_bytes!("../assets/wallet-1-fingerprint.png"),
     include_bytes!("../assets/wallet-2-fingerprint.png"),
 ];
 
@@ -95,7 +96,6 @@ impl FingerprintWallet {
         let pattern = PatternGeometry::new(
             capture.width(),
             capture.height(),
-            features.unit_px,
             &extracted.scale.pattern_support,
         )?;
         drop(extracted);
@@ -116,7 +116,7 @@ impl FingerprintWallet {
             &GridBaselineConfig {
                 padding_steps: UNCERTAINTY_STEPS,
                 max_baselines: MAX_BASELINES as u64,
-                max_work: MAX_WORK,
+                max_work: ENROLLMENT_WORK,
             },
         )?;
         let context = enrollment_context(&parameters, network, wallet_id)?;
@@ -170,7 +170,7 @@ impl FingerprintWallet {
         on_features: impl FnOnce(Vec<FeaturePoint>),
     ) -> Result<SignedFingerprint> {
         let expected = action.to_core()?;
-        // Only the cropped, masked and altered observation enters extraction.
+        // Only the cropped and masked observation enters extraction.
         let features = fingerprint::analyze(&sampled.capture, &ExtractionConfig::default())
             .context("the partial scan could not be analyzed")?;
         on_features(observed_points(&features, sampled.metadata.offset));
@@ -188,7 +188,7 @@ impl FingerprintWallet {
             &self.package,
             expected,
             None,
-            &limits(MAX_WORK),
+            &limits(SEARCH_WORK),
         )
         .with_context(|| {
             format!(
@@ -208,7 +208,7 @@ impl FingerprintWallet {
     fn search_config(&self) -> Result<SigningSearchConfig> {
         let controls = self
             .parameters
-            .controls(MAX_WORK)
+            .controls(SEARCH_WORK)
             .map_err(anyhow::Error::from_boxed)?;
         Ok(SigningSearchConfig {
             min_points: controls.min_points,
@@ -217,7 +217,7 @@ impl FingerprintWallet {
             spatial: controls.spatial,
             radius_units: controls.radius_units,
             uncertainty_steps: self.parameters.uncertainty_steps(),
-            max_work: MAX_WORK,
+            max_work: SEARCH_WORK,
             max_descriptor_bytes: nonzero(MAX_DESCRIPTOR_BYTES),
         })
     }
@@ -306,13 +306,13 @@ fn combination_config() -> CombinationConfig {
     CombinationConfig {
         min_points: 3,
         max_points: 6,
-        min_priority: 0.3,
+        min_priority: 0.1,
         spatial: SpatialPolicy {
             min_anchor_points: 3,
             min_anchor_distance_units: 6.0,
         },
         radius_units: 30.0,
-        max_work: MAX_WORK,
+        max_work: ENROLLMENT_WORK,
     }
 }
 
@@ -377,5 +377,51 @@ mod tests {
         assert!(image(1).is_some());
         assert!(image(2).is_none());
         assert!(FingerprintWallet::enroll(2, "near:local", "wallet.testnet").is_err());
+    }
+
+    #[test]
+    #[ignore = "runs real extraction and an extended cryptographic candidate search"]
+    fn reported_partial_capture_signs_with_enlarged_search_budget() {
+        let wallet = FingerprintWallet::enroll(0, "near:regression", "wallet.fixture").unwrap();
+        // This exact capture reached the former 1m work limit with 12 usable
+        // features. Its selection remains independent of the signing outcome.
+        let sampled = wallet.sample(457).unwrap();
+        assert_eq!(sampled.metadata.circle.x, 2.0);
+        assert_eq!(sampled.metadata.circle.y, 134.0);
+        assert_eq!(sampled.metadata.circle.radius, 123.00406497347964);
+        let action = Action {
+            operation: "wallet.ft_transfer.v1".into(),
+            payload: b"reported-partial-capture-regression".to_vec(),
+            nonce: 0,
+            expires_at_ms: 2_000_000_000_000,
+        };
+
+        let signed = wallet
+            .sign(action.clone(), &sampled, |points| {
+                assert_eq!(points.len(), 12)
+            })
+            .unwrap();
+        assert!(signed.attempts > 0);
+        assert!(!signed.matched_feature_ids.is_empty());
+
+        let commitment = wallet.commitment().unwrap().to_core().unwrap();
+        let authorization = signed.authorization.to_core().unwrap();
+        let mut expected = action.to_core().unwrap();
+        let verify = |expected: &gnorix::core::authorization::Action| {
+            authorization::verify(
+                &ExampleCrypto,
+                &commitment,
+                authorization::EnrollmentStatus::Active,
+                expected,
+                &authorization,
+                1_900_000_000_000,
+                &verification_limits(),
+            )
+        };
+        // Verify descriptor membership and the action signature. This does not
+        // assert correspondence to the same physical minutiae in both scans.
+        verify(&expected).unwrap();
+        expected.payload.push(0);
+        assert!(verify(&expected).is_err());
     }
 }

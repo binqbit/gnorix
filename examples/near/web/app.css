@@ -108,13 +108,8 @@ h2 { margin: 0; color: #72ff99; font-size: 16px; font-weight: 550; letter-spacin
 @keyframes scan-pass { to { top: calc(100% - 16px); } }
 #fingerprint { position: absolute; inset: 16px; display: block; width: calc(100% - 32px); height: calc(100% - 32px); }
 #fingerprint-image { opacity: .9; }
-#fingerprint.has-capture #fingerprint-image { opacity: .3; filter: url(#outside-blur); }
+#fingerprint.has-capture #fingerprint-image { opacity: .55; filter: url(#outside-blur); }
 #capture-image { opacity: .95; }
-#capture-boundary { stroke: var(--accent); stroke-width: 1.5; }
-#capture-activity { display: none; pointer-events: none; }
-.fingerprint-stage.is-signing #capture-activity { display: block; }
-.capture-particle { fill: #d1ff9c; animation: capture-drift 2.8s ease-in-out infinite; }
-@keyframes capture-drift { 0%, 100% { opacity: .1; transform: translateY(5px); } 50% { opacity: .8; transform: translateY(-5px); } }
 .image-placeholder { position: relative; max-width: 240px; text-align: center; padding: 20px; color: var(--muted); font-size: 12px; }
 .stage-corner { position: absolute; width: 23px; height: 23px; border-color: #39ff7599; border-style: solid; pointer-events: none; filter: drop-shadow(0 0 5px #39ff75aa); }
 .top-left { top: 10px; left: 10px; border-width: 1px 0 0 1px; }

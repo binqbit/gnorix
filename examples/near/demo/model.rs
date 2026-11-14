@@ -65,7 +65,6 @@ pub struct CaptureView {
     pub height: u32,
     pub region: Circle,
     pub pattern_fraction: f64,
-    pub artifact_level: u8,
     pub feature_count: Option<usize>,
     pub points: Vec<FeaturePoint>,
     pub matched_feature_ids: Vec<usize>,

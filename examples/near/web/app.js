@@ -206,16 +206,14 @@ async function loadFingerprint(wallet, capture) {
     $("image-placeholder").hidden = false;
     setText("image-placeholder", capture ? "Loading the actual captured image…" : "Loading this wallet’s fingerprint…");
     try {
-        await Promise.all([source.image_url, ...(capture ? [capture.image_url] : [])].map(async (url) => {
-            const image = new Image();
-            image.src = url;
-            await image.decode();
-        }));
+        const image = new Image();
+        image.src = capture?.image_url ?? source.image_url;
+        await image.decode();
         if (request !== state.imageRequest) return;
         $("fingerprint").setAttribute("viewBox", `0 0 ${source.width} ${source.height}`);
         $("fingerprint-image").setAttribute("width", source.width);
         $("fingerprint-image").setAttribute("height", source.height);
-        $("fingerprint-image").setAttribute("href", source.image_url);
+        $("fingerprint-image").setAttribute("href", image.src);
         if (capture) {
             $("capture-image").setAttribute("width", capture.width);
             $("capture-image").setAttribute("height", capture.height);
@@ -251,34 +249,20 @@ function insideCapture(point, capture) {
 function renderCaptureRegion(capture) {
     $("fingerprint").classList.toggle("has-capture", Boolean(capture));
     $("capture-image").toggleAttribute("hidden", !capture);
-    $("capture-boundary").toggleAttribute("hidden", !capture);
     if (!capture) {
         $("matched-points").removeAttribute("clip-path");
-        $("capture-activity").replaceChildren();
         state.captureKey = null;
         return;
     }
     $("matched-points").setAttribute("clip-path", "url(#capture-clip)");
     if (state.captureKey === capture.id) return;
     const { x, y, radius } = capture.region;
-    for (const id of ["capture-clip-circle", "capture-boundary"]) {
+    for (const id of ["capture-clip-circle", "capture-mask-circle"]) {
         for (const [name, value] of Object.entries({ cx: x, cy: y, r: radius })) $(id).setAttribute(name, value);
     }
+    $("capture-mask").setAttribute("width", capture.width);
+    $("capture-mask").setAttribute("height", capture.height);
     $("outside-blur-radius").setAttribute("stdDeviation", Math.max(capture.width, capture.height) * 0.01);
-    // Decorative activity particles; the capture PNG itself contains the real artifacts.
-    const particles = Array.from({ length: 12 }, (_, index) => {
-        const angle = index * 2.399963;
-        const distance = radius * Math.sqrt((index + 0.5) / 12) * 0.88;
-        const particle = svgCircle({
-            cx: x + Math.cos(angle) * distance,
-            cy: y + Math.sin(angle) * distance,
-            r: radius * 0.006,
-            class: "capture-particle",
-        });
-        particle.style.animationDelay = `${-index * 0.23}s`;
-        return particle;
-    });
-    $("capture-activity").replaceChildren(...particles);
     state.captureKey = capture.id;
 }
 
@@ -347,7 +331,7 @@ function renderFingerprint() {
     }
     setText("fingerprint-tag", featureLabel);
     setText("point-status", pointStatus);
-    setText("capture-description", capture ? `${(capture.pattern_fraction * 100).toFixed(1)}% of the fingerprint pattern · Artifacts ${capture.artifact_level}/100 · Minimum priority 0.3. Only the circle is analyzed; the outside is excluded.` : "Each approval analyzes a new random circular capture with mild image artifacts. Minimum feature priority: 0.3.");
+    setText("capture-description", capture ? `${(capture.pattern_fraction * 100).toFixed(1)}% of the fingerprint pattern · Minimum priority 0.1. Blur is visual; analysis uses the unchanged circular sample only.` : "Each approval analyzes a new random circular sample. The surroundings fade into blur. Minimum feature priority: 0.1.");
     setText("enrollment-root", wallet.root);
 }
 

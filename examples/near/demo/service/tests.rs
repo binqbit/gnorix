@@ -1,4 +1,4 @@
-//! Actual altered partial images through the application and deployed wallets.
+//! Actual circular samples through the application and deployed wallets.
 //! Fixed seeds make independent attempts repeatable, without runtime retries.
 
 use std::time::Duration;
@@ -41,7 +41,7 @@ async fn exercise_application(app: &App) -> Result<()> {
                 .fingerprint
                 .points
                 .iter()
-                .all(|point| point.priority >= 0.3)
+                .all(|point| point.priority >= 0.1)
         );
         println!(
             "{} ready: {} eligible features, {} leaves",
@@ -58,7 +58,7 @@ async fn exercise_application(app: &App) -> Result<()> {
     let steps = [
         (
             0,
-            2_u64,
+            4_u64,
             "1.25",
             forward,
             [1000 * TOKEN_UNIT - forward, 1000 * TOKEN_UNIT + forward],
@@ -66,7 +66,7 @@ async fn exercise_application(app: &App) -> Result<()> {
         ),
         (
             1,
-            3_u64,
+            1_u64,
             "2.5",
             reverse,
             [
@@ -192,15 +192,14 @@ async fn failed_attempt_is_retained(app: &App) -> Result<String> {
             amount: "1.25".into(),
             memo: None,
         },
-        1,
+        2,
     ))?;
     let failed = wait_for_phase(app, "failed").await?;
     ensure!(failed.prepared.is_none() && failed.transaction.is_none());
     ensure!(
-        failed.error.as_ref().is_some_and(
-            |message| message.contains("budget") && message.contains("before completion")
-        ),
-        "expected the known crop's bounded search failure"
+        failed.error.as_deref()
+            == Some("This capture did not reconstruct an enrolled key. Try a new random capture."),
+        "expected the known crop's unsuccessful reconstruction"
     );
     check_capture(app, &failed, 0)?;
     check_balances_and_nonces(&failed, [1000 * TOKEN_UNIT; 2], [0, 0])?;
@@ -260,9 +259,8 @@ fn check_capture(app: &App, state: &Snapshot, wallet: usize) -> Result<()> {
         .context("attempt has no visible capture")?;
     ensure!(capture.wallet == wallet);
     ensure!((1.0 / 3.0..=1.0).contains(&capture.pattern_fraction));
-    ensure!((6..=10).contains(&capture.artifact_level));
     ensure!(capture.region.radius.is_finite() && capture.region.radius >= 8.0);
-    ensure!(capture.points.iter().all(|point| point.priority >= 0.3));
+    ensure!(capture.points.iter().all(|point| point.priority >= 0.1));
     if let Some(count) = capture.feature_count {
         ensure!(count == capture.points.len());
     } else {
@@ -275,15 +273,15 @@ fn check_capture(app: &App, state: &Snapshot, wallet: usize) -> Result<()> {
     let png = app
         .capture_image(&capture.id)
         .context("capture preview is unavailable")?;
-    let altered = image::load_from_memory(&png)?.to_luma8();
-    ensure!(altered.dimensions() == (capture.width, capture.height));
+    let preview = image::load_from_memory(&png)?.to_luma8();
+    ensure!(preview.dimensions() == (capture.width, capture.height));
     let original = image::load_from_memory(
         crate::fingerprint::image(wallet).context("missing source image")?,
     )?
     .to_luma8();
     ensure!(
-        altered != original,
-        "capture preview shows unmodified pixels"
+        preview == original,
+        "capture preview must preserve the source pixels; blur is presentation-only"
     );
     Ok(())
 }

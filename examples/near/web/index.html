@@ -75,13 +75,20 @@
                                 <filter id="outside-blur" x="-10%" y="-10%" width="120%" height="120%">
                                     <feGaussianBlur id="outside-blur-radius" stdDeviation="0" />
                                 </filter>
+                                <radialGradient id="capture-fade">
+                                    <stop offset="82%" stop-color="white" stop-opacity="1" />
+                                    <stop offset="90%" stop-color="white" stop-opacity=".85" />
+                                    <stop offset="96%" stop-color="white" stop-opacity=".3" />
+                                    <stop offset="100%" stop-color="white" stop-opacity="0" />
+                                </radialGradient>
+                                <mask id="capture-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="1" height="1">
+                                    <circle id="capture-mask-circle" fill="url(#capture-fade)" />
+                                </mask>
                                 <clipPath id="capture-clip" clipPathUnits="userSpaceOnUse"><circle id="capture-clip-circle" /></clipPath>
                             </defs>
                             <image id="fingerprint-image" x="0" y="0" width="1" height="1" />
-                            <image id="capture-image" x="0" y="0" width="1" height="1" clip-path="url(#capture-clip)" hidden />
-                            <circle id="capture-boundary" fill="none" vector-effect="non-scaling-stroke" hidden />
+                            <image id="capture-image" x="0" y="0" width="1" height="1" mask="url(#capture-mask)" hidden />
                             <g id="matched-points"></g>
-                            <g id="capture-activity" clip-path="url(#capture-clip)" aria-hidden="true"></g>
                         </svg>
                         <p class="image-placeholder" id="image-placeholder">The wallet’s test fingerprint will appear here.</p>
                         <span class="stage-corner top-left" aria-hidden="true"></span>
@@ -93,7 +100,7 @@
                         <span><i class="point-legend" aria-hidden="true"></i><span id="point-status">Signing points appear after reconstruction</span></span>
                         <span id="source-size" class="mono"></span>
                     </div>
-                    <p id="capture-description" class="capture-description" tabindex="0" aria-label="Capture details">Each approval analyzes a new random circular capture with mild image artifacts. Minimum feature priority: 0.3.</p>
+                    <p id="capture-description" class="capture-description" tabindex="0" aria-label="Capture details">Each approval analyzes a new random circular sample. The surroundings fade into blur. Minimum feature priority: 0.1.</p>
                 </section>
 
                 <section class="transfer-panel panel" aria-labelledby="transfer-title">

@@ -37,16 +37,16 @@ service or `cargo-near` installation is required for this web demo.
    and on-chain token balance appear. Open **Registered Merkle root** to inspect
    the enrollment.
 2. Enter the amount and approve signing. Each click selects a **new random
-   circular capture** and adds light image artifacts. The circle covers at least
-   one third of the clean enrollment's confirmed pattern pixels. Everything
+   circular sample**. The circle covers at least
+   one third of the enrollment's confirmed pattern pixels. Everything
    outside it is blurred in the page and excluded from analysis. The backend
-   extracts fresh features only from this altered partial capture, reconstructs
+   extracts fresh features only from this unchanged partial sample, reconstructs
    a signing key, and checks the signature and Merkle proof through the deployed
    wallet's read-only verifier. Matched fresh points receive outer rings.
 3. Review the authorization and submit it to NEAR. A separate local relayer sends
    one transaction. The page shows its hash, receipt/callback result, gas and
    balances read from the token contract.
-4. A capture can fail. Its image, circle and observed features stay visible;
+4. A capture can fail. Its image, softly revealed sample and observed features stay visible;
    click **Approve & sign** again to make another independent attempt. The server
    never secretly chooses another crop or falls back to the full image. Reaching
    the search budget means the search is incomplete, not a confirmed mismatch.
@@ -81,7 +81,7 @@ This is one example with a single entry point:
 examples/near/
 ├── demo/                        Rust HTTP service, fingerprint adapter, managed chain
 ├── web/                         English UI and embedded local assets
-├── assets/                      Second scanner-style synthetic fingerprint fixture
+├── assets/                      Two compact synthetic fingerprint fixtures
 ├── src/                         Smart wallet and canonical transfer payload
 ├── token/src/                   Standard token, without a Gnorix dependency
 ├── tests/                       Wallet and token sandbox scenarios
@@ -289,16 +289,28 @@ amounts and request validation.
 
 ## Fingerprint fixtures
 
-Wallet 1 uses the existing [core test fingerprint](../../crates/core/tests/assets/README.md).
-Wallet 2 uses [a scanner-style synthetic variation](assets/wallet-2-fingerprint.png);
-its [fixture notes](assets/README.md) record provenance and format.
-The second image uses the original as a visual reference; these related synthetic
-fixtures are not evidence of different real identities. Both are software-test inputs, with no claimed real person, sensor calibration
+Both wallets use separate synthetic scans at 241 × 298 pixels:
+[Wallet 1](assets/wallet-1-fingerprint.png) and [Wallet 2](assets/wallet-2-fingerprint.png).
+Their dark ridges and light scanner background resemble the project's test
+gallery; the [fixture notes](assets/README.md) record generation and format.
+The core test image is unchanged. Both images are software-test inputs, with no claimed real person, sensor calibration
 or biometric uniqueness. The web demo applies the same explicit policy to both:
-3–6 points per combination, priority at least 0.3, three anchors separated by
+3–6 points per combination, priority at least 0.1, three anchors separated by
 at least 6R, region radius 30R, and one neighbor step during key reconstruction.
 Here R is the measured average dark-ridge thickness. Enrollment keeps only grid
 baselines; signing checks variants lazily and stops at the first matching key.
+Combination selection uses the strongest included point's score: above 0.9
+receives 50% of selections, 0.5–0.9 receives 25%, and below 0.5 receives 25%.
+Empty or exhausted groups pass their allowance to the others. Enrollment targets
+three times the eligible regional point count, then adds any required point
+coverage witnesses; capacity and those witnesses can change the final shares.
+Signing applies the same group preference to its lazy combination search.
+The signing work budget is 100 million units, including geometry and descriptor
+bytes, not 100 million key attempts. It preserves priority order and checks a
+subset's complete positional neighborhood before moving to the next subset.
+Eligible points in a crop do not guarantee that an enrolled combination lies
+entirely within it: enrollment selects a bounded set of combinations.
+These selection rules use example profile v8; earlier enrollments must be recreated.
 
 The public enrollment packages stay in memory; private keys and extracted
 candidate descriptors are not cached for subsequent signatures. Each signature
@@ -312,9 +324,11 @@ they do not qualify fingerprint-only custody of real assets.
 For sampling, the backend chooses a center uniformly from the confirmed pattern
 pixels and computes the smallest pixel radius containing at least a third of
 those pixels. Coverage includes ties at the boundary and counts confirmed pattern,
-not frame area or anatomical finger area. The artifact level is chosen from
-6–10 on the Lab's existing 0–100 scale, with a fresh seed for every click. Only
-that one crop is analyzed. The preview PNG contains exactly the altered pixels
-used inside the circle; decorative particles are a separate visual overlay.
+not frame area or anatomical finger area. A fresh random seed is used for every
+click, and only that one crop is analyzed. The preview PNG preserves the original
+pixels. The page blends the sharp sample into a blurred copy of the same frame,
+without a boundary ring, additional image distortions or decorative particles.
+This soft edge is only visual: the analysis mask
+remains an exact circle, and pixels outside it never enter reconstruction.
 Fresh feature IDs belong to this capture, never to the enrollment's point list.
-The 0.3 priority threshold is shared by registration and reconstruction.
+The 0.1 priority threshold is shared by registration and reconstruction.
