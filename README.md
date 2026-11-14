@@ -1,48 +1,50 @@
 # Gnorix
 
-Gnorix is an independent biometric-cryptographic library for signing data and digital actions with keys reconstructed from biometric measurements. It separates the signing mechanism from the application that verifies a signature and decides what it authorizes.
+Gnorix is a Rust library for reconstructing signing keys from biometric features. It enrolls keys from multiple feature combinations, represents their accepted set with one Merkle root, and searches for a matching key when signing from a later capture. Applications verify the resulting signature and membership proof before authorizing an action.
 
-Repeated biometric captures are not identical. The native fingerprint path selects features meeting a configurable minimum priority and enrolls one canonical grid position set per selected combination. Reconstruction applies the same minimum and searches bounded positional variations lazily, checking each candidate immediately. A Merkle root, a compact commitment to the enrolled public keys, represents the enrollment without requiring the verifier to hold the entire set.
+The repository includes native fingerprint processing, PNG diagnostics, a fingerprint lab and a NEAR smart-wallet demonstration.
 
-Each combination must satisfy the configured anchor count and minimum pairwise separation in ridge-width units R; its other points lie inside the anchors' convex hull. The retained policy is reused when signing from a partial capture.
+## Try it
 
-For a later signature, the library reconstructs one candidate key from a fresh capture and any required PIN or password. The authorization combines that key's public counterpart, evidence that it belongs to the enrolled set, and a signature over the approved action. Verification does not require the raw biometric sample or every other candidate key.
+Use the pinned [Rust toolchain](rust-toolchain.toml), then run either application from the repository root:
 
-The application retains control over enrollment ownership, permitted actions, reuse, revocation and recovery. Gnorix's signing mechanism is independent of a particular blockchain; the NEAR integration connects it to on-chain verification and permission-controlled operations. A valid signature establishes authorization evidence, not unlimited account access or proof of a live biometric capture.
+```sh
+# Fingerprint analysis and signing lab: http://127.0.0.1:8765
+cargo run -p gnorix-lab --release --locked
+
+# NEAR wallet demo: http://127.0.0.1:8780
+cargo run -p gnorix-near-wallet --bin gnorix-near-demo --features demo --release --locked
+```
+
+The NEAR command builds the example contracts and starts a local sandbox. See its [setup requirements and options](examples/near/README.md) before the first run. The [hosted demo](https://gnorix.online) also executes transfers in a private sandbox; it does not move public-network assets. Each browser session has its own wallets, token balances and enrollments, expiring after one hour.
+
+## Library
+
+The public package is `gnorix`. Its default `core` feature exposes the implementation in `crates/core` through both `gnorix::*` and `gnorix::core::*`. The optional `near` feature adds contract-side verification and enrollment lifecycle management through `gnorix::near::*`.
+
+The core provides fingerprint features, ranked combinations, canonical grid candidates, enrollment packages, signing search and SHA-256 Merkle proofs. Applications choose the cryptographic provider; the examples explicitly use HKDF-SHA256 and Ed25519. See [library setup](docs/development.md#using-the-library) for dependency declarations and feature selection.
 
 ## Documentation
 
-- [Concept](docs/concept.md) explains the biometric-stability problem, accepted-key-set principle, Merkle commitment and intended role of the library.
-- [How it works](docs/how-it-works.md) follows enrollment, retained proof material, fresh-capture reconstruction, signing, verification and recovery.
-- [Architecture](docs/architecture.md) describes component responsibilities, the user/verifier boundary, independent library and NEAR integration.
-- [Development](docs/development.md) covers the Rust workspace, setup, test commands, algorithm interfaces and implementation boundaries.
-- [Fingerprint extraction](docs/fingerprint.md#feature-summary) summarizes feature measurements with an illustrated example and describes native ridge processing, graph geometry and reproducible PNG diagnostics.
-- [Fingerprint signing](docs/fingerprint-signing.md) covers regional point-subset search, signing against an existing `.grx` package, public verification and checked crop examples.
-- [Fingerprint test stand](docs/fingerprint-lab.md) provides a local Rust web interface for preparing regions, selecting circular captures, testing spatially varying capture artifacts and inspecting real signatures and matching feature points.
-- [NEAR contract integration](docs/near-sdk.md) covers owner-controlled enrollment, contract verification, core authorization conversion and the runnable local sandbox example.
-- [NEAR example](examples/near/README.md) runs a local web demo with two fingerprint-backed smart wallets and real standard-token transfers. One Rust command prepares the contracts and starts the local NEAR environment.
+| Topic | Guide |
+| --- | --- |
+| Purpose and mechanism | [Concept](docs/concept.md), [How it works](docs/how-it-works.md), [Architecture](docs/architecture.md) |
+| Build and validation | [Development](docs/development.md) |
+| Image processing and diagnostics | [Fingerprint extraction](docs/fingerprint.md), [Testing and datasets](docs/fingerprint-testing.md) |
+| Key candidates | [Feature combinations](docs/feature-combinations.md), [Grid shapes](docs/grid-shapes.md) |
+| Enrollment and reconstruction | [GRX packages](docs/grx-packages.md), [Fingerprint signing](docs/fingerprint-signing.md) |
+| Interactive lab | [Fingerprint Lab](docs/fingerprint-lab.md) |
+| NEAR | [Contract SDK](docs/near-sdk.md), [Runnable example](examples/near/README.md), [Deployment](examples/near/deploy/README.md) |
 
-## Development
-
-The repository-root `gnorix` package is the public library entry point. Its default `core` feature exposes the implementation in `crates/core` (`gnorix-core`) through both `gnorix::core::*` and the direct `gnorix::*` API. It provides native fingerprint extraction, ranked point subsets, canonical grid candidates, fresh-image signing search, enrollment packages, bounded signing/verification pipelines and a working SHA-256 Merkle commitment. Applications can use these fingerprint components or supply a `MeasurementEngine`; the KDF/signature provider remains an explicit choice. See [Development](docs/development.md#using-the-library) for dependency and feature selection.
-
-The [Fingerprint Lab application](examples/fingerprint-lab/README.md) is a separate workspace package with its own manifest and web dependencies. Run it with `cargo run -p gnorix-lab --release --locked`.
-
-Use the pinned Rust 1.99.1 toolchain, then run:
+## Validation and limits
 
 ```sh
 cargo test --workspace --all-targets --locked
 cargo run -p gnorix-core --example merkle --locked
 ```
 
-The `merkle` example exercises membership proofs with illustrative public-key bytes. The [fingerprint signing example](docs/fingerprint-signing.md) also derives keys and verifies actual signatures against an existing enrollment, including re-extracted crops of the synthetic fixture. The optional `near` feature adds contract verification and enrollment lifecycle management, with a separate local sandbox test; signing uses the existing core API. Real-capture repeatability, calibrated acceptance criteria, production KDF/signature selection and protected persistence remain development work. See [Development](docs/development.md) for the complete workflow and test scope.
+These checks cover software behavior; the [development guide](docs/development.md) separates ordinary tests from opt-in sandbox tests. Fingerprint scores are engineering rankings, not recognition probabilities or security bits. Repeat-capture reliability, resistance to unrelated fingerprints and production key protection remain unqualified. A cross-subject descriptor match has been observed; see the [biometric security boundary](docs/near-sdk.md#biometric-security-boundary) before using this prototype for authorization.
 
 ## License
 
-Gnorix is available under the [MIT License](LICENSE). You may use, modify,
-redistribute and sell the software, including in proprietary products, provided
-you retain the copyright and license notice. The software is provided without
-warranty.
-
-Third-party dependencies and externally downloaded datasets retain their own
-licenses; the Gnorix license does not replace their terms.
+[MIT](LICENSE). Third-party dependencies and external datasets retain their own licenses.

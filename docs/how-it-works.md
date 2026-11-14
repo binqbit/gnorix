@@ -1,100 +1,35 @@
 # How it works
 
-Gnorix separates enrollment, later signing and application authorization. Enrollment commits to baseline keys from selected feature combinations. A later capture searches for one of those keys within the configured measurement tolerance. Verification checks both membership and the signature before the application decides whether the action is permitted.
+This page follows the implemented fingerprint path from one image to a verified authorization. The generic core also accepts a caller-supplied `MeasurementEngine`; multi-capture registration and fusion are not implemented by the native fingerprint path.
 
-## 1. Capture enough usable biometric information
+## Enrollment
 
-Enrollment begins with biometric captures that provide enough usable coverage of the selected measurement. Repeated captures help distinguish recurring features from unreliable observations. A poor or incomplete capture can require another attempt rather than being treated as evidence about an unseen area.
+1. **Measure the image.** Estimate the mean dark-ridge thickness R from supported ridge segments, normalize local brightness, extract ridge contours and identify feature candidates. Image evidence, geometry and controlled threshold variations contribute to feature strength; nearby feature crowding reduces final priority. [Fingerprint extraction](fingerprint.md) defines these measurements.
+2. **Select point combinations.** Apply the minimum final priority and configured point-count range. Circular regions use radius in R and expand automatically when necessary. Each combination must have enough pairwise-separated anchors, with all remaining points inside their convex hull. Quality-group weights and compact local groups determine the selected set. See [feature combinations](feature-combinations.md).
+3. **Build canonical candidates.** Orient each combination using its convex hull's longest edge, align it to the top and right boundaries, and snap every point to the nearest triangular-grid node with spacing R. Realign the snapped bounds, preserve row phase and add the fixed uncertainty margin. Hash the sorted integer-coordinate sequence with its phase, retaining repeated coordinates. Feature IDs, scores and pixel-valued R are excluded from this encoding. See [grid shapes](grid-shapes.md) and [candidate encoding](grx-packages.md).
+4. **Derive and commit keys.** The application's `CryptoProvider` derives each candidate key from the digest, enrollment context and any required secret. The examples use HKDF-SHA256 and Ed25519. The Merkle tree contains sorted, deduplicated, context-bound public-key hashes; its root also binds the distinct-leaf count. Enrollment derives keys only from baselines, without expanding their positional uncertainty or retaining their coordinates.
+5. **Retain proof material and register the commitment.** The `.grx` package holds public reconstruction parameters, enrollment context and leaf hashes from which the in-memory tree and membership paths can be rebuilt. It contains no private keys, source images or feature coordinates. The application registers the commitment through an owner-authorized path. See [GRX packages](grx-packages.md).
 
-The acquisition method must provide the information the library needs. A device's ordinary biometric unlock result is not automatically a reusable fingerprint measurement. Capture choice and the signing mechanism are separate responsibilities.
+The native path must finish constructing the selected enrollment set or fail. It does not return a silently truncated Merkle commitment after reaching a resource limit.
 
-## 2. Align captures and establish a common representation
+## Signing from a later capture
 
-The preparation stage brings captures into a comparable frame. A whole image being translated or rotated is different from a particular local feature being missing or uncertain. These effects must not be collapsed into one unrestricted tolerance.
+The application first obtains approval for the exact action: its operation, payload, nonce and expiry. Gnorix then processes the new image under the retained profile and applies the same eligibility and anchor constraints. Distances remain in R; a crop does not lower the stored minimum separation.
 
-Aligned observations can be combined to describe the usable biometric features and their consistency. Quality controls determine which information is suitable to retain. Alignment and quality settings involve speed, repeatability and coverage tradeoffs; a setting is not automatically a direct measure of cryptographic strength.
+The search visits point combinations lazily in priority-weighted order. For each combination it checks the rounded baseline first, followed by the allowed neighboring-position assignments in the fixed grid frame. Every derived public key is checked for membership immediately. A match stops the search and signs the approved action; otherwise all positional variants of the current combination are exhausted before the next combination is visited.
 
-If alignment or coverage is inadequate, the process requests another capture or stops. It does not create confidence by silently discarding inconvenient differences.
+A shared work budget bounds fingerprint subset enumeration and candidate checks. Budget exhaustion means **search incomplete**, which differs from exhausting the candidate stream without finding a member. Coverage, geometry, ranking changes and quantization can prevent reconstruction even when a crop contains visible features. The [signing guide](fingerprint-signing.md) describes these outcomes and reproducible examples.
 
-## 3. Define the accepted variation
+The signer needs the retained package and any required secret. A fresh image alone is not a guaranteed backup of the previous root or its membership data. Changing the profile, secret, context or accepted key set requires a new enrollment rather than an invisible change to an existing one.
 
-Enrollment specifies the feature-selection policy and tolerated measurement differences. These settings define which feature combinations are enrolled and which neighboring positions a later capture may search. Each point must meet the same inclusive minimum final priority in both stages. Each combination must fit the explicit minimum/maximum point count and contain enough pairwise-separated anchors, with the remaining points inside their convex hull. The fingerprint examples start with 3–6 points and at least three anchors separated by 6R, where R is the measured mean dark-ridge width. Partial captures reuse the same distance in R. Insufficient eligible points or geometric support require another capture or a new enrollment policy; the threshold does not shrink with the crop.
+## Verification and execution
 
-The goal is not to flatten all measurements into a trivial common value. It is to preserve useful distinctions while accounting for expected variability. Greater tolerance can improve acceptance of genuine recaptures but can also expand the space accepted by the enrollment. The policy must balance these effects.
+The authorization supplies the matching public key, Merkle proof and action signature. The verifier compares it with the application's independently trusted commitment and expected action, then checks enrollment status, context, revision, expiry, membership and signature validity.
 
-## 4. Derive candidate signing keys
+The core returns verification evidence. It does not consume replay state or execute the action. The application must enforce permissions and reserve or consume the nonce together with its protected state transition.
 
-Each selected feature combination is normalized and rounded to the grid. These baseline positions produce one candidate private key and its corresponding public key. Positional uncertainty is searched during later signing; it does not multiply the enrolled keys. If a PIN or password is part of the enrollment, it contributes as a secret input during both enrollment and later reconstruction.
+In the [NEAR SDK](near-sdk.md), owner-controlled commitment registration and monotonic nonce state supply that lifecycle. The example wallet consumes a nonce when accepting an authorization, then makes an asynchronous token transfer. Acceptance is distinct from transfer completion; a failed transfer needs a new signature. The [NEAR demo](../examples/near/README.md) shows the entire flow in a private sandbox with a new random circular capture on each attempt.
 
-This additional secret can be simple or strong according to the chosen protection policy. A public salt is not a substitute for it. Neither a long output key nor a large number of candidate keys establishes how difficult the original inputs are to guess.
+## What this establishes
 
-The candidate private keys are not intended to become a permanent list of stored secrets. The enrollment retains the information needed for the commitment and later membership evidence under a defined protection policy.
-
-## 5. Create the Merkle commitment
-
-The public candidate keys form the leaves of a Merkle tree. Hashes combine those leaves into a single root representing the accepted set. The verifier associates that root with an authorized enrollment.
-
-A Merkle path provides the sibling information needed to connect one candidate public key to the root. This lets verification check one candidate without receiving the entire tree or trying every possible signature key.
-
-The root identifies the accepted set; the candidate public key remains the key used to verify the actual signature. Registering the root must be authorized by the enrollment owner rather than accepted for an arbitrary person or account.
-
-## 6. Retain membership material
-
-The person needs a way to obtain the correct path for a reconstructed key. Retained tree, index or proof material supports this lookup. The fingerprint package also carries canonical public reconstruction settings, including the point-count range and anchor policy in R, authenticated by the context's profile ID. These retained materials are separate from the trusted public commitment and from the fresh biometric reading.
-
-This material is not automatically harmless because it omits raw images or private keys. Its handling, backup and recovery matter. Losing it can prevent an otherwise valid reconstructed key from being used with the existing enrollment.
-
-## 7. Reconstruct one candidate from a fresh capture
-
-When signing, the person supplies another capture and any required additional secret. The library applies the enrollment's measurement interpretation and visits feature combinations in deterministic priority order. It first tests a combination's rounded baseline, then lazily tries its neighboring-position combinations in the same fixed grid frame. Each derived key is checked against the enrolled set immediately. A match stops the search; only after exhausting that combination's positional variations does the search move to a lower-priority combination.
-
-The result need not equal the single reading used as an enrollment reference. It must belong to the set already committed by that enrollment. If no candidate is found, the system follows its retry or recovery policy; it does not silently enlarge the enrolled set to make the request pass.
-
-## 8. Approve and sign the exact action
-
-The person reviews the data or operation to authorize. The reconstructed private key signs that intended content, including the context needed to prevent it from being repurposed elsewhere.
-
-For an operation, the authorization must distinguish the relevant application, enrollment and consequential parameters. A signature intended for one recipient or amount must not become approval for another. Where authorization is one-time or time-limited, the application also needs an appropriate freshness and reuse policy.
-
-The resulting package includes the candidate public key, its Merkle path and the action signature. Raw biometric captures and all other enrolled public keys are not required for this verification step.
-
-## 9. Verify membership, signature and permissions
-
-The verifier first uses the trusted enrollment commitment, not a replacement supplied by an untrusted requester. It checks that the candidate belongs to the enrolled set and that its signature matches the intended action.
-
-The application separately checks whether the enrollment is active, the authorization is still usable and the action is within the owner's permissions. A cryptographically valid package can therefore be rejected because its permitted use has expired or because the action exceeds an allowance.
-
-In the NEAR integration, protected actions concern only resources the application is authorized to control. When an action spans asynchronous operations, acceptance, completion and failure are distinct outcomes. Retrying must not accidentally execute the same authorization twice.
-
-## 10. Handle failure, change and recovery
-
-A poor capture can be repeated under the existing enrollment rules. Changing those rules, the additional secret or the enrolled set is a different operation and can require a new commitment and explicit authorization.
-
-Recovery from lost proof material, replacement of a root and revocation after compromise need their own authority. A fresh scan does not guarantee reconstruction of the old root or its complete proof data. Recreating an enrollment and restoring an existing one are different outcomes.
-
-A stronger recovery secret may be used separately from a secret intended for limited everyday actions. The appropriate relationship between these protections must account for shared biometric and device failures rather than assuming that two labels create two independent factors.
-
-## The complete flow
-
-The diagram separates enrollment from later signing and shows the two inputs needed for verification: a trusted commitment and a newly created authorization package.
-
-```mermaid
-flowchart TD
-  A[Enrollment captures] --> B[Align and assess usable measurements]
-  B --> C[Select combinations and define tolerance]
-  C --> D[Derive baseline public keys]
-  D --> E[Commitment and retained proof material]
-  F[Fresh capture and required secret] --> G[Search baseline and neighboring positions lazily]
-  E --> H[Find its membership path]
-  G --> H
-  G --> I[Sign the approved action]
-  H --> J[Candidate key, path and signature]
-  I --> J
-  E --> K[Trusted enrollment commitment]
-  J --> L[Verify membership and signature]
-  K --> L
-  L --> M[Check application permissions]
-  M --> N[Perform only the permitted action]
-```
-
-In words: prepare an enrollment, retain its proof material, reconstruct one enrolled key later, sign the requested action, and check both cryptographic evidence and application authority. See [architecture](architecture.md) for responsibility boundaries.
+Membership proves that the supplied public key was enrolled; the signature proves that its private counterpart signed the bound action. Neither proves sensor provenance, liveness or reliable distinction between people. Feature priority is not a calibrated recognition probability, and the number of combinations is not an entropy estimate. See the [biometric security boundary](near-sdk.md#biometric-security-boundary).

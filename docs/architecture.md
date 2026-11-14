@@ -1,79 +1,59 @@
 # Architecture
 
-Gnorix is organized around an independent biometric-cryptographic library and separate application integrations. The library connects biometric measurements, candidate signing keys and membership proofs. An integration decides how an enrollment is owned, how authorizations are accepted and what actions they may permit.
+Gnorix separates biometric reconstruction from public verification and application authority. This page describes those mechanism boundaries; [Development](development.md) covers the Rust workspace and package layout.
 
-This separation avoids making a blockchain responsible for processing raw biometric images or treating the signing mechanism as exclusive to one account system.
+## Measurement and candidate construction
 
-## The independent library
+The measurement stage turns an image into ridge scale, contours and ranked features. The native fingerprint implementation processes one capture at a time; it does not merge repeated impressions or implement sensor acquisition.
 
-### Capture preparation and measurement
+The candidate stage selects spatially admissible feature combinations and gives each combination a canonical integer-grid representation. Normalization is per combination, using its hull, measured R and grid phase. It is distinct from registering or elastically aligning full images.
 
-The preparation component obtains usable measurement information from repeated captures, aligns them and identifies usable coverage. It separates global translation or rotation from missing and uncertain local observations. Its responsibility is a comparable representation, not an assertion that every acquisition is authentic or live.
+The generic `MeasurementEngine` interface lets an application provide its own measurement model and candidate stream. The native fingerprint components expose their own analysis, combination and grid stages. Both paths use the same core enrollment and signing machinery.
 
-### Enrollment construction
+## Enrollment and retained material
 
-The enrollment component describes accepted measurement variations and derives their candidate verification keys. It creates the Merkle commitment representing that set and the associated information needed to find membership paths later.
+Enrollment binds candidate interpretation, cryptographic suite, domain, subject, revision, salt and secret policy. The chosen `CryptoProvider` derives candidate keys; context-bound public-key hashes form a deterministic Merkle commitment.
 
-Enrollment policy is part of the authorization identity. Changing how measurements are interpreted can change which keys are accepted, so it cannot be treated as an invisible update to an existing enrollment.
+Generic `MeasurementEngine` enrollment retains its reconstruction model and hash tree. The native fingerprint path supplies encoded candidates directly, with no engine model; its `.grx` package retains public context, reconstruction settings and leaf hashes needed to rebuild the tree. Transient private keys are not retained as a key list. Storage protection, backups and recovery authority belong to the application.
 
-### Candidate reconstruction and signing
+The commitment must enter the verifier's registry through an authorized enrollment operation. A root supplied with an arbitrary request cannot replace that trusted state.
 
-The reconstruction component processes a later capture with the required enrollment information and optional secret. Its goal is to recover one enrolled candidate, not to recreate every enrollment possibility during each signing operation.
+## Reconstruction, signing and verification
 
-The signing component binds that key to the action the person approves. It must preserve the distinction between recovering a key and obtaining permission to use it for a particular request.
+Reconstruction tries one candidate at a time against the retained tree, stopping at the first member. In the native fingerprint path, enrollment commits keys derived from baseline positions; signing searches permitted positional neighborhoods for a matching key. Profile and resource checks prevent silent changes to that interpretation.
 
-### Membership evidence and verification
-
-The proof component finds the path connecting the candidate public key to the enrollment's Merkle root. The verifier checks that relationship and checks the action signature with the candidate public key.
-
-These checks are complementary. A membership path without an action signature does not prove authorization of an action. A valid signature from an unrelated key does not establish membership in the enrollment. The root commits to the accepted set but is not itself the ordinary signature verification key.
-
-## User-controlled material and the verification boundary
-
-Raw captures and the full candidate set are not required inputs to public verification. The user-side process retains the material needed for reconstruction and proof generation under an appropriate access and backup policy. A verifier receives the candidate public key, membership evidence, signature and relevant action context.
-
-This boundary reduces the information needed for verification; it does not establish complete anonymity or protection from a compromised device. Disclosed keys and proof material can have privacy consequences even when a raw image is never published.
-
-The application must obtain its enrollment commitment from a trusted registration process. Accepting a requester's arbitrary replacement root would defeat the intended ownership boundary.
+Signing binds the matching key to the exact approved action. Public verification checks its membership and signature against trusted enrollment state and the expected action. `SignatureVerifier` is narrower than `CryptoProvider`: verification requires neither biometric extraction nor private-key derivation.
 
 ```mermaid
 flowchart LR
-  subgraph UserSide[User-side preparation and signing]
-    Capture[Biometric capture] --> Prepare[Measurement preparation]
-    Prepare --> Recover[Candidate reconstruction]
-    Retained[Retained enrollment material] --> Recover
-    Retained --> Proof[Membership proof]
-    Secret[Required PIN or password] --> Recover
-    Recover --> Sign[Approve and sign action]
-    Proof --> Package[Public authorization package]
-    Sign --> Package
+  subgraph Signing[Reconstruction and signing]
+    Capture[Fresh capture] --> Features[Features and candidates]
+    Features --> Search[Lazy key search]
+    Package[Retained enrollment package] --> Search
+    Secret[Optional required secret] --> Search
+    Search --> Sign[Sign approved action]
+    Package --> Proof[Membership path]
+    Sign --> Authorization[Public key, proof and signature]
+    Proof --> Authorization
   end
-  Package --> Verify[Membership and signature verifier]
-  Root[Trusted enrollment commitment] --> Verify
-  Verify --> Policy[Application permission checks]
-  Policy --> Action[Authorized action]
+  Authorization --> Verify[Public verification]
+  Registry[Trusted commitment and status] --> Verify
+  Expected[Expected action and trusted time] --> Verify
+  Verify --> Application[Permissions, replay state and execution]
 ```
 
-The same boundary in words: biometric processing and proof preparation happen on the user side; the application verifies the resulting authorization against its trusted enrollment and its own rules. The optional-secret requirement depends on the enrollment policy.
+Raw captures and the complete enrolled key set are unnecessary for verification. Processing location is an application choice: the provided web demos process bundled test images in a Rust backend. This separation does not imply that biometric processing always happens on a user's device.
 
-## Application responsibilities
+## Application and NEAR boundaries
 
-Applications own registration authority, supported operations, permission limits, freshness, revocation and recovery. They must distinguish a valid signature from permission to perform an unlimited action. They also determine how consent is presented and how an interrupted request is resumed or rejected.
+Applications control enrollment ownership, exact payload semantics, consent, permissions, durable replay state, revocation and recovery. Core verification returns evidence; it grants no unrestricted account access and performs no protected operation.
 
-The library does not by itself establish civil identity, unique-person status, a live sensor reading or the integrity of the screen on which an action was approved. Those requirements need additional application controls when relevant.
+The optional NEAR integration implements contract-side commitment lifecycle and authorization checks using the actual chain and contract context. The smart-wallet example applies those checks before calling a separate standard token contract. A token transfer is asynchronous: nonce consumption, pending execution and final settlement remain distinct steps. An uncertain submission must be reconciled before another transfer is allowed.
 
-## NEAR integration
+The web demonstration uses one shared sandbox with isolated, expiring browser sessions. Each session owns separate wallet/token accounts and enrollments; immutable fingerprint preparation is shared. These deployment choices belong to the [example](../examples/near/README.md), not the core signing protocol.
 
-NEAR is an integration for registering commitments and checking signatures before protected on-chain operations. It is separate from the independent library: raw biometric extraction and candidate generation are not assumed to run on chain.
+## Compatibility and evidence
 
-An application can verify signed data or enforce a bounded authorization on resources already under its control. For example, an owner can permit spending within a limit; a correctly signed request beyond that limit must still be rejected. A signature does not confer access to assets held in unrelated accounts.
+Changes to feature interpretation, grid encoding, key derivation or enrollment context can change derived keys and require authorized re-enrollment. These are prerelease formats without a legacy compatibility promise.
 
-When execution continues through asynchronous calls, verifying an authorization is not equivalent to completing its action. The integration must distinguish pending, successful and failed outcomes, prevent duplicate execution and avoid restoring authority while an outcome remains uncertain. Exact operational contracts belong to the integration's design rather than the library's biometric model.
-
-## Lifecycle and continuity
-
-The enrollment, its retained material and the verifier's commitment must remain compatible. Changing measurement policy, an additional secret or the accepted key set can require authorized re-enrollment or root replacement.
-
-Ordinary signing, revocation and recovery may have different authority requirements. A retained backup is one continuity option, but its confidentiality and integrity must be protected. Reconstructing one key from a fresh scan does not guarantee recovery of the old commitment and all its proof material.
-
-See [concept](concept.md) for the core principle and [how it works](how-it-works.md) for the full lifecycle.
+Protocol correctness and biometric reliability are separate: valid membership and signatures do not establish unique identity or a live scan. Current limitations are recorded in the [biometric security boundary](near-sdk.md#biometric-security-boundary). See [How it works](how-it-works.md) for the complete implemented flow.

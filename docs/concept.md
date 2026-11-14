@@ -1,53 +1,37 @@
 # Concept
 
-## What Gnorix is
+Gnorix connects variable biometric measurements to exact signing keys. It supplies the signing mechanism; the application decides who may enroll and what a valid signature permits.
 
-Gnorix is an independent biometric-cryptographic library for reconstructing signing keys from biometric measurements and verifying the resulting signatures. Its central mechanism connects a person's variable biometric readings to an enrolled set of acceptable signing keys. Applications decide what those signatures authorize.
+## Why one hash of a scan is insufficient
 
-The library is independent of a particular blockchain or account model. NEAR is a separate integration for applications that need on-chain verification and permission-controlled actions.
+Digital signatures need an exact key. Fingerprint captures vary with placement, coverage and image quality, so hashing a fresh image usually produces a different result. Making the representation coarser can improve repeatability while also discarding distinctions between fingerprints.
 
-## The problem: measurements vary, signatures need exact keys
+Gnorix explores an accepted-set approach: enroll keys from several feature combinations, then try to reconstruct any one of those keys from a later capture. A partial capture can succeed when it contains enough compatible features; success is not guaranteed merely because features are visible.
 
-Digital signatures depend on exact cryptographic keys. Biometric measurements do not reproduce as identical data every time: a finger can be placed differently, some features may be missing, and acquisition conditions can alter the reading. Simply hashing each fresh scan produces unrelated results when even a small part of the input changes.
+## What is enrolled
 
-Reducing every measurement to a very coarse representation can improve repeatability, but it can also discard distinctions between people. The challenge is to accommodate legitimate variation without making the accepted measurements so broad that unrelated inputs become interchangeable.
+The current fingerprint path extracts and ranks features from one image. A shared minimum priority determines point eligibility at enrollment and signing. Each combination contains a configured number of points and enough pairwise-separated anchors to enclose its remaining points. Distances use the measured mean dark-ridge thickness, R, so a smaller later capture does not weaken the policy.
 
-There is also a disclosure problem. A person may want to sign data or authorize an action without uploading their raw fingerprint to the verifier or publishing it on a blockchain. The verifying application needs evidence of a valid authorization, not necessarily the biometric sample itself.
+Each admitted combination is oriented, rounded to a triangular grid and encoded into a candidate digest. The selected cryptographic provider derives a signing key using that digest, enrollment context and any required additional secret. Enrollment commits only the rounded baseline of each combination; positional variations are searched later.
 
-## Core principle: accept an enrolled set rather than one exact reading
+Context-bound hashes of candidate public keys are sorted, deduplicated and combined into a Merkle tree. Its root is the enrollment's public commitment. It is separate from the individual public key used to verify an action signature.
 
-Gnorix's enrollment model accounts for a defined range of measurement variation. Instead of requiring every later capture to recover one identical representative, it enrolls keys from multiple selected feature combinations. The same minimum final priority determines point eligibility during enrollment and later signing. Each combination must also span enough of the enrolled pattern through at least one separated point pair; this minimum is retained in ridge-width units so a smaller later capture cannot weaken it. Each admitted combination contributes its normalized, rounded baseline positions; enrollment does not expand their positional uncertainty.
+## What is presented when signing
 
-Each candidate has a private signing key and a corresponding public verification key. The allowed public keys are collected into a Merkle tree, a structure that combines their hashes into one compact commitment called the root. The root represents the enrolled set without requiring the verifier to store or search every key individually.
+For a new capture, Gnorix tests combinations in priority-weighted order. Each combination's baseline and allowed neighboring grid positions are checked immediately against the retained enrollment. The first matching key signs the exact approved action.
 
-On a later capture, the library tries feature combinations in priority order. For each combination it tests the rounded baseline, then positional variations within the configured uncertainty, checking membership as each key is derived. If a public key belongs to the enrolled set, the person can provide a membership proof and sign the intended action. Matching one enrolled candidate is sufficient; reconstructing every possible key is not necessary during ordinary signing.
+The resulting authorization contains:
 
-This replaces an exact-reading requirement with an accepted-set requirement. It does not mean that every future capture will succeed, or that accepting more variations inherently improves security. The accepted range remains a meaningful part of the enrollment policy.
+- The matching public key.
+- A Merkle path proving that key belongs to the enrolled set.
+- A signature over the action and its enrollment context.
 
-## What the signature package means
+The verifier needs a trusted enrollment commitment and this authorization. It does not need the raw image or all enrolled keys. The signer still needs retained membership material: a root alone cannot produce arbitrary membership paths.
 
-An authorization package combines three elements:
+## Scope and limits
 
-- A candidate public key, used to check the action signature.
-- A Merkle membership path, used to check that this key belongs to the enrolled set.
-- A signature over the particular data or action being authorized.
+The library is independent of a blockchain. Its NEAR adapter registers commitments and verifies authorizations inside contracts; the example smart wallet transfers tokens it owns after verification. Ownership, permissions, replay protection, revocation and recovery remain application responsibilities.
 
-The Merkle root serves as the enrollment's public commitment. It is not the public key of the underlying signature algorithm. Membership and signature validity answer different questions: whether this key was enrolled, and whether the corresponding private key signed this action.
+An optional PIN or password is an additional secret, while a public salt only diversifies enrollments. Neither a 256-bit output nor many combinations establishes biometric entropy. A valid authorization proves possession of an enrolled key, not a live capture, a unique person or legal identity. Current biometric limitations are recorded in the [security boundary](near-sdk.md#biometric-security-boundary).
 
-The full candidate set and raw biometric reading need not be submitted for this check. The disclosed candidate key, proof and action context are still visible to the verifier; avoiding raw-sample disclosure is not a claim of complete anonymity.
-
-## Optional secrets and retained proof material
-
-An enrollment can incorporate a PIN or password as an additional secret input. It need not be limited to four digits. This secret is different from public diversification data and contributes according to its actual unpredictability, not a fixed promised multiplier.
-
-Biometric reconstruction and proof availability are separate requirements. A person may recover a valid candidate key yet still need retained tree or proof information to demonstrate membership. A compact public root alone does not recreate all of that information. Backup, protection and recovery of the retained material therefore belong to the user experience.
-
-## Applications and authority
-
-Gnorix can provide a signing mechanism for arbitrary data and a supplementary authorization mechanism for protected operations. The application retains responsibility for enrollment ownership, consent, permissions, revocation and preventing unwanted reuse.
-
-In the NEAR integration, an application could allow a signed operation only within an owner's existing authorization. A valid signature would not bypass a spending limit or give control over arbitrary assets in another account.
-
-The signature establishes a cryptographic relationship to an enrollment, not by itself a legal identity, a unique person, or proof of a live capture. These distinctions define where biometric signing fits within an application's broader protection model.
-
-Continue with the full [enrollment and signing lifecycle](how-it-works.md) and [component architecture](architecture.md).
+Continue with the [implemented flow](how-it-works.md) or [mechanism architecture](architecture.md).
