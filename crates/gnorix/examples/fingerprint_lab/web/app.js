@@ -80,6 +80,7 @@ function validConfig() {
         const input = $(id);
         const value = Number(input.value);
         if (
+            input.value.trim() === "" ||
             !input.checkValidity() ||
             !Number.isFinite(value) ||
             (integerFields.has(key) && !Number.isInteger(value))
@@ -96,6 +97,7 @@ function validConfig() {
 function validSearchControls() {
     const input = $("work-limit");
     return (
+        input.value.trim() !== "" &&
         input.checkValidity() &&
         Number.isInteger(Number(input.value))
     );
@@ -833,6 +835,7 @@ function render() {
         state.busy ||
         !displayReady ||
         !valid ||
+        !validSearchControls() ||
         (state.mode === "enrollment" && !validMemoryBudget()) ||
         (state.mode === "signing" && !signingReady);
     $("test-altered-scan").disabled = state.busy || !valid || !signingReady;
