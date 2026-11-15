@@ -110,6 +110,17 @@ class CommandTests(unittest.TestCase):
     def assert_only_canonical_folder(self):
         self.assertEqual({path.name for path in self.output.parent.iterdir()}, {"fingerprint"})
 
+    def test_help_exits_successfully_without_an_image_or_native_processing(self):
+        with patch("gnorix_reports.cli.subprocess.run") as native:
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                with self.assertRaises(SystemExit) as result:
+                    main(["--help"])
+        self.assertEqual(result.exception.code, 0)
+        for text in ("--image", "--dpi", "--overlay-alpha", "40–90%"):
+            self.assertIn(text, stdout.getvalue())
+        native.assert_not_called()
+        self.assertFalse(self.output.exists())
+
     def test_runs_native_rust_and_renders_the_complete_canonical_report(self):
         previous_cwd = Path.cwd()
         try:

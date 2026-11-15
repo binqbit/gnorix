@@ -45,7 +45,9 @@ def parser() -> argparse.ArgumentParser:
         "--overlay-alpha",
         type=float,
         default=0.5,
-        help="Map/annotation opacity (0 to 1); clarity lines and priority markers use fixed 40–90%",
+        help=(
+            "Map/annotation opacity (0 to 1); clarity lines and priority markers use fixed 40–90%%"
+        ),
     )
     return command
 
