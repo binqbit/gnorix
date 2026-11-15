@@ -54,6 +54,6 @@ The web demonstration uses one shared sandbox with isolated, expiring browser se
 
 ## Compatibility and evidence
 
-Changes to feature interpretation, grid encoding, key derivation or enrollment context can change derived keys and require authorized re-enrollment. These are prerelease formats without a legacy compatibility promise.
+Changes to feature interpretation, grid encoding, key derivation or enrollment context can change derived keys and require authorized re-enrollment. Internal format versions do not carry a legacy compatibility promise; the package version is separate from those format versions.
 
 Protocol correctness and biometric reliability are separate: valid membership and signatures do not establish unique identity or a live scan. Current limitations are recorded in the [biometric security boundary](near-sdk.md#biometric-security-boundary). See [How it works](how-it-works.md) for the complete implemented flow.

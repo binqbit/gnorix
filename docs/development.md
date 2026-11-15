@@ -25,9 +25,10 @@ toolchain through the system configuration. Check for conflicting `RUSTC` and
 compiler can cause incompatible compiler-plugin errors. Once the toolchain-bin
 prefix is active, use plain `cargo`; `cargo +VERSION` requires the rustup proxy.
 
-The library needs no scanner, blockchain node, credentials or database to build
-and test. Keep `Cargo.lock` in version control. Package publication is disabled
-during this prerelease stage.
+Ordinary library tests need no scanner, running blockchain node, credentials or
+database. The explicit sandbox tests start their own local chain. Keep
+`Cargo.lock` in version control. Packages currently set `publish = false`;
+version 1.0.0 does not imply that they are published to crates.io.
 
 The core implementation dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
 
@@ -211,7 +212,7 @@ Signing stops after finding one enrolled member. Exhaustion without a match is `
 
 The Merkle baseline sorts and deduplicates context-bound leaf hashes, duplicates the last node at odd levels, and uses distinct leaf/node/root hash domains. The root commits to both the top digest and the number of distinct leaves. Proof validation checks the count, index, exact depth, duplicated siblings and root. The retained tree contains hashes rather than a stored list of private keys or raw public-key bytes. Hashes/indexes still require an explicit privacy and backup policy.
 
-The enrollment context binds network, verifier, subject, enrollment identifier and revision, public salt, secret policy, measurement profile and crypto suite. The signing message additionally binds the root, leaf count and complete action: operation, payload bytes, nonce and expiration. All variable-length fields use explicit lengths. These internal versioned encodings are a changeable prerelease baseline, not a stable storage or network wire format.
+The enrollment context binds network, verifier, subject, enrollment identifier and revision, public salt, secret policy, measurement profile and crypto suite. The signing message additionally binds the root, leaf count and complete action: operation, payload bytes, nonce and expiration. All variable-length fields use explicit lengths. These internal versioned encodings have no promised cross-version storage or network compatibility; package version 1.0.0 does not change that boundary.
 
 The application defines canonical operation payloads and a consistent unit for expiration/current time. `now >= expires_at` is expired. `verify` takes the expected action separately, rejects revoked/stale enrollments and never obtains its trusted root from the submitted package. A successful `VerifiedAuthorization` reports cryptographic evidence only. It does not consume a nonce, grant a spending allowance, or prove that a live capture or trustworthy approval screen was used.
 
@@ -243,6 +244,6 @@ ignored by Git.
 
 Maintain documentation, interface text, runtime messages and report captions in English.
 
-Keep pipeline, mechanism and primitive responsibilities distinct. Prefer clear function names and cohesive modules, and use blank lines between logical segments. Refactor when current requirements outgrow a structure; remove unused code and obsolete fields. Before the first release, correct architecture takes priority over compatibility with old internal APIs. Add abstractions and package boundaries only when current responsibilities justify them.
+Keep pipeline, mechanism and primitive responsibilities distinct. Prefer clear function names and cohesive modules, and use blank lines between logical segments. Refactor when current requirements outgrow a structure; remove unused code and obsolete fields. Document breaking changes and any required re-enrollment explicitly. Add abstractions and package boundaries only when current responsibilities justify them.
 
 Keep maintained tests next to the behavior they verify or in the crate's `tests/` directory. Add regressions for actual failure modes. Do not add production fallbacks that silently accept invalid proofs, widen enrollment, bypass missing algorithms or hide budget failures. Update the relevant API documentation and tests together with changed contracts.
