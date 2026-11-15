@@ -52,3 +52,5 @@ These checks cover software behavior; the [development guide](docs/development.m
 ## License
 
 [MIT](LICENSE). Third-party dependencies and external datasets retain their own licenses.
+
+The author's other NEAR Hackathon project: [Apodect](https://github.com/binqbit/apodect).
