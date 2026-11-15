@@ -1,16 +1,18 @@
 # Fingerprint Lab
 
-A local Rust application for inspecting fingerprint features, enrolling a Merkle set and testing signatures from circular or altered captures. The server embeds its web interface and requires no frontend installation.
+A local Rust application for inspecting fingerprint features, enrolling a Merkle set and testing signatures from circular or altered captures. It does **not** start NEAR or transfer tokens; use the [NEAR demo](../near/README.md) for that.
 
-Install the pinned toolchain, then run from the repository root:
+After the one-time [local setup](../../docs/local-testing.md), start it from the repository root with one command:
 
 ```sh
-rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
-export PATH="$(dirname "$(rustup which --toolchain 1.99.1 rustc)"):${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 cargo run -p gnorix-lab --release --locked
 ```
 
-Or run `cargo run --release --locked` from this directory. Open **http://127.0.0.1:8765** and stop the application with Ctrl+C. Append `-- --port 8766` to choose another port.
+Wait for `Gnorix fingerprint lab: http://127.0.0.1:8765`, then open that address. The first run downloads Cargo dependencies and compiles the application; later runs reuse the build. The interface and default fingerprint are bundled: no Python, frontend installation, scanner, dataset, wallet or external service is needed.
+
+Stop with Ctrl+C. Append `-- --port 8766` if port 8765 is occupied. You can also run `cargo run --release --locked` from this directory.
+
+For a first control test, keep the defaults and use **Prepare features → Create Merkle set → Sign with a fragment**. Set **Artifact severity** to **0**, expand **Selected fragment radius** to its maximum to include the full image, then use **Prepare features → Sign message → Verify signature**. Start reducing the circle only after this control. The [Lab guide](../../docs/fingerprint-lab.md#test-a-signature) explains the results and retry steps.
 
 The application has its own `Cargo.toml` and depends on the repository-root `gnorix` library with its default `core` feature and the `gnorix-example-support` package. It shares the workspace lockfile and `target/` directory. Build from the repository checkout: the bundled image comes from `crates/core/tests/assets/test-fingerprint.png`.
 
@@ -38,7 +40,9 @@ Run the application tests:
 cargo test -p gnorix-lab --release --locked
 ```
 
-See the [Lab guide](../../docs/fingerprint-lab.md) for controls, workflow and
+See the [local testing guide](../../docs/local-testing.md) to choose between
+biometric tests, PNG reports and actual local NEAR transfers; the
+[Lab guide](../../docs/fingerprint-lab.md) covers controls, workflow and
 artifact reproduction, the [gallery importer](../../tools/fingerprint-gallery/README.md)
 for research images, and [toolchain setup](../../docs/development.md#workspace-and-setup)
 if system Cargo/Clippy versions differ. The [biometric security boundary](../../docs/near-sdk.md#biometric-security-boundary)

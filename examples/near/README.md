@@ -13,47 +13,95 @@ before adapting it for real assets. The page includes the prototype notice and
 
 ## Open the demo
 
-From the repository root, install and select the pinned tools once:
+Run all commands below from the repository root. For image analysis without
+blockchain transactions, use the [Fingerprint Lab](../fingerprint-lab/README.md);
+the [local testing guide](../../docs/local-testing.md) helps choose a workflow.
+
+### One-time setup
+
+Install the native build prerequisites for your OS from
+[workspace setup](../../docs/development.md#workspace-and-setup), then install
+and select the pinned Rust tools:
 
 ```sh
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
 export PATH="$(dirname "$(rustup which --toolchain 1.99.1 rustc)"):${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
 ```
-
-Open **http://127.0.0.1:8780**. The page opens while Rust builds both contracts,
-starts one sandbox and analyzes the two source images. Each browser session then
-generates its own Merkle enrollments and receives two funded wallets and a token
-contract. Both balances start at **1,000 GXT**, verified against the token state.
 
 The first run needs internet access for dependencies, the Wasm target and the
 NEAR sandbox binary. The app installs a missing Wasm target for Rust 1.99.1.
-Use Linux or macOS with a supported sandbox binary; use WSL on Windows. No Docker,
-Node.js, separate RPC service or `cargo-near` is required for this web entry point.
-A native build environment and rustup are needed unless using prebuilt contracts.
-On systems with multiple Rust installations, keep Cargo, rustc and Clippy from
-one toolchain; see [setup](../../docs/development.md#workspace-and-setup).
+Automatic sandbox downloads support Linux x86_64/aarch64 and Apple Silicon macOS.
+Use a Linux VM on Intel Macs and WSL on Windows. No Docker, Node.js, separate RPC
+service or `cargo-near` is required for this web entry point.
+A native build environment is required for the Cargo command; runtime contract
+builds also require rustup unless you supply prebuilt contracts. Keep the same
+toolchain selected in each new terminal.
 
-1. Select a wallet and enter an amount. Its fingerprint, eligible points, balance
-   and registered root are shown.
+### Start with one command
+
+Use the same five-point profile as the supplied public service:
+
+```sh
+cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --points-per-combination 5
+```
+
+Keep the terminal running. Once it prints the address, open
+**http://127.0.0.1:8780**. The page shows startup progress while Rust builds both
+contracts, starts one private sandbox and analyzes the two source images. Each
+browser session then generates its own Merkle enrollments and receives two
+funded wallets and a token contract. Wait for **Sandbox connected**, both wallets
+and their **1,000 GXT** balances before signing. Account creation, contract
+deployment and funding are automatic; no browser wallet, public-chain account,
+faucet or separate deployment command is needed.
+
+Omitting `--points-per-combination 5` uses the standalone **3–6** point range.
+The flag fixes the size of each combination, not the total number of detected
+features. It requires at least three points and changes both enrollment and
+signing. Changing it requires a restart and fresh enrollments.
+
+### Make and verify a transfer
+
+1. Select **Wallet 1** and enter **10** as the amount. The recipient is
+   **Wallet 2**. The fingerprint, eligible points, balance and registered root
+   belong to the selected sending wallet.
 2. Click **Approve & sign**. One new random circle covers at least a third of the
    confirmed pattern. Only its unchanged pixels enter fresh feature extraction;
    the surrounding blur is visual. A failed capture stays visible and requires
    another explicit click. No hidden crop retry or full-image fallback occurs.
-3. A successful reconstruction highlights five matched points under the deployed
-   five-point profile, or the selected number under another profile. The actual
-   **Signing public key** appears beside the submission controls. Inspect
-   **Signature & Merkle proof**, then click **Submit to NEAR** once.
+3. A successful reconstruction highlights five matched points with the command
+   above and shows **Signature ready** and the actual **Signing public key**.
+   No tokens have moved yet. Inspect **Signature & Merkle proof**, then click
+   **Submit to NEAR** once.
 4. The page displays the transaction hash, receipt/callback outcome, actual gas,
-   balances and a link back to the proof. The attached allowance is **100 Tgas**;
-   measured consumption is shown separately. After completion, edit the next
-   transfer directly or switch wallets to send tokens back.
+   balances and a link back to the proof. On success, this first transfer leaves
+   **990 GXT** in Wallet 1 and **1,010 GXT** in Wallet 2. The attached allowance is
+   **100 Tgas**; measured consumption is shown separately. Switch to Wallet 2
+   and repeat with 10 GXT to return both balances to 1,000, or edit the next
+   transfer directly.
 
 If observation is uncertain, **Check transaction status** queries the original
 hash without broadcasting again. A new transfer stays blocked until that result
 is resolved. A search-budget failure means **incomplete**, not a confirmed
 fingerprint mismatch. Visible points alone do not guarantee an enrolled subset
 exists inside the selected crop.
+
+### Stop, reset and troubleshoot
+
+Press **Ctrl+C** in the launching terminal and wait for shutdown. It stops the
+service and its managed sandbox. Rerun the same command for a fresh chain,
+wallets, enrollments and balances; a page reload alone resumes the current
+browser session. Restarting discards all sessions on this local service.
+Build artifacts stay cached under `target/`; no `cargo clean` is needed.
+
+| What you see | What to do |
+| --- | --- |
+| Startup progress or disabled signing controls | Wait for contract builds, image analysis and enrollment. The first run takes longer than subsequent builds. |
+| `cannot listen on http://127.0.0.1:8780` | Another process owns the port. Add `--port 8781` after the final `--` in the launch command and open that port. |
+| `Sandbox setup failed` | Read the page's error and terminal output. Check the Rust/native prerequisites and first-run downloads, then restart after fixing the cause. |
+| `Capture failed` | Read the reason. Too few usable points, no enrolled match and an exhausted search budget are different outcomes. Click **Approve & sign** for a new random attempt; a new attempt is not guaranteed to match. |
+| `Signature ready`, balances unchanged | The transfer is only prepared. Click **Submit to NEAR** to execute it. |
+| `Outcome unconfirmed` | Use **Check transaction status**; it checks the existing hash without sending another transfer. |
+| `Session account cleanup failed` during Ctrl+C | The terminal signal can stop sandbox RPC before account retirement finishes. Shutdown still discards the disposable local chain; wait for the process to exit before restarting. |
 
 ### Runtime options
 
@@ -65,17 +113,9 @@ exists inside the selected crop.
 | `GNORIX_DEMO_CONTRACTS_DIR` | Directory containing `gnorix_near_wallet.wasm` and `gnorix_near_token.wasm`; skips startup compilation. |
 | `NEAR_SANDBOX_BIN_PATH` | Select a compatible preinstalled NEAR sandbox binary; current version is **2.14.1**. |
 
-For the same profile as the supplied public service:
-
-```sh
-cargo run -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --points-per-combination 5
-```
-
-The point count is a server startup setting; changing it requires a restart and
-fresh enrollments. It limits points per combination, not detected features.
-Ctrl+C stops the service and its managed sandbox. No account is created on
-public testnet or mainnet. See [deployment](deploy/README.md) for a self-contained
-release bundle, systemd and nginx.
+See [deployment](deploy/README.md) for a self-contained release bundle, systemd
+and nginx. Local accounts exist only in the managed sandbox, not on public
+testnet or mainnet.
 
 ## Browser sessions and data lifetime
 
@@ -221,23 +261,44 @@ arbitrary contract has been audited as a trustworthy token.
 
 ## Verification
 
-Ordinary demo tests and the opt-in real-sandbox suite:
+The commands below start and stop their own test environment. A separately
+running web demo is not required. Ordinary workspace tests do not enable the
+`demo` feature or run tests marked `ignored`.
+
+For one automated end-to-end check of fresh fingerprint capture, signing and
+token transfers in both directions, use:
+
+```sh
+cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked fingerprint_approvals_execute_real_transfers_between_both_wallets -- --ignored --nocapture --test-threads=1
+```
+
+This scenario uses repeatable capture seeds, checks the actual balances and
+retains an expected failed capture. It automatically builds contracts and starts
+a private sandbox, using the same prerequisites as the browser demo. It does not
+need `cargo-near`.
+
+For all ordinary demo tests, then the complete opt-in extraction/sandbox suite:
 
 ```sh
 cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked
 cargo test -p gnorix-near-wallet --features demo --bin gnorix-near-demo --release --locked -- --ignored --nocapture --test-threads=1
 ```
 
-Ordinary tests cover HTTP cookie/CSRF boundaries and request validation. The
-ignored suite builds contracts automatically unless supplied through
+Ordinary tests cover HTTP cookie/CSRF boundaries and request validation without
+starting a sandbox. The ignored suite builds contracts automatically unless supplied through
 `GNORIX_DEMO_CONTRACTS_DIR`. It covers fresh fingerprint extraction, actual
 transfers, default and five-point profiles, failed captures, replay/async failure,
 isolated enrollments and expiry cleanup. Public random-capture tests must retain
-failed attempts rather than replacing them silently. Passing tests establish their specific software checks, not biometric
-false-acceptance rates.
+failed attempts rather than replacing them silently. Passing tests establish
+their specific software checks, not biometric false-acceptance rates.
 
-For the standalone wallet and NEP-141 token contract regression suites, install
-`cargo-near` and build all three test contracts:
+### Standalone contract regression suites
+
+These check wallet authorization, replay protection, asynchronous transfers and
+standard token behavior using small deterministic key fixtures. They do not run
+image extraction; use the demo check above to test the complete biometric path.
+They also exercise a test-only token receiver. Unlike the web entry point, their
+build script requires `cargo-near`.
 
 On Ubuntu, install the native dependency used by `cargo-near` first:
 

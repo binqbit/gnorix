@@ -4,12 +4,20 @@ This tool runs the native Rust extractor and renders its measurements as nine st
 
 ## Run
 
-Requirements: the repository checkout, its pinned Rust toolchain, `uv` and Python 3.11 or newer. From the repository root:
+Requirements: the repository checkout, its pinned Rust toolchain, `uv` and Python 3.11 or newer. Follow the one-time [local setup](../../docs/local-testing.md) first. From the repository root, one command builds/runs the Rust extractor and produces every report figure:
 
 ```sh
 uv run --project tools/fingerprint-reports --locked gnorix-report \
   --image crates/core/tests/assets/test-fingerprint.png
 ```
+
+The first run downloads dependencies and builds the native example. Wait for the
+printed `overview.png` path, then open **`reports/fingerprint/overview.png`**;
+there is no web server or browser port. Run the same command again to refresh
+the bundle. Reports inspect extraction and feature quality; they do not enroll
+keys or execute NEAR transfers. For interactive signing use the
+[Lab](../../examples/fingerprint-lab/README.md), or the
+[NEAR demo](../../examples/near/README.md) for token transfers.
 
 Input must be an opaque PNG. Transparency is rejected; missing pixels require the library's `Capture` validity mask. The native example limits source dimensions to 4096 per side and extraction to 4,000,000 pixels. Processing estimates its scale from the image; there is no manual ridge-period argument. For external research inputs, see [SOCOFing conversion](../../docs/fingerprint-testing.md#convert-without-inventing-scanner-evidence).
 
@@ -68,4 +76,10 @@ uv run --project tools/fingerprint-reports --locked python -Werror -m unittest d
   -s tools/fingerprint-reports/tests -v
 ```
 
-CI also runs report generation on the checked-in synthetic fixture. These checks validate processing contracts and publication behavior, not sensor recognition accuracy.
+The Python tests validate report parsing, rendering contracts and publication
+behavior. To test Rust extraction directly, run
+`cargo test -p gnorix-core --test fingerprint --release --locked`.
+CI also runs the report command above on the checked-in synthetic fixture,
+covering native extraction through PNG publication. None of these checks needs
+a scanner or research dataset, and they do not measure sensor recognition
+accuracy.

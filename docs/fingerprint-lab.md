@@ -1,13 +1,14 @@
 # Fingerprint Lab
 
-Run the local web interface from the checkout root:
+Complete the one-time [local setup](local-testing.md), then run the web interface from the checkout root:
 
 ```sh
 cargo run -p gnorix-lab --release --locked
 ```
 
-Open **http://127.0.0.1:8765**. This independent Rust application embeds its
-interface and needs no frontend installation or external service. Append
+Wait for the startup URL, then open **http://127.0.0.1:8765**. The first build
+can take several minutes. This Rust application embeds its interface and
+default image; it needs no frontend installation, dataset or external service. Append
 `-- --port 8766` to choose another port; stop with Ctrl+C. The
 [application README](../examples/fingerprint-lab/README.md) covers setup, optional
 gallery paths and tests.
@@ -17,29 +18,24 @@ its enrollment and current operation. It does not use the NEAR demo's per-browse
 cookies or one-hour sessions. Its adjustable defaults and artifact generator
 are independent of the [NEAR transaction demo](../examples/near/README.md).
 
-## Choose an image
-
-The **Image library** offers the default synthetic fingerprint and five locally imported SOCOFing originals. Select a thumbnail to change the source. This clears the active enrollment, prepared features, signature, artifacts and analysis cache, then returns to Enrollment. Saved `.grx` files remain on disk; numerical controls stay at their current values. Marker sizes adapt to the display so smaller scanner images remain readable.
-
-The curated gallery contains five distinct subjects: **226 / right middle**, **270 / right index**, **53 / right ring**, **560 / left little** and **590 / left middle**. These 241 × 298 originals show different ridge patterns and source contrast. They are selected demonstration examples, not a representative evaluation set or measured top-five biometric accuracy ranking.
-
-Import the gallery from a local version-2 [SOCOFing download](fingerprint-testing.md#retrieve-a-pinned-copy):
-
-```sh
-uv run --project tools/fingerprint-reports --locked python \
-  tools/fingerprint-gallery/import_socofing.py \
-  --source /absolute/path/to/SOCOFing
-```
-
-The importer verifies the pinned source hashes and preserves grayscale pixels without resizing. It writes five PNGs into the ignored **`test-data/fingerprint-gallery/`** directory. Dataset images are local research inputs and are not distributed with the repository; the [dataset use terms and required citations](fingerprint-testing.md#provenance-and-use) apply. Start or restart the stand after importing. For another location, pass `--output /path/to/gallery` to the importer and `-- --gallery /path/to/gallery` to the stand. Missing gallery files leave the bundled image available; a present file with the wrong dimensions or pixel digest is rejected explicitly.
-
 ## Test a signature
+
+For the first run, keep the default image and algorithm settings. Use the full
+image as a control: in **Sign with a fragment**, set **Artifact severity** to
+**0** and move **Selected fragment radius** to its maximum. The circle then
+covers the complete image. **Center circle** only restores the default smaller
+circle; it does not select the whole image.
 
 1. In **Enrollment**, adjust the parameters and select **Prepare features**. Inspect the actual detected points and algorithm regions. Region buttons highlight all eligible points inside each effective circle. Preparation checks the baseline candidate count against the enrollment memory budget.
 2. Select **Create Merkle set**. The stand derives one key from each selected subset's rounded baseline, creates the package, checks its readback and displays its Merkle root and leaf count. It does not expand positional uncertainty during enrollment.
 3. Switch to **Sign with a fragment**. Drag the circular selection or change its radius and center. Pixels outside the circle are shaded in the interface. Adjust **Artifact severity** to test spatially varying capture defects, or leave it at zero for the original pixels. Select **Prepare features** to analyze the circular capture and inspect its regions and points.
 4. Select **Sign message**. For each ranked subset, the stand checks its baseline and then its positional uncertainty variants one at a time. It stops at the first enrolled member. On success, white rings identify every feature in the matching combination. The result shows the Ed25519 public key, signature, Merkle proof and full public authorization JSON.
-5. **Verify signature** checks the authorization against the retained enrollment and current message. Changing the message makes verification fail. A consumed search needs another preparation before retrying.
+5. **Verify signature** checks the authorization against the retained enrollment and current message. After a successful control, reduce or move the circle and repeat **Prepare features → Sign message**. Each search consumes its preparation, so prepare again before retrying or signing a new message.
+
+For a negative control, change the **Message** field after a successful signature,
+then select **Verify signature**. The existing signature must fail verification
+for the changed message. This checks message binding; selecting **Sign message**
+would instead create a new signature.
 
 The circle used to select source pixels and the algorithm's search circles are different controls. The former is measured in image pixels; the latter use **R**, the freshly measured mean dark-ridge thickness. Circular extraction preserves the selected scan's grayscale values and supplies an explicit validity mask; the interface's shade is never an input to extraction. Overlay coordinates are translated back to the original image.
 
@@ -58,6 +54,22 @@ A changed severity or **Randomize** produces a new time-seeded variation. The se
 **Test altered scan** prepares the currently displayed fragment, searches its candidate keys and verifies any resulting signature in one operation. The manual **Prepare features** → **Sign message** flow remains available to inspect points before searching. **Verify signature** checks an existing authorization against the message; it does not extract a new fingerprint.
 
 Public test records include the artifact level, seed, clean ridge-width scale, generator version and grayscale-image SHA-256 for reproduction. Preview revisions bind preparations to a specific image; stale preparations are rejected.
+
+## Choose an image
+
+The default synthetic fingerprint is always available. Optionally, the **Image library** also offers five locally imported SOCOFing originals. Select a thumbnail to change the source. This clears the active enrollment, prepared features, signature, artifacts and analysis cache, then returns to Enrollment. Saved `.grx` files remain on disk; numerical controls stay at their current values. Marker sizes adapt to the display so smaller scanner images remain readable.
+
+The curated gallery contains five distinct subjects: **226 / right middle**, **270 / right index**, **53 / right ring**, **560 / left little** and **590 / left middle**. These 241 × 298 originals show different ridge patterns and source contrast. They are selected demonstration examples, not a representative evaluation set or measured top-five biometric accuracy ranking.
+
+Import the gallery from a local version-2 [SOCOFing download](fingerprint-testing.md#retrieve-a-pinned-copy):
+
+```sh
+uv run --project tools/fingerprint-reports --locked python \
+  tools/fingerprint-gallery/import_socofing.py \
+  --source /absolute/path/to/SOCOFing
+```
+
+The importer verifies the pinned source hashes and preserves grayscale pixels without resizing. It writes five PNGs into the ignored **`test-data/fingerprint-gallery/`** directory. Dataset images are local research inputs and are not distributed with the repository; the [dataset use terms and required citations](fingerprint-testing.md#provenance-and-use) apply. Start or restart the stand after importing. For another location, pass `--output /path/to/gallery` to the importer and `-- --gallery /path/to/gallery` to the stand. Missing gallery files leave the bundled image available; a present file with the wrong dimensions or pixel digest is rejected explicitly.
 
 ## Parameters and outcomes
 
@@ -93,7 +105,9 @@ budget is exposed.
 
 **Enrollment memory budget** defaults to **2 GiB** and accepts **1–10 GiB** under Computation limits. Preparation uses a conservative peak-memory estimate with reserved headroom to derive consistent limits for baseline candidates, retained leaves and package size. It shows the estimated peak and supported candidate limit before key generation. If the complete requested baseline set exceeds these limits, preparation fails; it never silently truncates the set. This is an estimate, not an operating-system memory cap: actual process memory may vary.
 
-The estimate reserves 512 MiB for working data, then adds 512 bytes per planned baseline candidate and 96 bytes per leaf in the already retained enrollment. Without a previous set, the default budget permits 3,145,728 candidates; 10 GiB permits 19,922,944. Encoded package limits grow with that allowance, and temporary tree and byte-buffer copies are released before package readback. The signing uncertainty product is generated on demand and does not count as retained enrollment keys.
+Positional uncertainty variants are generated during signing and are not stored
+as additional enrollment keys. The estimate accounts for an already retained
+set when preparing its replacement.
 
 The **Search work limit** defaults to **1,000,000,000** and counts preparation, subset enumeration, deduplication, spatial checks, geometry and positional traversal. Actual candidate-key checks remain visible statistics. Rejected subsets consume work without generating a key. The generic signing API receives the same value as its candidate-attempt safety cap; for this fingerprint stream, each yielded candidate already consumes work, so the cap does not independently bind. Budget exhaustion reports **incomplete**, never a completed no-match result. Work units are not milliseconds, and this limit allocates no candidates upfront.
 
@@ -101,10 +115,12 @@ Preparation reuses one compact analyzed capture when the source revision, exact 
 
 Changing enrollment parameters, including minimum feature priority, requires a newly prepared and registered set. The cutoff is part of the key profile, not a display setting. Changing only the enrollment memory budget invalidates an enrollment preparation, but does not change the key profile or invalidate an existing registered set. Changing the search-work limit requires preparing the fragment again. The interface hides outdated overlays and the server rejects stale preparation IDs. Operations run one at a time while the page reports their current stage.
 
-- **Matched:** a member key was found, and both signature and Merkle proof were verified.
-- **No match:** the configured regional search was exhausted without a member.
-- **Incomplete:** the work budget stopped signing. This is not a completed no-match result. Enrollment baseline counts that exceed the memory-derived limits are rejected during preparation, before a package is created.
-- **Error:** invalid input, insufficient usable data or another failed operation; the page retains the error message.
+| Result | Meaning and next step |
+| --- | --- |
+| **Key found / MATCHED** | A member key was found; inspect its public key, selected features and proof. Confirm **Signature and Merkle proof verified**. |
+| **No match found / NO MATCH** | The configured regional search finished without an enrolled key. Restore the full clean image as a control, then try a larger fragment. Many visible points do not guarantee that an enrolled subset is present. |
+| **Search incomplete / INCOMPLETE** | The work budget stopped the search. Increase **Search work limit** if it is below the allowed maximum, or try a larger/cleaner fragment; prepare again. This is not evidence of a completed mismatch. |
+| **Experiment failed / ERROR**, or a preparation error | Read the displayed reason. Too few eligible points, impossible anchor geometry, stale settings and a memory estimate over budget require different changes. Parameter changes that affect enrollment require a new Merkle set. |
 
 The root identifies an enrolled set. It is distinct from the Ed25519 public key of the member used for a signature. Signing searches only regional subsets, so spatially excluded combinations can be missed. The selection and anchor policy uses profile v10 and is retained inside container-v2 `.grx` packages; signing reads the saved policy. Recreate earlier test enrollments rather than mixing the interpretations.
 
@@ -115,6 +131,24 @@ Successful enrollment writes `<root>.grx` and a public preparation record under 
 The stand binds to loopback and requires its process-local CSRF token for mutations. All clients of this local process share its state; it is not a public multi-user service. It accepts catalog image IDs and bounded numeric controls; the HTTP API does not accept filesystem paths. Each enrollment uses a new public context and salt, so its root can differ between runs. The test suite is HKDF-SHA256/Ed25519 with no independent secret. These demonstrations use a synthetic fixture and selected research scans; they do not qualify repeatability across independent scanner captures or biometric key entropy.
 
 ## Validation scope
+
+Run these independent checks from the repository root; none starts a server or
+requires SOCOFing:
+
+```sh
+# Extraction, geometry and ranking units, plus image-pipeline integration tests.
+cargo test -p gnorix-core --release --locked
+
+# Lab HTTP, state transitions, image/artifact and resource handling.
+cargo test -p gnorix-lab --release --locked
+```
+
+The image-pipeline integration suite can also run alone with
+`cargo test -p gnorix-core --test fingerprint --release --locked`. Its checked-in
+image test exercises extraction, measurements, contours, feature scores and
+regional combinations. Use release mode for image processing; debug mode is
+considerably slower. These automated checks do not produce a PNG report; use
+the [report command](../tools/fingerprint-reports/README.md#run) for that.
 
 Use the full source as a control, then test smaller circles and altered scans.
 Inspect eligible features, regions, attempted keys and the final status. A crop

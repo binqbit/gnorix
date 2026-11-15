@@ -4,7 +4,16 @@
 
 The repository uses a Rust 2024 Cargo workspace. The root `gnorix` package is the public library facade; `crates/core` contains the `gnorix-core` implementation and `crates/near` the optional NEAR SDK. `examples/fingerprint-lab` is the independent `gnorix-lab` application. `examples/support` provides the shared crypto, enrollment-profile, file/JSON and test-image capture/artifact adapters used by examples. The single NEAR example lives in `examples/near`: its main package is the smart wallet, `token/` builds the separate standard token, and `tests/` contains sandbox checks and their receiver fixture. Its `demo` feature starts a Rust web interface and manages the local NEAR sandbox with real fingerprint signing. Run the single command in its README for the web demo or `./examples/near/test.sh` for the contract regression suite; there is no separate integration-test package. Each package has its own manifest and dependencies; the workspace shares `Cargo.lock`, build output and quality checks.
 
-Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users. With rustup:
+For a guided first run, see [Run and test locally](local-testing.md). Commands below assume a repository checkout and run from its root. Shell examples use Bash/POSIX; use WSL for the complete workflow on Windows. First-time builds need internet access and a native C/C++ toolchain and linker. NEAR's native dependencies also need CMake and, on Linux, OpenSSL development headers and pkg-config. On Ubuntu/WSL Ubuntu:
+
+```sh
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y build-essential cmake pkg-config libssl-dev git curl ca-certificates
+```
+
+On macOS, install Xcode Command Line Tools and CMake. Automatic NEAR sandbox downloads support Linux x86_64/aarch64 and Apple Silicon macOS; use a Linux VM on Intel Macs and WSL on Windows for sandbox workflows. This restriction does not apply to ordinary native Rust library tests.
+
+If Rust is missing, install [rustup](https://rust-lang.org/tools/install/), then open a new terminal. Install Rust **1.99.1** with Cargo, rustfmt and Clippy. `rust-toolchain.toml` selects that version for rustup users:
 
 ```sh
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
@@ -29,6 +38,23 @@ Ordinary library tests need no scanner, running blockchain node, credentials or
 database. The explicit sandbox tests start their own local chain. Keep
 `Cargo.lock` in version control. Packages currently set `publish = false`;
 version 1.0.0 does not imply that they are published to crates.io.
+
+### Optional Python tools
+
+Python is only needed for PNG reports and dataset import, not either web app.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) through its
+installer or your package manager. CI uses uv **0.11.21** and Python **3.13**;
+the report package accepts Python **3.11 or newer**. To prepare the same Python
+version as CI:
+
+```sh
+uv python install 3.13
+uv sync --project tools/fingerprint-reports --python 3.13 --locked
+```
+
+The tool environment stays in `tools/fingerprint-reports/.venv`; no manual
+activation is needed. `uv run --project tools/fingerprint-reports --locked …`
+uses it directly.
 
 The core implementation dependencies are [RustCrypto SHA-2](https://docs.rs/sha2/0.11.1/sha2/) for complete SHA-256 digests and [zeroize](https://docs.rs/zeroize/1.9.1/zeroize/) for owned sensitive buffers and signing-key disposal contracts. These dependencies do not select a biometric KDF or signature suite.
 
@@ -61,7 +87,8 @@ The CLI examples belong to the implementation package at `crates/core/examples/`
 
 ## Routine checks
 
-Run from the repository root:
+Choose a focused workflow in [Run and test locally](local-testing.md#automated-tests).
+The following are the full Rust quality checks, run from the repository root:
 
 ```sh
 cargo fmt --all -- --check
@@ -93,6 +120,12 @@ Native NEAR tests enable the SDK's official mock host through development
 dependencies, including account context and cryptographic host functions. Wasm
 contract builds use the chain host. CI also runs the opt-in sandbox suites and
 the Python report and gallery checks.
+
+Python/report and gallery tests are separate from Cargo. Their exact Ruff,
+unittest and image-to-PNG commands are in the [report tool guide](../tools/fingerprint-reports/README.md#implementation-and-checks)
+and [gallery importer guide](../tools/fingerprint-gallery/README.md#checks).
+The [CI workflow](../.github/workflows/ci.yml) is the maintained list of jobs;
+no single Cargo command covers every job.
 
 ## Implemented responsibilities
 

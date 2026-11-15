@@ -1,4 +1,10 @@
-# Fingerprint testing with SOCOFing
+# Optional fingerprint testing with SOCOFing
+
+For a first local test, use the bundled fingerprint in the [Lab](fingerprint-lab.md)
+or generate the [PNG report](../tools/fingerprint-reports/README.md#run).
+The [local testing guide](local-testing.md) covers setup, one-command launches
+and automated checks. **SOCOFing is optional** for all of those workflows;
+this page describes adding external research inputs afterward.
 
 [SOCOFing on Kaggle](https://www.kaggle.com/datasets/ruizgara/socofing) provides external research inputs for ridge clarity, local normalization and feature extraction. Keep the dataset and converted captures outside tracked project files. Normal builds and tests must not require a Kaggle download.
 
